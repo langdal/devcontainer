@@ -1,0 +1,151 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Container name based on current directory
+CONTAINER_NAME="dev-$(basename "$(pwd)")"
+IMAGE_NAME="generic-devcontainer"
+
+# Flags
+DRY_RUN=false
+FORCE_BUILD=false
+NO_PORTS=false
+EXTRA_PORTS=()
+CMD_ARGS=()
+
+usage() {
+  cat <<EOF
+Usage: dev [OPTIONS] [-- COMMAND...]
+
+Run or attach to the generic devcontainer.
+
+OPTIONS:
+  --help          Show this help message
+  --dry-run       Print docker command without executing
+  --build         Force rebuild the image
+  --port PORT     Add additional port forwarding (repeatable)
+  --no-ports      Skip default port forwarding
+  --              Pass remaining arguments as command to container
+
+EXAMPLES:
+  dev                           # Start or attach to container with default shell
+  dev --build                   # Rebuild image and start container
+  dev --dry-run                 # Show docker command without running
+  dev --port 9000 --port 9001   # Add custom port forwarding
+  dev -- npm run dev            # Run custom command in container
+
+EOF
+}
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --help)
+      usage
+      exit 0
+      ;;
+    --dry-run)
+      DRY_RUN=true
+      shift
+      ;;
+    --build)
+      FORCE_BUILD=true
+      shift
+      ;;
+    --port)
+      if [[ -z ${2:-} ]]; then
+        echo "Error: --port requires a port number" >&2
+        exit 1
+      fi
+      EXTRA_PORTS+=("$2")
+      shift 2
+      ;;
+    --no-ports)
+      NO_PORTS=true
+      shift
+      ;;
+    --)
+      shift
+      CMD_ARGS=("$@")
+      break
+      ;;
+    *)
+      echo "Error: Unknown option: $1" >&2
+      echo "Run 'dev --help' for usage information" >&2
+      exit 1
+      ;;
+  esac
+done
+
+# Build image if needed
+if [[ "$FORCE_BUILD" == true ]] || ! docker images -q "$IMAGE_NAME" | grep -q .; then
+  if [[ "$DRY_RUN" == true ]]; then
+    echo "Would build image: docker buildx build --network=host -t $IMAGE_NAME ."
+  else
+    echo "Building image $IMAGE_NAME..."
+    docker buildx build --network=host -t "$IMAGE_NAME" .
+  fi
+fi
+
+# Check if container exists and is running
+if [[ "$DRY_RUN" == false ]]; then
+  if docker ps -q -f name="^${CONTAINER_NAME}$" | grep -q .; then
+    # Container exists and is running
+    echo "Attaching to running container $CONTAINER_NAME..."
+    if [[ ${#CMD_ARGS[@]} -gt 0 ]]; then
+      exec docker exec -it "$CONTAINER_NAME" "${CMD_ARGS[@]}"
+    else
+      exec docker exec -it "$CONTAINER_NAME" zsh
+    fi
+  elif docker ps -aq -f name="^${CONTAINER_NAME}$" | grep -q .; then
+    # Container exists but is stopped
+    echo "Starting stopped container $CONTAINER_NAME..."
+    docker start "$CONTAINER_NAME"
+    if [[ ${#CMD_ARGS[@]} -gt 0 ]]; then
+      exec docker exec -it "$CONTAINER_NAME" "${CMD_ARGS[@]}"
+    else
+      exec docker exec -it "$CONTAINER_NAME" zsh
+    fi
+  fi
+fi
+
+# Build docker run command
+DOCKER_CMD=(docker run -it --rm --name "$CONTAINER_NAME")
+
+# Volume mounts
+DOCKER_CMD+=(-v "$(pwd):/workspace")
+DOCKER_CMD+=(-v devcontainer-mise:/mise)
+DOCKER_CMD+=(-v devcontainer-home:/home/vscode)
+
+# Port forwarding
+if [[ "$NO_PORTS" == false ]]; then
+  DOCKER_CMD+=(-p 5173:5173 -p 5174:5174 -p 8080:8080 -p 2345:2345 -p 3000:3000)
+fi
+
+# Extra ports
+if [[ ${#EXTRA_PORTS[@]} -gt 0 ]]; then
+  for port in "${EXTRA_PORTS[@]}"; do
+    DOCKER_CMD+=(-p "$port:$port")
+  done
+fi
+
+# Forward GITHUB_TOKEN if set
+if [[ -n ${GITHUB_TOKEN:-} ]]; then
+  DOCKER_CMD+=(-e GITHUB_TOKEN)
+fi
+
+# Image name
+DOCKER_CMD+=("$IMAGE_NAME")
+
+# Command args (default to zsh if none provided)
+if [[ ${#CMD_ARGS[@]} -gt 0 ]]; then
+  DOCKER_CMD+=("${CMD_ARGS[@]}")
+else
+  DOCKER_CMD+=(zsh)
+fi
+
+# Execute or print
+if [[ "$DRY_RUN" == true ]]; then
+  echo "${DOCKER_CMD[*]}"
+else
+  exec "${DOCKER_CMD[@]}"
+fi

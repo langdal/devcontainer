@@ -1,0 +1,6 @@
+[tools]
+node = "lts"
+ripgrep = "latest"
+eza = "latest"
+lazygit = "latest"
+neovim = "latest"

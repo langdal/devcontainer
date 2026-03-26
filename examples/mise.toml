@@ -1,0 +1,7 @@
+[tools]
+go = "1.24"
+node = "22"
+pnpm = "latest"
+
+[env]
+GOPATH = "/workspace/.go"
