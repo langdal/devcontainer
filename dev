@@ -1,6 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Resolve the real directory of this script, following symlinks.
+# Needed so --build finds the Dockerfile when invoked via an installed symlink.
+resolve_script_dir() {
+  local source="${BASH_SOURCE[0]}"
+  while [[ -L "$source" ]]; do
+    local dir
+    dir="$(cd -P "$(dirname "$source")" && pwd)"
+    source="$(readlink "$source")"
+    [[ "$source" != /* ]] && source="$dir/$source"
+  done
+  cd -P "$(dirname "$source")" && pwd
+}
+SCRIPT_DIR="$(resolve_script_dir)"
+
 # Container name based on current directory
 CONTAINER_NAME="dev-$(basename "$(pwd)")"
 IMAGE_NAME="generic-devcontainer"
@@ -115,10 +129,10 @@ done
 # Build image if needed
 if [[ "$FORCE_BUILD" == true ]] || ! docker images -q "$IMAGE_NAME" | grep -q .; then
   if [[ "$DRY_RUN" == true ]]; then
-    echo "Would build image: docker buildx build --network=host -t $IMAGE_NAME ."
+    echo "Would build image: docker buildx build --network=host -t $IMAGE_NAME $SCRIPT_DIR"
   else
     echo "Building image $IMAGE_NAME..."
-    docker buildx build --network=host -t "$IMAGE_NAME" .
+    docker buildx build --network=host -t "$IMAGE_NAME" "$SCRIPT_DIR"
   fi
 fi
 
