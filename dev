@@ -166,6 +166,16 @@ DOCKER_CMD+=(-v "$(pwd):/workspace")
 DOCKER_CMD+=(-v devcontainer-mise:/mise)
 DOCKER_CMD+=(-v devcontainer-home:/home/vscode)
 
+# Skip default ports if another dev-* container is already running (they'd collide).
+# Explicit --port requests are left alone so conflicts there still surface.
+if [[ "$NO_PORTS" == false ]]; then
+  OTHER_DEV=$(docker ps --format '{{.Names}}' | grep '^dev-' | grep -vx "$CONTAINER_NAME" || true)
+  if [[ -n "$OTHER_DEV" ]]; then
+    echo "Note: another dev container is running ($(echo "$OTHER_DEV" | paste -sd, -)); skipping default port forwards." >&2
+    NO_PORTS=true
+  fi
+fi
+
 # Port forwarding
 if [[ "$NO_PORTS" == false ]]; then
   DOCKER_CMD+=(-p 5173:5173 -p 5174:5174 -p 8080:8080 -p 2345:2345 -p 3000:3000)
