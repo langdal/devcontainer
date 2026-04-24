@@ -15,6 +15,7 @@ CMD_ARGS=()
 usage() {
   cat <<EOF
 Usage: dev [OPTIONS] [-- COMMAND...]
+       dev install
 
 Run or attach to the generic devcontainer.
 
@@ -26,15 +27,50 @@ OPTIONS:
   --no-ports      Skip default port forwarding
   --              Pass remaining arguments as command to container
 
+COMMANDS:
+  install         Symlink this script into a writable directory on PATH
+
 EXAMPLES:
   dev                           # Start or attach to container with default shell
   dev --build                   # Rebuild image and start container
   dev --dry-run                 # Show docker command without running
   dev --port 9000 --port 9001   # Add custom port forwarding
   dev -- npm run dev            # Run custom command in container
+  dev install                   # Install 'dev' onto your PATH
 
 EOF
 }
+
+install_self() {
+  local script_path
+  script_path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+
+  local target_dir=""
+  local IFS=':'
+  for dir in $PATH; do
+    [[ -z "$dir" ]] && continue
+    if [[ -d "$dir" && -w "$dir" ]]; then
+      target_dir="$dir"
+      break
+    fi
+  done
+
+  if [[ -z "$target_dir" ]]; then
+    echo "Error: No writable directory found on PATH." >&2
+    echo "Create one (e.g. ~/.local/bin) and add it to PATH, then retry." >&2
+    exit 1
+  fi
+
+  local link="$target_dir/dev"
+  ln -sf "$script_path" "$link"
+  echo "Installed: $link -> $script_path"
+}
+
+# Handle subcommands before flag parsing
+if [[ ${1:-} == "install" ]]; then
+  install_self
+  exit 0
+fi
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
