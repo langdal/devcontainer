@@ -60,18 +60,22 @@ install_self() {
   script_path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 
   local target_dir=""
-  local IFS=':'
-  for dir in $PATH; do
-    [[ -z "$dir" ]] && continue
-    if [[ -d "$dir" && -w "$dir" ]]; then
-      target_dir="$dir"
-      break
-    fi
+  local candidates=("$HOME/.local/bin" "$HOME/bin" "/usr/local/bin")
+  for dir in "${candidates[@]}"; do
+    case ":$PATH:" in
+      *":$dir:"*)
+        if [[ -d "$dir" && -w "$dir" ]]; then
+          target_dir="$dir"
+          break
+        fi
+        ;;
+    esac
   done
 
   if [[ -z "$target_dir" ]]; then
-    echo "Error: No writable directory found on PATH." >&2
-    echo "Create one (e.g. ~/.local/bin) and add it to PATH, then retry." >&2
+    echo "Error: No writable bin directory found on PATH." >&2
+    echo "Expected one of: ${candidates[*]}" >&2
+    echo "Create one and add it to PATH, then retry." >&2
     exit 1
   fi
 
