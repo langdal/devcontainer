@@ -56,7 +56,6 @@ RUN echo 'eval "$(mise activate zsh)"' >> /home/vscode/.zshrc
 USER root
 RUN mkdir -p /etc/skel.devcontainer && \
     cp /home/vscode/.zshrc /etc/skel.devcontainer/.zshrc
-USER vscode
 
 # --- Firewall staging ---
 # Ensure the 'proxy' system user exists (the tinyproxy package may already
