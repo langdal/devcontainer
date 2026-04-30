@@ -22,6 +22,7 @@ DRY_RUN=false
 FORCE_BUILD=false
 NO_PORTS=false
 MAINTENANCE=false
+MONITOR=false
 EXTRA_PORTS=()
 CMD_ARGS=()
 
@@ -41,6 +42,8 @@ OPTIONS:
   --maintenance   Start with firewall disabled and sudo enabled.
                   Container name is suffixed with -maint to avoid
                   clashing with the normal container.
+  --monitor       Tail the firewall proxy log of the running container
+                  (/var/log/tinyproxy.log). Does not start a container.
   --              Pass remaining arguments as command to container
 
 COMMANDS:
@@ -52,6 +55,7 @@ EXAMPLES:
   dev --dry-run                 # Show docker command without running
   dev --port 9000 --port 9001   # Add custom port forwarding
   dev --maintenance             # Start in maintenance mode (no firewall, sudo enabled)
+  dev --monitor                 # Tail firewall proxy log of running container
   dev -- npm run dev            # Run custom command in container
   dev install                   # Install 'dev' onto your PATH
 
@@ -124,6 +128,10 @@ while [[ $# -gt 0 ]]; do
       MAINTENANCE=true
       shift
       ;;
+    --monitor)
+      MONITOR=true
+      shift
+      ;;
     --)
       shift
       CMD_ARGS=("$@")
@@ -143,6 +151,20 @@ done
 WORKSPACE_BASENAME="$(basename "$(pwd)")"
 NORMAL_NAME="dev-${WORKSPACE_BASENAME}"
 MAINT_NAME="dev-${WORKSPACE_BASENAME}-maint"
+
+# --monitor: tail the firewall proxy log of the running normal container.
+# Maintenance mode has no firewall, so the log is meaningless there.
+if [[ "$MONITOR" == true ]]; then
+  if [[ "$MAINTENANCE" == true ]]; then
+    echo "Error: --monitor and --maintenance are mutually exclusive (no firewall in maintenance mode)." >&2
+    exit 1
+  fi
+  if ! docker ps -q -f name="^${NORMAL_NAME}$" | grep -q .; then
+    echo "Error: container ${NORMAL_NAME} is not running. Start it with 'dev' first." >&2
+    exit 1
+  fi
+  exec docker exec -it "$NORMAL_NAME" tail -F /var/log/tinyproxy.log
+fi
 
 if [[ "$MAINTENANCE" == true ]]; then
   if docker ps -q -f name="^${NORMAL_NAME}$" | grep -q .; then
