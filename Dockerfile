@@ -90,3 +90,36 @@ COPY --chmod=755 entrypoint.sh /entrypoint.sh
 # Use entrypoint for initialization
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["zsh"]
+
+# ===========================================================================
+# DinD stage: rootless dockerd, fuse-overlayfs, uidmap.
+# Built with: docker build --target dind -t generic-devcontainer:dind .
+# Used by `dev --dind`. Adds the rootless docker bundle on top of base.
+# ===========================================================================
+FROM base AS dind
+USER root
+
+# fuse-overlayfs   - storage driver for rootless docker
+# uidmap           - newuidmap / newgidmap for user-namespace allocation
+# slirp4netns      - per-container network stack for rootless docker
+# dbus-user-session- enables systemd-style user session paths if present
+# iproute2         - already in base, listed for clarity
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        fuse-overlayfs \
+        uidmap \
+        slirp4netns \
+        dbus-user-session && \
+    rm -rf /var/lib/apt/lists/*
+
+# Allocate sub-uid/gid range for vscode (newuidmap consumes this for the
+# rootlesskit user namespace). Range is conventional; doesn't conflict with
+# host UIDs because it's container-local.
+RUN if ! grep -q '^vscode:' /etc/subuid; then \
+        echo "vscode:100000:65536" >> /etc/subuid; \
+    fi && \
+    if ! grep -q '^vscode:' /etc/subgid; then \
+        echo "vscode:100000:65536" >> /etc/subgid; \
+    fi
+
+USER vscode
