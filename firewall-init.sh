@@ -62,22 +62,31 @@ touch /var/log/tinyproxy.log
 chown proxy:proxy /var/log/tinyproxy.log
 chmod 0755 /run
 
-# --- Start tinyproxy (daemonizes by default) ---
-if ! tinyproxy -c "$CONF"; then
-    echo "firewall-init: tinyproxy failed to start" >&2
-    exit 1
-fi
-
-# Wait briefly for tinyproxy to bind 127.0.0.1:8888
-for _ in 1 2 3 4 5 6 7 8 9 10; do
-    if ss -lnt 'sport = :8888' 2>/dev/null | grep -q ':8888'; then
-        break
+# --- Start tinyproxy (daemonizes by default; skip if already running so this
+#     script is safe to re-run on a live container, e.g. `dev --enable-firewall`).
+#     If already running, SIGHUP it so the just-rewritten filter is picked up. ---
+if ss -lnt 'sport = :8888' 2>/dev/null | grep -q ':8888'; then
+    echo "firewall-init: tinyproxy already listening on 127.0.0.1:8888, reloading filter"
+    if [ -f /run/tinyproxy.pid ]; then
+        kill -HUP "$(cat /run/tinyproxy.pid)"
+    else
+        pkill -HUP -x tinyproxy
     fi
-    sleep 0.2
-done
-if ! ss -lnt 'sport = :8888' 2>/dev/null | grep -q ':8888'; then
-    echo "firewall-init: tinyproxy did not bind to 127.0.0.1:8888" >&2
-    exit 1
+else
+    if ! tinyproxy -c "$CONF"; then
+        echo "firewall-init: tinyproxy failed to start" >&2
+        exit 1
+    fi
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        if ss -lnt 'sport = :8888' 2>/dev/null | grep -q ':8888'; then
+            break
+        fi
+        sleep 0.2
+    done
+    if ! ss -lnt 'sport = :8888' 2>/dev/null | grep -q ':8888'; then
+        echo "firewall-init: tinyproxy did not bind to 127.0.0.1:8888" >&2
+        exit 1
+    fi
 fi
 
 # --- Apply iptables rules ---

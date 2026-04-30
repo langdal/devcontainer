@@ -144,6 +144,24 @@ from non-allowlisted hosts. The maintenance container has a different name
 vice versa) — they would both have `/workspace` mounted and produce
 surprising state.
 
+### Toggling the firewall on a running container
+
+```bash
+dev --disable-firewall   # open OUTPUT + switch tinyproxy filter to allow-all
+dev --enable-firewall    # rebuild the allowlist filter + restore default-deny
+```
+
+These act on the running normal container (`dev-<dir>`) via `docker exec
+--user root`, which is allowed because the container has `CAP_NET_ADMIN`.
+Disable opens both layers: it flushes iptables OUTPUT and rewrites
+`/etc/tinyproxy/filter` to a permissive regex, then SIGHUPs tinyproxy so
+existing `HTTPS_PROXY`-honoring shells get through too. Enable re-runs
+`firewall-init.sh`, which rebuilds the filter from the allowlist and
+SIGHUPs tinyproxy to reload it.
+
+Caveat: the container name does not change, so there is no visible signal
+that the firewall is off. For longer-lived work prefer `--maintenance`.
+
 ### Verifying the firewall
 
 A helper script probes posture:

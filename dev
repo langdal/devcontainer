@@ -24,6 +24,8 @@ DEFAULT_PORTS=false
 MAINTENANCE=false
 MONITOR=false
 MONITOR_FW=false
+DISABLE_FW=false
+ENABLE_FW=false
 EXTRA_PORTS=()
 CMD_ARGS=()
 
@@ -48,6 +50,15 @@ OPTIONS:
                   (/var/log/tinyproxy.log). Does not start a container.
   --monitor-fw    Stream packets dropped by iptables in the running container
                   (tcpdump on NFLOG group 1). Does not start a container.
+  --disable-firewall
+                  Open the firewall on the running container: flush OUTPUT
+                  rules + ACCEPT policy, and switch tinyproxy to an allow-all
+                  filter (SIGHUP reload). Existing shells keep working
+                  whether or not HTTPS_PROXY is set.
+  --enable-firewall
+                  Re-run firewall-init.sh on the running container to rebuild
+                  the allowlist filter and restore the default-deny iptables
+                  policy.
   --              Pass remaining arguments as command to container
 
 COMMANDS:
@@ -62,6 +73,8 @@ EXAMPLES:
   dev --maintenance             # Start in maintenance mode (no firewall, sudo enabled)
   dev --monitor                 # Tail firewall proxy log of running container
   dev --monitor-fw              # Stream iptables-dropped packets of running container
+  dev --disable-firewall        # Drop the firewall on the running container
+  dev --enable-firewall         # Restore the firewall on the running container
   dev -- npm run dev            # Run custom command in container
   dev install                   # Install 'dev' onto your PATH
 
@@ -142,6 +155,14 @@ while [[ $# -gt 0 ]]; do
       MONITOR_FW=true
       shift
       ;;
+    --disable-firewall)
+      DISABLE_FW=true
+      shift
+      ;;
+    --enable-firewall)
+      ENABLE_FW=true
+      shift
+      ;;
     --)
       shift
       CMD_ARGS=("$@")
@@ -184,6 +205,43 @@ if [[ "$MONITOR" == true || "$MONITOR_FW" == true ]]; then
     # (the container already has it) and root inside the container.
     exec docker exec -it --user root "$NORMAL_NAME" \
         tcpdump -i nflog:1 -nn -l
+  fi
+fi
+
+# --disable-firewall / --enable-firewall: toggle iptables on the running normal
+# container without restarting it. Container has CAP_NET_ADMIN, so root inside
+# can rewrite the OUTPUT chain.
+if [[ "$DISABLE_FW" == true || "$ENABLE_FW" == true ]]; then
+  if [[ "$DISABLE_FW" == true && "$ENABLE_FW" == true ]]; then
+    echo "Error: --disable-firewall and --enable-firewall are mutually exclusive." >&2
+    exit 1
+  fi
+  if [[ "$MAINTENANCE" == true ]]; then
+    echo "Error: --disable-firewall/--enable-firewall and --maintenance are mutually exclusive (no firewall in maintenance mode)." >&2
+    exit 1
+  fi
+  if ! docker ps -q -f name="^${NORMAL_NAME}$" | grep -q .; then
+    echo "Error: container ${NORMAL_NAME} is not running. Start it with 'dev' first." >&2
+    exit 1
+  fi
+  if [[ "$DISABLE_FW" == true ]]; then
+    # Open the kernel egress AND switch tinyproxy to allow-all (permissive
+    # filter + SIGHUP) so HTTP_PROXY-honoring clients in existing shells
+    # also get through, not just direct/--noproxy traffic.
+    exec docker exec --user root "$NORMAL_NAME" sh -c "
+      set -e
+      iptables -F OUTPUT
+      iptables -P OUTPUT ACCEPT
+      printf '%s\n' '^.*\$' > /etc/tinyproxy/filter
+      if [ -f /run/tinyproxy.pid ]; then
+          kill -HUP \"\$(cat /run/tinyproxy.pid)\"
+      else
+          pkill -HUP -x tinyproxy 2>/dev/null || true
+      fi
+      echo 'firewall disabled'
+    "
+  else
+    exec docker exec --user root "$NORMAL_NAME" /usr/local/sbin/firewall-init.sh
   fi
 fi
 
