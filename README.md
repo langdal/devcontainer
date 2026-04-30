@@ -172,6 +172,86 @@ dev -- /workspace/scripts/verify-firewall.sh
 
 In normal mode all 7 checks pass; in maintenance mode 5 are skipped.
 
+## Docker-in-Docker
+
+Opt-in mode that runs a rootless `dockerd` inside the dev container so the
+agent can use the `docker` CLI for testcontainers and occasional builds —
+without `--privileged`, without mounting a host docker socket, and
+without breaking the firewall.
+
+```bash
+dev --dind
+```
+
+### How it works
+
+- A separate image tag `generic-devcontainer:dind` (built via the multi-stage
+  Dockerfile's `dind` target) adds `dockerd-rootless`, `fuse-overlayfs`,
+  `slirp4netns`, and `uidmap` on top of the base image.
+- The container is named `dev-<dir>-dind`; mutually exclusive with
+  `--maintenance` and the normal mode (three-way conflict guard).
+- `--device=/dev/fuse`, `--security-opt apparmor=unconfined`, and
+  `--security-opt seccomp=unconfined` are required for the rootlesskit
+  user namespace.
+- A dedicated named volume `devcontainer-dind:/home/vscode/.local/share/docker`
+  preserves the image cache across container restarts and `--build` rebuilds.
+- The entrypoint launches `dockerd-rootless.sh` as `vscode` with
+  `HTTPS_PROXY=http://127.0.0.1:8888` and `--iptables=false`. Registry
+  pulls flow through `tinyproxy` and are filtered against the same
+  allowlist machinery as everything else.
+- An additional `allowlist.dind` (Docker Hub, MCR, Quay, GCR, etc.) is
+  merged into the tinyproxy filter only when DinD is active.
+
+### Security boundary
+
+The agent inside `--dind` mode is no more powerful for outbound traffic
+than in normal mode: `tinyproxy` still gates everything. Nested containers
+run their own slirp4netns inside `vscode`'s user namespace; their outbound
+traffic appears to the host iptables as originating from `vscode`, which
+the existing owner-rule blocks. Testcontainers' usual loopback-port
+pattern works as expected.
+
+### Host runtime support
+
+- **Linux:** `docker` is preferred when both are installed; `podman` is
+  used otherwise. Override with `DEV_RUNTIME=docker` or `DEV_RUNTIME=podman`.
+- **macOS:** `podman` only. Docker Desktop is explicitly unsupported. Make
+  sure the podman VM is running:
+
+  ```bash
+  brew install podman
+  podman machine init
+  podman machine start
+  ```
+
+### Verification
+
+The DinD-aware checks in `verify-firewall.sh` activate inside `--dind`:
+
+```bash
+dev --dind -- /workspace/scripts/verify-firewall.sh
+```
+
+In `--dind` mode all 12 checks should pass.
+
+For the heavier in-container checks (smoke build, postgres testcontainers
+smoke, self-build):
+
+```bash
+dev --dind -- /workspace/scripts/verify-dind.sh
+```
+
+The full edge-case matrix lives under `scripts/test/`. Run it on a VM:
+
+```bash
+bash scripts/test/run-all.sh
+```
+
+This builds both images, runs every scenario in `scripts/test/scenarios/`,
+and reports a final pass/fail/skip table. See
+`docs/superpowers/specs/2026-04-30-dind-design.md` for the design and
+the full coverage map.
+
 ## Port Forwarding
 
 By default, no ports are forwarded. Pass `--default-ports` to forward a
