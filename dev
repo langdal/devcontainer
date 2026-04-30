@@ -15,14 +15,13 @@ resolve_script_dir() {
 }
 SCRIPT_DIR="$(resolve_script_dir)"
 
-# Container name based on current directory
-CONTAINER_NAME="dev-$(basename "$(pwd)")"
 IMAGE_NAME="generic-devcontainer"
 
 # Flags
 DRY_RUN=false
 FORCE_BUILD=false
 NO_PORTS=false
+MAINTENANCE=false
 EXTRA_PORTS=()
 CMD_ARGS=()
 
@@ -39,6 +38,9 @@ OPTIONS:
   --build         Force rebuild the image
   --port PORT     Add additional port forwarding (repeatable)
   --no-ports      Skip default port forwarding
+  --maintenance   Start with firewall disabled and sudo enabled.
+                  Container name is suffixed with -maint to avoid
+                  clashing with the normal container.
   --              Pass remaining arguments as command to container
 
 COMMANDS:
@@ -49,6 +51,7 @@ EXAMPLES:
   dev --build                   # Rebuild image and start container
   dev --dry-run                 # Show docker command without running
   dev --port 9000 --port 9001   # Add custom port forwarding
+  dev --maintenance             # Start in maintenance mode (no firewall, sudo enabled)
   dev -- npm run dev            # Run custom command in container
   dev install                   # Install 'dev' onto your PATH
 
@@ -117,6 +120,10 @@ while [[ $# -gt 0 ]]; do
       NO_PORTS=true
       shift
       ;;
+    --maintenance)
+      MAINTENANCE=true
+      shift
+      ;;
     --)
       shift
       CMD_ARGS=("$@")
@@ -129,6 +136,29 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+# Container naming: normal mode uses dev-<dir>, maintenance uses dev-<dir>-maint.
+# Refuse to start one mode while the other is already running for the same
+# workspace — both would share /workspace and produce surprising state.
+WORKSPACE_BASENAME="$(basename "$(pwd)")"
+NORMAL_NAME="dev-${WORKSPACE_BASENAME}"
+MAINT_NAME="dev-${WORKSPACE_BASENAME}-maint"
+
+if [[ "$MAINTENANCE" == true ]]; then
+  if docker ps -q -f name="^${NORMAL_NAME}$" | grep -q .; then
+    echo "Error: normal container ${NORMAL_NAME} is running for this workspace." >&2
+    echo "       Stop it first:  docker stop ${NORMAL_NAME}" >&2
+    exit 1
+  fi
+  CONTAINER_NAME="$MAINT_NAME"
+else
+  if docker ps -q -f name="^${MAINT_NAME}$" | grep -q .; then
+    echo "Error: maintenance container ${MAINT_NAME} is running for this workspace." >&2
+    echo "       Stop it first:  docker stop ${MAINT_NAME}" >&2
+    exit 1
+  fi
+  CONTAINER_NAME="$NORMAL_NAME"
+fi
 
 # Build image if needed
 if [[ "$FORCE_BUILD" == true ]] || ! docker images -q "$IMAGE_NAME" | grep -q .; then
@@ -199,6 +229,11 @@ fi
 # Forward GITHUB_TOKEN if set
 if [[ -n ${GITHUB_TOKEN:-} ]]; then
   DOCKER_CMD+=(-e GITHUB_TOKEN)
+fi
+
+# Maintenance mode: tell entrypoint.sh to skip firewall init and grant sudo.
+if [[ "$MAINTENANCE" == true ]]; then
+  DOCKER_CMD+=(-e DEVCONTAINER_MAINTENANCE=1)
 fi
 
 # Image name

@@ -18,6 +18,23 @@ EOF
     chmod 644 /etc/profile.d/proxy.sh
 fi
 
+# --- Maintenance mode: re-grant sudo for vscode and warn loudly ---
+if [ -n "${DEVCONTAINER_MAINTENANCE:-}" ]; then
+    cat > /etc/sudoers.d/vscode-maint <<'EOF'
+vscode ALL=(ALL) NOPASSWD:ALL
+EOF
+    chmod 440 /etc/sudoers.d/vscode-maint
+    cat > /etc/profile.d/zz-maint-banner.sh <<'EOF'
+echo
+echo "=========================================================="
+echo "  MAINTENANCE MODE - firewall disabled, sudo enabled."
+echo "  Do not run untrusted code in this container."
+echo "=========================================================="
+echo
+EOF
+    chmod 644 /etc/profile.d/zz-maint-banner.sh
+fi
+
 # entrypoint.sh runs as root. It runs user-context tasks via gosu vscode,
 # then exec's gosu vscode for the actual command.
 
