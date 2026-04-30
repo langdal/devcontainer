@@ -15,6 +15,75 @@ resolve_script_dir() {
 }
 SCRIPT_DIR="$(resolve_script_dir)"
 
+# Pick host runtime once at startup. Linux: prefer docker, fall back to
+# podman. macOS: podman only — Docker Desktop is explicitly unsupported.
+# Override with DEV_RUNTIME=docker | DEV_RUNTIME=podman.
+detect_runtime() {
+  if [[ -n "${DEV_RUNTIME:-}" ]]; then
+    if ! command -v "$DEV_RUNTIME" >/dev/null 2>&1; then
+      echo "Error: DEV_RUNTIME=$DEV_RUNTIME but '$DEV_RUNTIME' not found on PATH." >&2
+      exit 1
+    fi
+    RUNTIME="$DEV_RUNTIME"
+    return
+  fi
+  case "$(uname -s)" in
+    Darwin)
+      if command -v podman >/dev/null 2>&1; then
+        RUNTIME=podman
+        return
+      fi
+      echo "Error: On macOS, podman is required (Docker Desktop is not supported)." >&2
+      echo "       Install with:  brew install podman && podman machine init && podman machine start" >&2
+      exit 1
+      ;;
+    Linux)
+      if command -v docker >/dev/null 2>&1; then
+        RUNTIME=docker
+        return
+      fi
+      if command -v podman >/dev/null 2>&1; then
+        RUNTIME=podman
+        return
+      fi
+      echo "Error: Neither docker nor podman found on PATH." >&2
+      exit 1
+      ;;
+    *)
+      echo "Error: Unsupported platform: $(uname -s)" >&2
+      exit 1
+      ;;
+  esac
+}
+
+# On macOS with podman, the VM must be running.
+ensure_runtime_ready() {
+  if [[ "$(uname -s)" == "Darwin" && "$RUNTIME" == "podman" ]]; then
+    if ! podman machine list --format '{{.Running}}' 2>/dev/null | grep -q '^true$'; then
+      echo "Error: podman machine is not running." >&2
+      echo "       Start it with:  podman machine start" >&2
+      exit 1
+    fi
+  fi
+}
+
+# Build a runtime-appropriate 'build' command. Docker uses buildx; podman
+# uses its built-in build. Args after the network/tag are passed through.
+runtime_build() {
+  local tag="$1"; shift
+  local target="$1"; shift   # may be empty string; only docker/podman with --target use it
+  local context="$1"; shift
+  local extra=()
+  if [[ -n "$target" ]]; then
+    extra+=(--target "$target")
+  fi
+  if [[ "$RUNTIME" == "docker" ]]; then
+    docker buildx build --network=host "${extra[@]}" -t "$tag" "$context"
+  else
+    podman build --network=host "${extra[@]}" -t "$tag" "$context"
+  fi
+}
+
 IMAGE_NAME="generic-devcontainer"
 
 # Flags
@@ -219,6 +288,9 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+detect_runtime
+ensure_runtime_ready
+
 # Container naming: normal mode uses dev-<dir>, maintenance uses dev-<dir>-maint.
 # Refuse to start one mode while the other is already running for the same
 # workspace — both would share /workspace and produce surprising state.
@@ -237,16 +309,16 @@ if [[ "$MONITOR" == true || "$MONITOR_FW" == true ]]; then
     echo "Error: --monitor* and --maintenance are mutually exclusive (no firewall in maintenance mode)." >&2
     exit 1
   fi
-  if ! docker ps -q -f name="^${NORMAL_NAME}$" | grep -q .; then
+  if ! $RUNTIME ps -q -f name="^${NORMAL_NAME}$" | grep -q .; then
     echo "Error: container ${NORMAL_NAME} is not running. Start it with 'dev' first." >&2
     exit 1
   fi
   if [[ "$MONITOR" == true ]]; then
-    exec docker exec -it "$NORMAL_NAME" tail -F /var/log/tinyproxy.log
+    exec $RUNTIME exec -it "$NORMAL_NAME" tail -F /var/log/tinyproxy.log
   else
     # tcpdump on the NFLOG group set by firewall-init.sh. Needs CAP_NET_ADMIN
     # (the container already has it) and root inside the container.
-    exec docker exec -it --user root "$NORMAL_NAME" \
+    exec $RUNTIME exec -it --user root "$NORMAL_NAME" \
         tcpdump -i nflog:1 -nn -l
   fi
 fi
@@ -263,7 +335,7 @@ if [[ "$DISABLE_FW" == true || "$ENABLE_FW" == true ]]; then
     echo "Error: --disable-firewall/--enable-firewall and --maintenance are mutually exclusive (no firewall in maintenance mode)." >&2
     exit 1
   fi
-  if ! docker ps -q -f name="^${NORMAL_NAME}$" | grep -q .; then
+  if ! $RUNTIME ps -q -f name="^${NORMAL_NAME}$" | grep -q .; then
     echo "Error: container ${NORMAL_NAME} is not running. Start it with 'dev' first." >&2
     exit 1
   fi
@@ -271,7 +343,7 @@ if [[ "$DISABLE_FW" == true || "$ENABLE_FW" == true ]]; then
     # Open the kernel egress AND switch tinyproxy to allow-all (permissive
     # filter + SIGHUP) so HTTP_PROXY-honoring clients in existing shells
     # also get through, not just direct/--noproxy traffic.
-    exec docker exec --user root "$NORMAL_NAME" sh -c "
+    exec $RUNTIME exec --user root "$NORMAL_NAME" sh -c "
       set -e
       iptables -F OUTPUT
       iptables -P OUTPUT ACCEPT
@@ -284,60 +356,60 @@ if [[ "$DISABLE_FW" == true || "$ENABLE_FW" == true ]]; then
       echo 'firewall disabled'
     "
   else
-    exec docker exec --user root "$NORMAL_NAME" /usr/local/sbin/firewall-init.sh
+    exec $RUNTIME exec --user root "$NORMAL_NAME" /usr/local/sbin/firewall-init.sh
   fi
 fi
 
 if [[ "$MAINTENANCE" == true ]]; then
-  if docker ps -q -f name="^${NORMAL_NAME}$" | grep -q .; then
+  if $RUNTIME ps -q -f name="^${NORMAL_NAME}$" | grep -q .; then
     echo "Error: normal container ${NORMAL_NAME} is running for this workspace." >&2
-    echo "       Stop it first:  docker stop ${NORMAL_NAME}" >&2
+    echo "       Stop it first:  $RUNTIME stop ${NORMAL_NAME}" >&2
     exit 1
   fi
   CONTAINER_NAME="$MAINT_NAME"
 else
-  if docker ps -q -f name="^${MAINT_NAME}$" | grep -q .; then
+  if $RUNTIME ps -q -f name="^${MAINT_NAME}$" | grep -q .; then
     echo "Error: maintenance container ${MAINT_NAME} is running for this workspace." >&2
-    echo "       Stop it first:  docker stop ${MAINT_NAME}" >&2
+    echo "       Stop it first:  $RUNTIME stop ${MAINT_NAME}" >&2
     exit 1
   fi
   CONTAINER_NAME="$NORMAL_NAME"
 fi
 
 # Build image if needed
-if [[ "$FORCE_BUILD" == true ]] || ! docker images -q "$IMAGE_NAME" | grep -q .; then
+if [[ "$FORCE_BUILD" == true ]] || ! $RUNTIME images -q "$IMAGE_NAME" | grep -q .; then
   if [[ "$DRY_RUN" == true ]]; then
-    echo "Would build image: docker buildx build --network=host -t $IMAGE_NAME $SCRIPT_DIR"
+    echo "Would build image: $RUNTIME build --network=host --target base -t $IMAGE_NAME $SCRIPT_DIR"
   else
-    echo "Building image $IMAGE_NAME..."
-    docker buildx build --network=host -t "$IMAGE_NAME" "$SCRIPT_DIR"
+    echo "Building image $IMAGE_NAME (target: base)..."
+    runtime_build "$IMAGE_NAME" base "$SCRIPT_DIR"
   fi
 fi
 
 # Check if container exists and is running
 if [[ "$DRY_RUN" == false ]]; then
-  if docker ps -q -f name="^${CONTAINER_NAME}$" | grep -q .; then
+  if $RUNTIME ps -q -f name="^${CONTAINER_NAME}$" | grep -q .; then
     # Container exists and is running
     echo "Attaching to running container $CONTAINER_NAME..."
     if [[ ${#CMD_ARGS[@]} -gt 0 ]]; then
-      exec docker exec -it "$CONTAINER_NAME" "${CMD_ARGS[@]}"
+      exec $RUNTIME exec -it "$CONTAINER_NAME" "${CMD_ARGS[@]}"
     else
-      exec docker exec -it "$CONTAINER_NAME" zsh
+      exec $RUNTIME exec -it "$CONTAINER_NAME" zsh
     fi
-  elif docker ps -aq -f name="^${CONTAINER_NAME}$" | grep -q .; then
+  elif $RUNTIME ps -aq -f name="^${CONTAINER_NAME}$" | grep -q .; then
     # Container exists but is stopped
     echo "Starting stopped container $CONTAINER_NAME..."
-    docker start "$CONTAINER_NAME"
+    $RUNTIME start "$CONTAINER_NAME"
     if [[ ${#CMD_ARGS[@]} -gt 0 ]]; then
-      exec docker exec -it "$CONTAINER_NAME" "${CMD_ARGS[@]}"
+      exec $RUNTIME exec -it "$CONTAINER_NAME" "${CMD_ARGS[@]}"
     else
-      exec docker exec -it "$CONTAINER_NAME" zsh
+      exec $RUNTIME exec -it "$CONTAINER_NAME" zsh
     fi
   fi
 fi
 
 # Build docker run command
-DOCKER_CMD=(docker run -it --rm --name "$CONTAINER_NAME")
+DOCKER_CMD=($RUNTIME run -it --rm --name "$CONTAINER_NAME")
 
 # Capability needed by entrypoint to configure iptables (used in normal mode;
 # harmless when unused in maintenance mode).
@@ -351,7 +423,7 @@ DOCKER_CMD+=(-v devcontainer-home:/home/vscode)
 # Skip default ports if another dev-* container is already running (they'd collide).
 # Explicit --port requests are left alone so conflicts there still surface.
 if [[ "$DEFAULT_PORTS" == true ]]; then
-  OTHER_DEV=$(docker ps --format '{{.Names}}' | grep '^dev-' | grep -vx "$CONTAINER_NAME" || true)
+  OTHER_DEV=$($RUNTIME ps --format '{{.Names}}' | grep '^dev-' | grep -vx "$CONTAINER_NAME" || true)
   if [[ -n "$OTHER_DEV" ]]; then
     echo "Note: another dev container is running ($(echo "$OTHER_DEV" | paste -sd, -)); skipping default port forwards." >&2
     DEFAULT_PORTS=false
