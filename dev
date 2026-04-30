@@ -91,6 +91,7 @@ DRY_RUN=false
 FORCE_BUILD=false
 DEFAULT_PORTS=false
 MAINTENANCE=false
+DIND=false
 MONITOR=false
 MONITOR_FW=false
 DISABLE_FW=false
@@ -115,6 +116,11 @@ OPTIONS:
   --maintenance   Start with firewall disabled and sudo enabled.
                   Container name is suffixed with -maint to avoid
                   clashing with the normal container.
+  --dind          Start with rootless Docker daemon available inside.
+                  Uses generic-devcontainer:dind, suffixes container
+                  name with -dind, mounts /dev/fuse, and uses a
+                  dedicated image cache volume. Mutually exclusive
+                  with --maintenance.
   --monitor       Tail the firewall proxy log of the running container
                   (/var/log/tinyproxy.log). Does not start a container.
   --monitor-fw    Stream packets dropped by iptables in the running container
@@ -140,6 +146,7 @@ EXAMPLES:
   dev --port 9000 --port 9001   # Add custom port forwarding
   dev --default-ports           # Forward the default dev ports
   dev --maintenance             # Start in maintenance mode (no firewall, sudo enabled)
+  dev --dind                    # Start with rootless docker available inside
   dev --monitor                 # Tail firewall proxy log of running container
   dev --monitor-fw              # Stream iptables-dropped packets of running container
   dev --disable-firewall        # Drop the firewall on the running container
@@ -259,6 +266,10 @@ while [[ $# -gt 0 ]]; do
       MAINTENANCE=true
       shift
       ;;
+    --dind)
+      DIND=true
+      shift
+      ;;
     --monitor)
       MONITOR=true
       shift
@@ -288,8 +299,22 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ "$DIND" == true && "$MAINTENANCE" == true ]]; then
+  echo "Error: --dind and --maintenance are mutually exclusive." >&2
+  exit 1
+fi
+
 detect_runtime
 ensure_runtime_ready
+
+# In --dind mode, use the :dind image variant.
+if [[ "$DIND" == true ]]; then
+  IMAGE_TAG="${IMAGE_NAME}:dind"
+  BUILD_TARGET="dind"
+else
+  IMAGE_TAG="$IMAGE_NAME"
+  BUILD_TARGET="base"
+fi
 
 # Container naming: normal mode uses dev-<dir>, maintenance uses dev-<dir>-maint.
 # Refuse to start one mode while the other is already running for the same
@@ -297,6 +322,7 @@ ensure_runtime_ready
 WORKSPACE_BASENAME="$(basename "$(pwd)")"
 NORMAL_NAME="dev-${WORKSPACE_BASENAME}"
 MAINT_NAME="dev-${WORKSPACE_BASENAME}-maint"
+DIND_NAME="dev-${WORKSPACE_BASENAME}-dind"
 
 # --monitor / --monitor-fw: read firewall logs from the running normal container.
 # Maintenance mode has no firewall, so these are meaningless there.
@@ -360,29 +386,39 @@ if [[ "$DISABLE_FW" == true || "$ENABLE_FW" == true ]]; then
   fi
 fi
 
-if [[ "$MAINTENANCE" == true ]]; then
-  if $RUNTIME ps -q -f name="^${NORMAL_NAME}$" | grep -q .; then
-    echo "Error: normal container ${NORMAL_NAME} is running for this workspace." >&2
-    echo "       Stop it first:  $RUNTIME stop ${NORMAL_NAME}" >&2
+# Three-way conflict guard: normal / maintenance / dind. Each pair refuses
+# while the other is running for the same workspace; both would mount
+# /workspace and produce surprising state.
+refuse_if_running() {
+  local other_name="$1" other_label="$2"
+  if $RUNTIME ps -q -f name="^${other_name}$" | grep -q .; then
+    echo "Error: ${other_label} container ${other_name} is running for this workspace." >&2
+    echo "       Stop it first:  $RUNTIME stop ${other_name}" >&2
     exit 1
   fi
+}
+
+if [[ "$DIND" == true ]]; then
+  refuse_if_running "$NORMAL_NAME" "normal"
+  refuse_if_running "$MAINT_NAME" "maintenance"
+  CONTAINER_NAME="$DIND_NAME"
+elif [[ "$MAINTENANCE" == true ]]; then
+  refuse_if_running "$NORMAL_NAME" "normal"
+  refuse_if_running "$DIND_NAME" "dind"
   CONTAINER_NAME="$MAINT_NAME"
 else
-  if $RUNTIME ps -q -f name="^${MAINT_NAME}$" | grep -q .; then
-    echo "Error: maintenance container ${MAINT_NAME} is running for this workspace." >&2
-    echo "       Stop it first:  $RUNTIME stop ${MAINT_NAME}" >&2
-    exit 1
-  fi
+  refuse_if_running "$MAINT_NAME" "maintenance"
+  refuse_if_running "$DIND_NAME" "dind"
   CONTAINER_NAME="$NORMAL_NAME"
 fi
 
 # Build image if needed
-if [[ "$FORCE_BUILD" == true ]] || ! $RUNTIME images -q "$IMAGE_NAME" | grep -q .; then
+if [[ "$FORCE_BUILD" == true ]] || ! $RUNTIME images -q "$IMAGE_TAG" | grep -q .; then
   if [[ "$DRY_RUN" == true ]]; then
-    echo "Would build image: $RUNTIME build --network=host --target base -t $IMAGE_NAME $SCRIPT_DIR"
+    echo "Would build image: $RUNTIME build --network=host --target $BUILD_TARGET -t $IMAGE_TAG $SCRIPT_DIR"
   else
-    echo "Building image $IMAGE_NAME (target: base)..."
-    runtime_build "$IMAGE_NAME" base "$SCRIPT_DIR"
+    echo "Building image $IMAGE_TAG (target: $BUILD_TARGET)..."
+    runtime_build "$IMAGE_TAG" "$BUILD_TARGET" "$SCRIPT_DIR"
   fi
 fi
 
@@ -420,6 +456,14 @@ DOCKER_CMD+=(-v "$(pwd):/workspace")
 DOCKER_CMD+=(-v devcontainer-mise:/mise)
 DOCKER_CMD+=(-v devcontainer-home:/home/vscode)
 
+# DinD-specific runtime knobs.
+if [[ "$DIND" == true ]]; then
+  DOCKER_CMD+=(--device=/dev/fuse)
+  DOCKER_CMD+=(--security-opt apparmor=unconfined)
+  DOCKER_CMD+=(--security-opt seccomp=unconfined)
+  DOCKER_CMD+=(-v devcontainer-dind:/home/vscode/.local/share/docker)
+fi
+
 # Skip default ports if another dev-* container is already running (they'd collide).
 # Explicit --port requests are left alone so conflicts there still surface.
 if [[ "$DEFAULT_PORTS" == true ]]; then
@@ -452,8 +496,13 @@ if [[ "$MAINTENANCE" == true ]]; then
   DOCKER_CMD+=(-e DEVCONTAINER_MAINTENANCE=1)
 fi
 
-# Image name
-DOCKER_CMD+=("$IMAGE_NAME")
+# DinD mode: tell entrypoint.sh to start dockerd-rootless.
+if [[ "$DIND" == true ]]; then
+  DOCKER_CMD+=(-e DEVCONTAINER_DIND=1)
+fi
+
+# Image tag (base or :dind)
+DOCKER_CMD+=("$IMAGE_TAG")
 
 # Command args (default to zsh if none provided)
 if [[ ${#CMD_ARGS[@]} -gt 0 ]]; then
