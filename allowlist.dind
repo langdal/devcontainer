@@ -1,0 +1,26 @@
+# Registry hostnames consumed by rootless dockerd in --dind mode.
+# Merged into the tinyproxy filter only when DEVCONTAINER_DIND=1.
+
+# Docker Hub
+registry-1.docker.io
+auth.docker.io
+production.cloudflare.docker.com
+*.cloudfront.net
+
+# Microsoft Container Registry (devcontainers/base; multi-arch)
+mcr.microsoft.com
+*.data.mcr.microsoft.com
+*.azureedge.net
+
+# Quay (testcontainers / postgres / redis frequently host here)
+quay.io
+*.quay.io
+cdn.quay.io
+cdn03.quay.io
+cdn04.quay.io
+
+# Google Container Registry (some testcontainers images)
+gcr.io
+storage.googleapis.com
+
+# (download.docker.com is in allowlist.base; ghcr.io is in allowlist.base)

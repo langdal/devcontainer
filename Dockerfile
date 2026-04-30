@@ -147,6 +147,7 @@ RUN if ! grep -q '^vscode:' /etc/subuid; then \
         echo "vscode:100000:65536" >> /etc/subgid; \
     fi
 
+COPY allowlist.dind /etc/devcontainer/allowlist.dind
 COPY --chmod=755 dind-init.sh /usr/local/sbin/dind-init.sh
 
 USER vscode

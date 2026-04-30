@@ -18,6 +18,9 @@ mkdir -p /etc/tinyproxy /var/log /run
     if [ -f "$PROJECT" ]; then
         cat "$PROJECT"
     fi
+    if [ -n "${DEVCONTAINER_DIND:-}" ] && [ -f /etc/devcontainer/allowlist.dind ]; then
+        cat /etc/devcontainer/allowlist.dind
+    fi
 } | sed 's/#.*//'           \
   | tr -d ' \t'             \
   | awk 'NF'                \
