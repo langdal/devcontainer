@@ -165,6 +165,10 @@ fi
 # Build docker run command
 DOCKER_CMD=(docker run -it --rm --name "$CONTAINER_NAME")
 
+# Capability needed by entrypoint to configure iptables (used in normal mode;
+# harmless when unused in maintenance mode).
+DOCKER_CMD+=(--cap-add=NET_ADMIN)
+
 # Volume mounts
 DOCKER_CMD+=(-v "$(pwd):/workspace")
 DOCKER_CMD+=(-v devcontainer-mise:/mise)

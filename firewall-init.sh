@@ -20,7 +20,7 @@ mkdir -p /etc/tinyproxy /var/log /run
     fi
 } | sed 's/#.*//'           \
   | tr -d ' \t'             \
-  | grep -v '^$'            \
+  | awk 'NF'                \
   | sort -u                 \
   | while IFS= read -r entry; do
         # *.foo.com  -> ^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.foo\.com$

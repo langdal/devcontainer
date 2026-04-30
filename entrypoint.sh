@@ -1,9 +1,25 @@
 #!/bin/bash
 set -u
 
+# --- Firewall (skipped in maintenance mode) ---
+if [ -z "${DEVCONTAINER_MAINTENANCE:-}" ]; then
+    if ! /usr/local/sbin/firewall-init.sh; then
+        echo "FATAL: firewall-init.sh failed; refusing to start container" >&2
+        exit 1
+    fi
+    export HTTPS_PROXY=http://127.0.0.1:8888
+    export HTTP_PROXY=http://127.0.0.1:8888
+    export NO_PROXY=localhost,127.0.0.1
+    cat > /etc/profile.d/proxy.sh <<'EOF'
+export HTTPS_PROXY=http://127.0.0.1:8888
+export HTTP_PROXY=http://127.0.0.1:8888
+export NO_PROXY=localhost,127.0.0.1
+EOF
+    chmod 644 /etc/profile.d/proxy.sh
+fi
+
 # entrypoint.sh runs as root. It runs user-context tasks via gosu vscode,
-# then exec's gosu vscode for the actual command. The firewall hook (Task 4)
-# slots in at the top of this file.
+# then exec's gosu vscode for the actual command.
 
 # Run user-context startup tasks as vscode (preserves file ownership under
 # /home/vscode and /mise; ensures 'git config --global' lands in
