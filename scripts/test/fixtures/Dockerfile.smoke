@@ -1,0 +1,8 @@
+# Tiny image used by verify-dind.sh's D1 check.
+# A 'RUN apt-get update' verifies that registry pulls and apt mirrors
+# both work via the proxy during build.
+FROM debian:bookworm-slim
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+CMD ["true"]
