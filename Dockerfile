@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/devcontainers/base:ubuntu
+FROM mcr.microsoft.com/devcontainers/base:ubuntu AS base
 
 # Allow UID override for macOS compatibility
 ARG USER_UID=1000
