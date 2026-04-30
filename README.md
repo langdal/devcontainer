@@ -94,7 +94,65 @@ The `dev` script manages the container lifecycle.
 - `--build`: Force a rebuild of the `generic-devcontainer` image before starting.
 - `--port PORT`: Add additional port forwarding (e.g., `--port 9000`). This flag can be repeated.
 - `--no-ports`: Skip all default port forwarding.
+- `--maintenance`: Start with the firewall disabled and sudo enabled (see [Firewall](#firewall)).
 - `--`: Pass any remaining arguments as a command to be executed inside the container (e.g., `./dev -- npm run dev`).
+
+## Firewall
+
+The container restricts outbound traffic to a curated allowlist of domains.
+This is intended for running AI agents in a sandbox: an agent running as
+`vscode` cannot exfiltrate workspace contents to arbitrary hosts.
+
+### How it works
+
+- `tinyproxy` runs inside the container and filters HTTPS by hostname (CONNECT).
+- `iptables` defaults `OUTPUT` to DROP and only allows DNS + the `proxy` user
+  reaching :80/:443. An agent process bypassing the proxy via raw sockets
+  cannot match the owner rule and is dropped at the kernel.
+- `vscode` has no sudo in normal mode. There is no path to disable iptables
+  from inside the container.
+- HTTP(S) clients in the container honour `HTTPS_PROXY` / `HTTP_PROXY` env
+  vars, which are exported by the entrypoint to point at `127.0.0.1:8888`.
+
+### Allowlists
+
+Two layers, merged at container startup:
+
+- **Base list** (`allowlist.base` in this repo) is baked into the image at
+  `/etc/devcontainer/allowlist.base`. It includes Anthropic, GitHub, common
+  package registries, mise, and OS package mirrors. Edit this file and
+  rebuild the image to change the base list.
+- **Project list** (`.devcontainer-allowlist` at the workspace root) is
+  optional. Read at every container start; concatenated with the base list
+  and deduplicated. No image rebuild needed — restart the container to pick
+  up changes.
+
+Format: one entry per line, `#` comments. A bare hostname (`github.com`)
+matches that name exactly. A `*.` prefix (`*.github.com`) matches any
+subdomain. List both if you need both.
+
+### Maintenance mode
+
+```bash
+dev --maintenance
+```
+
+Starts the container with the firewall disabled and sudo enabled. Use this
+for installing system packages, debugging the firewall, or fetching tools
+from non-allowlisted hosts. The maintenance container has a different name
+(`dev-<dir>-maint`), and the normal container is refused while it runs (and
+vice versa) — they would both have `/workspace` mounted and produce
+surprising state.
+
+### Verifying the firewall
+
+A helper script probes posture:
+
+```bash
+dev -- /workspace/scripts/verify-firewall.sh
+```
+
+In normal mode all 7 checks pass; in maintenance mode 5 are skipped.
 
 ## Port Forwarding
 
