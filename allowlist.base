@@ -1,5 +1,6 @@
 # Anthropic
-api.anthropic.com
+*.anthropic.com
+*.claude.ai
 
 # GitHub (HTTPS clone, API, raw, releases)
 github.com
