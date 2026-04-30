@@ -35,6 +35,14 @@ EOF
     chmod 644 /etc/profile.d/zz-maint-banner.sh
 fi
 
+# --- DinD mode: launch rootless dockerd ---
+if [ -n "${DEVCONTAINER_DIND:-}" ]; then
+    if ! /usr/local/sbin/dind-init.sh; then
+        echo "FATAL: dind-init.sh failed; refusing to start container" >&2
+        exit 1
+    fi
+fi
+
 # entrypoint.sh runs as root. It runs user-context tasks via gosu vscode,
 # then exec's gosu vscode for the actual command.
 
