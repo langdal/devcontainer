@@ -31,7 +31,7 @@ There is no test suite, linter, or CI pipeline.
 
 Three components, each with a distinct role:
 
-- **Dockerfile** — Builds the base image on `mcr.microsoft.com/devcontainers/base:ubuntu`. Installs mise to `/usr/local/bin/mise`, bakes in base tools from `mise.toml` into `/mise/`, stages `.zshrc` to `/etc/skel.devcontainer/` for entrypoint sync.
+- **Dockerfile** — Builds the base image on `mcr.microsoft.com/devcontainers/base:ubuntu`. Installs mise to `/usr/local/bin/mise`, bakes in base tools from `mise.base.toml` into `/mise/`, stages `.zshrc` to `/etc/skel.devcontainer/` for entrypoint sync.
 
 - **entrypoint.sh** — Runs on every container start. Idempotently ensures `mise activate zsh` is in `.zshrc`, runs `mise install` if a project `mise.toml` exists in `/workspace`, sets git safe.directory, then execs into the shell.
 
@@ -43,5 +43,5 @@ Three components, each with a distinct role:
 - **Two named Docker volumes** persist state: `devcontainer-mise:/mise` (tools/caches) and `devcontainer-home:/home/vscode` (shell history, git config, SSH keys).
 - **Container runs as user `vscode`** (UID 1000 by default, overridable via `USER_UID` build arg).
 - **Containers are `--rm`** (ephemeral) but the `dev` script reuses a running/stopped container named `dev-<dirname>` before creating a new one.
-- **Base tools** (node LTS, ripgrep, eza, lazygit) are defined in `mise.toml` and baked into the image at build time. Per-project tools come from the project's own `mise.toml` and are installed at container startup.
+- **Base tools** (node LTS, ripgrep, eza, lazygit) are defined in `mise.base.toml` and baked into the image at build time. The file is named `mise.base.toml` rather than `mise.toml` so mise does not treat it as a project config when this repo is itself opened in the devcontainer. Per-project tools come from the consuming project's own `mise.toml` and are installed at container startup.
 - **No Docker-in-Docker** — intentionally removed.

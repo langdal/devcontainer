@@ -50,8 +50,9 @@ ENV PATH="/mise/shims:${PATH}"
 # Create /mise directory owned by vscode user
 RUN mkdir -p /mise && chown -R vscode:vscode /mise
 
-# Copy mise.toml to mise config location
-COPY --chown=vscode:vscode mise.toml /mise/config.toml
+# Copy base tool list to mise config location (named mise.base.toml so it
+# does not get picked up as a mise config when this repo itself is opened)
+COPY --chown=vscode:vscode mise.base.toml /mise/config.toml
 
 # Switch to vscode user and install base tools
 USER vscode
