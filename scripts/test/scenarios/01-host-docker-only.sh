@@ -1,0 +1,33 @@
+#!/bin/bash
+# scripts/test/scenarios/01-host-docker-only.sh
+# platform: linux
+set -u
+LIB="$(dirname "$0")/../lib"
+. "$LIB/assert.sh"; . "$LIB/runtime.sh"; . "$LIB/restore.sh"
+require_platform linux
+
+# Setup: mask podman if installed.
+if command -v podman >/dev/null 2>&1; then
+    mask_dir=$(mask_and_prepend podman)
+    remember_path_overlay "$mask_dir"
+fi
+trap restore_host EXIT
+
+# Confirm docker is on PATH and podman is masked.
+if ! command -v docker >/dev/null 2>&1; then
+    log_skip "docker not installed on host"
+    exit 0
+fi
+if command -v podman >/dev/null 2>&1 && podman --version >/dev/null 2>&1; then
+    log_fail "podman should be masked but is reachable"
+    exit 1
+fi
+
+cd "$(dirname "$0")/../../.."
+out=$(./dev --dry-run 2>&1) || { log_fail "dev --dry-run failed: $out"; exit 1; }
+if expect_grep "$out" '^docker run '; then
+    log_pass "docker-only host: dev uses docker"
+    exit 0
+fi
+log_fail "expected docker run, got: $out"
+exit 1
