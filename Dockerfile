@@ -16,6 +16,7 @@ RUN if [ "${USER_UID}" != "1000" ]; then \
 # - dnsutils: getent/dig for diagnostics
 # - gosu: clean privilege drop in the entrypoint
 # - iproute2: 'ss' for tinyproxy bind verification
+# - tcpdump: read NFLOG group for `dev --monitor-fw`
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         iptables \
@@ -23,7 +24,8 @@ RUN apt-get update && \
         tinyproxy \
         dnsutils \
         gosu \
-        iproute2 && \
+        iproute2 \
+        tcpdump && \
     rm -rf /var/lib/apt/lists/*
 
 # Strip vscode's passwordless sudo. vscode is the agent-facing user; if it

@@ -96,4 +96,10 @@ iptables -A OUTPUT -m owner --uid-owner "$PROXY_UID" \
                   -p tcp -m multiport --dports 80,443 -j ACCEPT
 iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
 
+# Log packets that fell through every ACCEPT above — i.e. exactly what the
+# default-DROP policy is about to discard. Rate-limited so a noisy app cannot
+# flood the netlink buffer. Read with `tcpdump -i nflog:1` (see `dev --monitor-fw`).
+iptables -A OUTPUT -m limit --limit 60/min --limit-burst 20 \
+                  -j NFLOG --nflog-group 1 --nflog-prefix "FW-DROP"
+
 echo "firewall-init: ready ($(wc -l < "$FILTER") allowlist entries, proxy uid=$PROXY_UID)"

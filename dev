@@ -23,6 +23,7 @@ FORCE_BUILD=false
 NO_PORTS=false
 MAINTENANCE=false
 MONITOR=false
+MONITOR_FW=false
 EXTRA_PORTS=()
 CMD_ARGS=()
 
@@ -44,6 +45,8 @@ OPTIONS:
                   clashing with the normal container.
   --monitor       Tail the firewall proxy log of the running container
                   (/var/log/tinyproxy.log). Does not start a container.
+  --monitor-fw    Stream packets dropped by iptables in the running container
+                  (tcpdump on NFLOG group 1). Does not start a container.
   --              Pass remaining arguments as command to container
 
 COMMANDS:
@@ -56,6 +59,7 @@ EXAMPLES:
   dev --port 9000 --port 9001   # Add custom port forwarding
   dev --maintenance             # Start in maintenance mode (no firewall, sudo enabled)
   dev --monitor                 # Tail firewall proxy log of running container
+  dev --monitor-fw              # Stream iptables-dropped packets of running container
   dev -- npm run dev            # Run custom command in container
   dev install                   # Install 'dev' onto your PATH
 
@@ -132,6 +136,10 @@ while [[ $# -gt 0 ]]; do
       MONITOR=true
       shift
       ;;
+    --monitor-fw)
+      MONITOR_FW=true
+      shift
+      ;;
     --)
       shift
       CMD_ARGS=("$@")
@@ -152,18 +160,29 @@ WORKSPACE_BASENAME="$(basename "$(pwd)")"
 NORMAL_NAME="dev-${WORKSPACE_BASENAME}"
 MAINT_NAME="dev-${WORKSPACE_BASENAME}-maint"
 
-# --monitor: tail the firewall proxy log of the running normal container.
-# Maintenance mode has no firewall, so the log is meaningless there.
-if [[ "$MONITOR" == true ]]; then
+# --monitor / --monitor-fw: read firewall logs from the running normal container.
+# Maintenance mode has no firewall, so these are meaningless there.
+if [[ "$MONITOR" == true || "$MONITOR_FW" == true ]]; then
+  if [[ "$MONITOR" == true && "$MONITOR_FW" == true ]]; then
+    echo "Error: --monitor and --monitor-fw are mutually exclusive." >&2
+    exit 1
+  fi
   if [[ "$MAINTENANCE" == true ]]; then
-    echo "Error: --monitor and --maintenance are mutually exclusive (no firewall in maintenance mode)." >&2
+    echo "Error: --monitor* and --maintenance are mutually exclusive (no firewall in maintenance mode)." >&2
     exit 1
   fi
   if ! docker ps -q -f name="^${NORMAL_NAME}$" | grep -q .; then
     echo "Error: container ${NORMAL_NAME} is not running. Start it with 'dev' first." >&2
     exit 1
   fi
-  exec docker exec -it "$NORMAL_NAME" tail -F /var/log/tinyproxy.log
+  if [[ "$MONITOR" == true ]]; then
+    exec docker exec -it "$NORMAL_NAME" tail -F /var/log/tinyproxy.log
+  else
+    # tcpdump on the NFLOG group set by firewall-init.sh. Needs CAP_NET_ADMIN
+    # (the container already has it) and root inside the container.
+    exec docker exec -it --user root "$NORMAL_NAME" \
+        tcpdump -i nflog:1 -nn -l
+  fi
 fi
 
 if [[ "$MAINTENANCE" == true ]]; then
