@@ -93,7 +93,7 @@ The `dev` script manages the container lifecycle.
 - `--dry-run`: Print the `docker run` command that would be executed without actually running it.
 - `--build`: Force a rebuild of the `generic-devcontainer` image before starting.
 - `--port PORT`: Add additional port forwarding (e.g., `--port 9000`). This flag can be repeated.
-- `--no-ports`: Skip all default port forwarding.
+- `--default-ports`: Forward the default development ports (off by default; see [Port Forwarding](#port-forwarding)).
 - `--maintenance`: Start with the firewall disabled and sudo enabled (see [Firewall](#firewall)).
 - `--`: Pass any remaining arguments as a command to be executed inside the container (e.g., `./dev -- npm run dev`).
 
@@ -156,14 +156,15 @@ In normal mode all 7 checks pass; in maintenance mode 5 are skipped.
 
 ## Port Forwarding
 
-By default, the following ports are forwarded from the container to your host:
+By default, no ports are forwarded. Pass `--default-ports` to forward a
+common set of development ports from the container to your host:
 
 - `5173`, `5174`: Standard Vite/Frontend ports.
 - `8080`: Common web server port.
 - `2345`: Default port for Delve (Go debugger).
 - `3000`: Common Node.js/Rails/React port.
 
-Use the `--port` flag to add more as needed.
+Use the `--port` flag to forward additional ports individually.
 
 ## macOS Users
 

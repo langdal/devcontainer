@@ -20,7 +20,7 @@ IMAGE_NAME="generic-devcontainer"
 # Flags
 DRY_RUN=false
 FORCE_BUILD=false
-NO_PORTS=false
+DEFAULT_PORTS=false
 MAINTENANCE=false
 MONITOR=false
 MONITOR_FW=false
@@ -39,7 +39,8 @@ OPTIONS:
   --dry-run       Print docker command without executing
   --build         Force rebuild the image
   --port PORT     Add additional port forwarding (repeatable)
-  --no-ports      Skip default port forwarding
+  --default-ports Forward the default development ports (5173, 5174, 8080,
+                  2345, 3000). Off by default.
   --maintenance   Start with firewall disabled and sudo enabled.
                   Container name is suffixed with -maint to avoid
                   clashing with the normal container.
@@ -57,6 +58,7 @@ EXAMPLES:
   dev --build                   # Rebuild image and start container
   dev --dry-run                 # Show docker command without running
   dev --port 9000 --port 9001   # Add custom port forwarding
+  dev --default-ports           # Forward the default dev ports
   dev --maintenance             # Start in maintenance mode (no firewall, sudo enabled)
   dev --monitor                 # Tail firewall proxy log of running container
   dev --monitor-fw              # Stream iptables-dropped packets of running container
@@ -124,8 +126,8 @@ while [[ $# -gt 0 ]]; do
       EXTRA_PORTS+=("$2")
       shift 2
       ;;
-    --no-ports)
-      NO_PORTS=true
+    --default-ports)
+      DEFAULT_PORTS=true
       shift
       ;;
     --maintenance)
@@ -247,16 +249,16 @@ DOCKER_CMD+=(-v devcontainer-home:/home/vscode)
 
 # Skip default ports if another dev-* container is already running (they'd collide).
 # Explicit --port requests are left alone so conflicts there still surface.
-if [[ "$NO_PORTS" == false ]]; then
+if [[ "$DEFAULT_PORTS" == true ]]; then
   OTHER_DEV=$(docker ps --format '{{.Names}}' | grep '^dev-' | grep -vx "$CONTAINER_NAME" || true)
   if [[ -n "$OTHER_DEV" ]]; then
     echo "Note: another dev container is running ($(echo "$OTHER_DEV" | paste -sd, -)); skipping default port forwards." >&2
-    NO_PORTS=true
+    DEFAULT_PORTS=false
   fi
 fi
 
 # Port forwarding
-if [[ "$NO_PORTS" == false ]]; then
+if [[ "$DEFAULT_PORTS" == true ]]; then
   DOCKER_CMD+=(-p 5173:5173 -p 5174:5174 -p 8080:8080 -p 2345:2345 -p 3000:3000)
 fi
 
