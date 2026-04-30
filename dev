@@ -106,8 +106,51 @@ install_self() {
   fi
 
   local link="$target_dir/dev"
-  ln -sf "$script_path" "$link"
-  echo "Installed: $link -> $script_path"
+  if [[ -L "$link" ]]; then
+    local current
+    current="$(readlink "$link")"
+    if [[ "$current" == "$script_path" ]]; then
+      echo "Already installed: $link -> $script_path"
+    else
+      echo "Error: $link already exists and points to $current" >&2
+      echo "Remove it first: rm $link" >&2
+      exit 1
+    fi
+  elif [[ -e "$link" ]]; then
+    echo "Error: $link exists and is not a symlink. Refusing to overwrite." >&2
+    exit 1
+  else
+    ln -s "$script_path" "$link"
+    echo "Installed: $link -> $script_path"
+  fi
+
+  local zshrc="$HOME/.zshrc"
+  local compdef_line='compdef _gnu_generic dev'
+  if [[ -f "$zshrc" ]] && grep -qxF -- "$compdef_line" "$zshrc"; then
+    echo "zsh completion already configured in ~/.zshrc"
+    return
+  fi
+
+  if [[ ! -t 0 ]]; then
+    echo "To enable tab-completion, add this line to ~/.zshrc:  $compdef_line"
+    return
+  fi
+
+  local reply
+  read -r -p "Add '$compdef_line' to ~/.zshrc to enable tab-completion? [y/N] " reply
+  case "$reply" in
+    y|Y|yes|YES)
+      {
+        echo ""
+        echo "# Added by 'dev install': enable tab-completion for the dev script"
+        echo "$compdef_line"
+      } >> "$zshrc"
+      echo "Added compdef line to ~/.zshrc. Run 'exec zsh' to activate."
+      ;;
+    *)
+      echo "Skipped. You can add it later with: echo '$compdef_line' >> ~/.zshrc"
+      ;;
+  esac
 }
 
 # Handle subcommands before flag parsing
