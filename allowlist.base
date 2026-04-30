@@ -1,0 +1,27 @@
+# Anthropic
+api.anthropic.com
+
+# GitHub (HTTPS clone, API, raw, releases)
+github.com
+api.github.com
+codeload.github.com
+*.githubusercontent.com
+ghcr.io
+
+# Package registries
+*.npmjs.org
+pypi.org
+files.pythonhosted.org
+crates.io
+static.crates.io
+
+# mise / language runtimes
+mise.jdx.dev
+nodejs.org
+*.nodejs.org
+
+# OS packages
+deb.debian.org
+security.debian.org
+archive.ubuntu.com
+security.ubuntu.com

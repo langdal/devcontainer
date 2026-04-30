@@ -10,6 +10,22 @@ RUN if [ "${USER_UID}" != "1000" ]; then \
         chown -R ${USER_UID}:${USER_UID} /home/vscode; \
     fi
 
+# Install firewall stack and supporting tools.
+# - iptables/ipset: kernel-level packet filtering
+# - tinyproxy: hostname-filtering forward proxy
+# - dnsutils: getent/dig for diagnostics
+# - gosu: clean privilege drop in the entrypoint
+# - iproute2: 'ss' for tinyproxy bind verification
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        iptables \
+        ipset \
+        tinyproxy \
+        dnsutils \
+        gosu \
+        iproute2 && \
+    rm -rf /var/lib/apt/lists/*
+
 # Install mise to /usr/local/bin/mise
 RUN curl -fsSL https://mise.run | MISE_INSTALL_PATH=/usr/local/bin/mise sh
 
