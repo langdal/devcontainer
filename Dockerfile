@@ -26,6 +26,14 @@ RUN apt-get update && \
         iproute2 && \
     rm -rf /var/lib/apt/lists/*
 
+# Strip vscode's passwordless sudo. vscode is the agent-facing user; if it
+# can sudo, it can flush iptables and defeat the firewall. Maintenance mode
+# re-creates a sudoers fragment at container runtime.
+RUN rm -f /etc/sudoers.d/vscode /etc/sudoers.d/nopasswd && \
+    if grep -rEl '^[[:space:]]*vscode[[:space:]]' /etc/sudoers.d/ 2>/dev/null; then \
+        grep -rEl '^[[:space:]]*vscode[[:space:]]' /etc/sudoers.d/ | xargs -r rm -f; \
+    fi
+
 # Install mise to /usr/local/bin/mise
 RUN curl -fsSL https://mise.run | MISE_INSTALL_PATH=/usr/local/bin/mise sh
 
