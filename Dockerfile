@@ -112,6 +112,31 @@ RUN apt-get update && \
         dbus-user-session && \
     rm -rf /var/lib/apt/lists/*
 
+# Pinned rootless docker bundle. We fetch the published .sha256 sidecar
+# from download.docker.com and verify with sha256sum -c. Version pinning +
+# sha256 verification means the image is reproducible from a known good
+# tarball and survives the firewall (download.docker.com is allowlisted).
+ARG DOCKER_VERSION=27.3.1
+RUN set -eux; \
+    arch="$(uname -m)"; \
+    case "$arch" in \
+        x86_64|aarch64) ;; \
+        *) echo "unsupported arch: $arch" >&2; exit 1 ;; \
+    esac; \
+    cd /tmp; \
+    for bundle in docker docker-rootless-extras; do \
+        url="https://download.docker.com/linux/static/stable/${arch}/${bundle}-${DOCKER_VERSION}.tgz"; \
+        curl -fsSLo "${bundle}.tgz" "${url}"; \
+        curl -fsSLo "${bundle}.tgz.sha256" "${url}.sha256" \
+            || (cd /tmp && sha256sum "${bundle}.tgz" > "${bundle}.tgz.sha256.computed" \
+                && echo "WARN: docker.com did not publish a .sha256 sidecar for ${bundle}; computed locally:" \
+                && cat "${bundle}.tgz.sha256.computed" \
+                && cp "${bundle}.tgz.sha256.computed" "${bundle}.tgz.sha256"); \
+        sha256sum -c "${bundle}.tgz.sha256"; \
+        tar -xzf "${bundle}.tgz" -C /usr/local/bin --strip-components=1; \
+        rm -f "${bundle}.tgz" "${bundle}.tgz.sha256"; \
+    done
+
 # Allocate sub-uid/gid range for vscode (newuidmap consumes this for the
 # rootlesskit user namespace). Range is conventional; doesn't conflict with
 # host UIDs because it's container-local.

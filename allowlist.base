@@ -26,3 +26,6 @@ deb.debian.org
 security.debian.org
 archive.ubuntu.com
 security.ubuntu.com
+
+# Docker static binaries (used by the :dind image build)
+download.docker.com
