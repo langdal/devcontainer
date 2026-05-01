@@ -144,19 +144,23 @@ OPTIONS:
                   name with -dind, mounts /dev/fuse, and uses a
                   dedicated image cache volume. Mutually exclusive
                   with --maintenance.
-  --monitor       Tail the firewall proxy log of the running container
-                  (/var/log/tinyproxy.log). Does not start a container.
-  --monitor-fw    Stream packets dropped by iptables in the running container
-                  (tcpdump on NFLOG group 1). Does not start a container.
+  --monitor       Tail the firewall proxy log of the running workspace
+                  container (/var/log/tinyproxy.log). Targets the normal
+                  *or* dind container, whichever is running. Does not
+                  start a container.
+  --monitor-fw    Stream packets dropped by iptables in the running workspace
+                  container (tcpdump on NFLOG group 1). Targets normal or
+                  dind. Does not start a container.
   --disable-firewall
-                  Open the firewall on the running container: flush OUTPUT
-                  rules + ACCEPT policy, and switch tinyproxy to an allow-all
-                  filter (SIGHUP reload). Existing shells keep working
-                  whether or not HTTPS_PROXY is set.
+                  Open the firewall on the running workspace container
+                  (normal or dind): flush OUTPUT rules + ACCEPT policy, and
+                  switch tinyproxy to an allow-all filter (SIGHUP reload).
+                  Existing shells keep working whether or not HTTPS_PROXY
+                  is set.
   --enable-firewall
-                  Re-run firewall-init.sh on the running container to rebuild
-                  the allowlist filter and restore the default-deny iptables
-                  policy.
+                  Re-run firewall-init.sh on the running workspace container
+                  (normal or dind) to rebuild the allowlist filter and
+                  restore the default-deny iptables policy.
   --              Pass remaining arguments as command to container
 
 COMMANDS:
@@ -405,8 +409,29 @@ NORMAL_NAME="dev-${WORKSPACE_BASENAME}"
 MAINT_NAME="dev-${WORKSPACE_BASENAME}-maint"
 DIND_NAME="dev-${WORKSPACE_BASENAME}-dind"
 
-# --monitor / --monitor-fw: read firewall logs from the running normal container.
-# Maintenance mode has no firewall, so these are meaningless there.
+# Resolve which workspace container the management commands below should
+# target. Picks the running one among normal / dind / maint. Sets:
+#   MANAGED_TARGET = "normal" | "dind" | "maint" | ""   (empty = none running)
+#   MANAGED_NAME   = the container name (when MANAGED_TARGET is non-empty)
+# Only one of the three can be running at a time — enforced by the
+# three-way conflict guard further down.
+resolve_managed_container() {
+  MANAGED_TARGET=""
+  MANAGED_NAME=""
+  if $RUNTIME ps -q -f name="^${NORMAL_NAME}$" | grep -q .; then
+    MANAGED_TARGET="normal"; MANAGED_NAME="$NORMAL_NAME"; return
+  fi
+  if $RUNTIME ps -q -f name="^${DIND_NAME}$" | grep -q .; then
+    MANAGED_TARGET="dind"; MANAGED_NAME="$DIND_NAME"; return
+  fi
+  if $RUNTIME ps -q -f name="^${MAINT_NAME}$" | grep -q .; then
+    MANAGED_TARGET="maint"; MANAGED_NAME="$MAINT_NAME"; return
+  fi
+}
+
+# --monitor / --monitor-fw: read firewall logs from the running workspace
+# container (normal or dind — both run firewall-init.sh and have the same
+# tinyproxy + NFLOG stack). Maintenance mode has no firewall.
 if [[ "$MONITOR" == true || "$MONITOR_FW" == true ]]; then
   if [[ "$MONITOR" == true && "$MONITOR_FW" == true ]]; then
     echo "Error: --monitor and --monitor-fw are mutually exclusive." >&2
@@ -416,23 +441,28 @@ if [[ "$MONITOR" == true || "$MONITOR_FW" == true ]]; then
     echo "Error: --monitor* and --maintenance are mutually exclusive (no firewall in maintenance mode)." >&2
     exit 1
   fi
-  if ! $RUNTIME ps -q -f name="^${NORMAL_NAME}$" | grep -q .; then
-    echo "Error: container ${NORMAL_NAME} is not running. Start it with 'dev' first." >&2
+  resolve_managed_container
+  if [[ -z "$MANAGED_TARGET" ]]; then
+    echo "Error: no dev container is running for this workspace (looked for ${NORMAL_NAME}, ${DIND_NAME}). Start one with 'dev' or 'dev --dind' first." >&2
+    exit 1
+  fi
+  if [[ "$MANAGED_TARGET" == "maint" ]]; then
+    echo "Error: maintenance container ${MAINT_NAME} has no firewall — --monitor/--monitor-fw are meaningless in maintenance mode." >&2
     exit 1
   fi
   if [[ "$MONITOR" == true ]]; then
-    exec $RUNTIME exec -it "$NORMAL_NAME" tail -F /var/log/tinyproxy.log
+    exec $RUNTIME exec -it "$MANAGED_NAME" tail -F /var/log/tinyproxy.log
   else
     # tcpdump on the NFLOG group set by firewall-init.sh. Needs CAP_NET_ADMIN
     # (the container already has it) and root inside the container.
-    exec $RUNTIME exec -it --user root "$NORMAL_NAME" \
+    exec $RUNTIME exec -it --user root "$MANAGED_NAME" \
         tcpdump -i nflog:1 -nn -l
   fi
 fi
 
-# --disable-firewall / --enable-firewall: toggle iptables on the running normal
-# container without restarting it. Container has CAP_NET_ADMIN, so root inside
-# can rewrite the OUTPUT chain.
+# --disable-firewall / --enable-firewall: toggle iptables on the running
+# workspace container without restarting it. Works for both normal and dind
+# (both have CAP_NET_ADMIN and the same firewall stack).
 if [[ "$DISABLE_FW" == true || "$ENABLE_FW" == true ]]; then
   if [[ "$DISABLE_FW" == true && "$ENABLE_FW" == true ]]; then
     echo "Error: --disable-firewall and --enable-firewall are mutually exclusive." >&2
@@ -442,15 +472,20 @@ if [[ "$DISABLE_FW" == true || "$ENABLE_FW" == true ]]; then
     echo "Error: --disable-firewall/--enable-firewall and --maintenance are mutually exclusive (no firewall in maintenance mode)." >&2
     exit 1
   fi
-  if ! $RUNTIME ps -q -f name="^${NORMAL_NAME}$" | grep -q .; then
-    echo "Error: container ${NORMAL_NAME} is not running. Start it with 'dev' first." >&2
+  resolve_managed_container
+  if [[ -z "$MANAGED_TARGET" ]]; then
+    echo "Error: no dev container is running for this workspace (looked for ${NORMAL_NAME}, ${DIND_NAME}). Start one with 'dev' or 'dev --dind' first." >&2
+    exit 1
+  fi
+  if [[ "$MANAGED_TARGET" == "maint" ]]; then
+    echo "Error: maintenance container ${MAINT_NAME} has no firewall — --disable-firewall/--enable-firewall are meaningless in maintenance mode." >&2
     exit 1
   fi
   if [[ "$DISABLE_FW" == true ]]; then
     # Open the kernel egress AND switch tinyproxy to allow-all (permissive
     # filter + SIGHUP) so HTTP_PROXY-honoring clients in existing shells
     # also get through, not just direct/--noproxy traffic.
-    exec $RUNTIME exec --user root "$NORMAL_NAME" sh -c "
+    exec $RUNTIME exec --user root "$MANAGED_NAME" sh -c "
       set -e
       iptables -F OUTPUT
       iptables -P OUTPUT ACCEPT
@@ -463,7 +498,7 @@ if [[ "$DISABLE_FW" == true || "$ENABLE_FW" == true ]]; then
       echo 'firewall disabled'
     "
   else
-    exec $RUNTIME exec --user root "$NORMAL_NAME" /usr/local/sbin/firewall-init.sh
+    exec $RUNTIME exec --user root "$MANAGED_NAME" /usr/local/sbin/firewall-init.sh
   fi
 fi
 

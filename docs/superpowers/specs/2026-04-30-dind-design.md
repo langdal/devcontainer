@@ -133,7 +133,7 @@ Architecture handling: `$(uname -m)` selects the correct static bundle, so the s
 
 The existing two-way conflict guard (normal ↔ maintenance) extends to a three-way pairwise guard. `dev` refuses to start any mode while another mode's container is running for the same workspace.
 
-`--monitor`, `--monitor-fw`, `--disable-firewall`, and `--enable-firewall` continue to act on the normal container only. `--dind` has its own firewall posture but no separate monitor flags in v1.
+`--monitor`, `--monitor-fw`, `--disable-firewall`, and `--enable-firewall` auto-detect which workspace container is running (normal or dind) and target that one. Both run `firewall-init.sh` and share the same tinyproxy + NFLOG stack, so the same management commands apply. The maintenance container is detected separately and rejected with a clear error (no firewall in maintenance mode).
 
 ### Host runtime detection
 

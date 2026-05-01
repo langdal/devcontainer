@@ -151,16 +151,22 @@ dev --disable-firewall   # open OUTPUT + switch tinyproxy filter to allow-all
 dev --enable-firewall    # rebuild the allowlist filter + restore default-deny
 ```
 
-These act on the running normal container (`dev-<dir>`) via `docker exec
---user root`, which is allowed because the container has `CAP_NET_ADMIN`.
-Disable opens both layers: it flushes iptables OUTPUT and rewrites
-`/etc/tinyproxy/filter` to a permissive regex, then SIGHUPs tinyproxy so
-existing `HTTPS_PROXY`-honoring shells get through too. Enable re-runs
-`firewall-init.sh`, which rebuilds the filter from the allowlist and
-SIGHUPs tinyproxy to reload it.
+These act on whichever workspace container is running — normal (`dev-<dir>`)
+or dind (`dev-<dir>-dind`) — via `docker exec --user root`, which is
+allowed because both containers have `CAP_NET_ADMIN`. Maintenance has no
+firewall, so the commands refuse with a clear error if only the
+maintenance container is running. Disable opens both layers: it flushes
+iptables OUTPUT and rewrites `/etc/tinyproxy/filter` to a permissive regex,
+then SIGHUPs tinyproxy so existing `HTTPS_PROXY`-honoring shells get
+through too. Enable re-runs `firewall-init.sh`, which rebuilds the filter
+from the allowlist and SIGHUPs tinyproxy to reload it.
 
-Caveat: the container name does not change, so there is no visible signal
-that the firewall is off. For longer-lived work prefer `--maintenance`.
+`--monitor` (tail `/var/log/tinyproxy.log`) and `--monitor-fw` (tcpdump on
+NFLOG group 1) likewise auto-detect normal vs. dind.
+
+Caveat: the container name does not change when the firewall is toggled,
+so there is no visible signal that the firewall is off. For longer-lived
+work prefer `--maintenance`.
 
 ### Verifying the firewall
 
