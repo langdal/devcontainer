@@ -88,9 +88,24 @@ runtime_build() {
   if [[ "$RUNTIME" == "docker" ]]; then
     docker buildx build --network=host "${extra[@]}" -t "$tag" "$context"
   else
-    podman build --network=host "${extra[@]}" -t "$tag" "$context"
+    podman $RUNTIME_ARGS build --network=host "${extra[@]}" -t "$tag" "$context"
   fi
 }
+
+# Container-runtime extra args. On macOS+podman, the rootless connection
+# cannot pass /dev/net/tun into a container (rootless podman silently drops
+# the device even with --device=/dev/net/tun), which makes the nested
+# rootless dockerd's slirp4netns fail. Route --dind through the rootful
+# podman connection instead. dind containers, images, and volumes live in
+# the rootful storage; everything else stays rootless.
+#
+#   DIND_RUNTIME_ARGS — connection args to reach the dind storage from
+#                       any mode (used by cross-context conflict guards).
+#   RUNTIME_ARGS      — connection args for this invocation's primary
+#                       target. Empty for normal/maint, set to
+#                       DIND_RUNTIME_ARGS for --dind.
+DIND_RUNTIME_ARGS=""
+RUNTIME_ARGS=""
 
 IMAGE_NAME="generic-devcontainer"
 
@@ -353,6 +368,14 @@ fi
 detect_runtime
 ensure_runtime_ready
 
+# Resolve the dind storage location once detect_runtime has settled on a
+# binary. macOS+podman is the only host where dind has to leave the default
+# (rootless) connection; everywhere else the dind container lives in the
+# same context as normal/maint.
+if [[ "$(uname -s)" == "Darwin" && "$RUNTIME" == "podman" ]]; then
+  DIND_RUNTIME_ARGS="--connection=podman-machine-default-root"
+fi
+
 # Host identity. Used to (a) bake correct UID/GID into the image at
 # build time, and (b) detect when an existing image was built for a
 # different user.
@@ -363,10 +386,12 @@ if [[ "$HOST_UID" == "0" ]]; then
   exit 1
 fi
 
-# In --dind mode, use the :dind image variant.
+# In --dind mode, use the :dind image variant. RUNTIME_ARGS routes all
+# subsequent runtime commands at the dind storage (see DIND_RUNTIME_ARGS).
 if [[ "$DIND" == true ]]; then
   IMAGE_TAG="${IMAGE_NAME}:dind"
   BUILD_TARGET="dind"
+  RUNTIME_ARGS="$DIND_RUNTIME_ARGS"
 else
   IMAGE_TAG="$IMAGE_NAME"
   BUILD_TARGET="base"
@@ -444,12 +469,14 @@ fi
 
 # Three-way conflict guard: normal / maintenance / dind. Each pair refuses
 # while the other is running for the same workspace; both would mount
-# /workspace and produce surprising state.
+# /workspace and produce surprising state. Takes an optional 3rd arg with
+# extra runtime args so a non-dind invocation can still reach into the
+# dind storage when checking for a running dind container.
 refuse_if_running() {
-  local other_name="$1" other_label="$2"
-  if $RUNTIME ps -q -f name="^${other_name}$" | grep -q .; then
+  local other_name="$1" other_label="$2" extra="${3:-}"
+  if $RUNTIME $extra ps -q -f name="^${other_name}$" | grep -q .; then
     echo "Error: ${other_label} container ${other_name} is running for this workspace." >&2
-    echo "       Stop it first:  $RUNTIME stop ${other_name}" >&2
+    echo "       Stop it first:  $RUNTIME $extra stop ${other_name}" >&2
     exit 1
   fi
 }
@@ -461,9 +488,9 @@ refuse_if_running() {
 # volumes from the freshly-built image.
 cleanup_for_rebuild() {
   local container="$1" with_dind="$2"
-  if $RUNTIME ps -aq -f name="^${container}$" | grep -q .; then
+  if $RUNTIME $RUNTIME_ARGS ps -aq -f name="^${container}$" | grep -q .; then
     echo "Removing container ${container}…" >&2
-    if ! $RUNTIME rm -f "$container" >/dev/null 2>&1; then
+    if ! $RUNTIME $RUNTIME_ARGS rm -f "$container" >/dev/null 2>&1; then
       echo "Error: failed to remove container ${container}." >&2
       exit 1
     fi
@@ -473,9 +500,9 @@ cleanup_for_rebuild() {
     vols+=(devcontainer-dind)
   fi
   for v in "${vols[@]}"; do
-    if $RUNTIME volume inspect "$v" >/dev/null 2>&1; then
+    if $RUNTIME $RUNTIME_ARGS volume inspect "$v" >/dev/null 2>&1; then
       echo "Removing volume ${v}…" >&2
-      if ! $RUNTIME volume rm "$v" >/dev/null 2>&1; then
+      if ! $RUNTIME $RUNTIME_ARGS volume rm "$v" >/dev/null 2>&1; then
         echo "Error: failed to remove volume ${v}." >&2
         exit 1
       fi
@@ -490,13 +517,13 @@ cleanup_for_rebuild() {
 # fatal — the build branch will still rebuild with the right args.
 check_image_uid_match() {
   local tag="$1"
-  if ! $RUNTIME image inspect "$tag" >/dev/null 2>&1; then
+  if ! $RUNTIME $RUNTIME_ARGS image inspect "$tag" >/dev/null 2>&1; then
     return 0
   fi
   local img_uid img_gid
-  img_uid=$($RUNTIME image inspect "$tag" \
+  img_uid=$($RUNTIME $RUNTIME_ARGS image inspect "$tag" \
       --format '{{ index .Config.Labels "dev.uid" }}' 2>/dev/null)
-  img_gid=$($RUNTIME image inspect "$tag" \
+  img_gid=$($RUNTIME $RUNTIME_ARGS image inspect "$tag" \
       --format '{{ index .Config.Labels "dev.gid" }}' 2>/dev/null)
   if [[ -n "$img_uid" && -n "$img_gid" \
         && "$img_uid" == "$HOST_UID" && "$img_gid" == "$HOST_GID" ]]; then
@@ -548,11 +575,11 @@ if [[ "$DIND" == true ]]; then
   CONTAINER_NAME="$DIND_NAME"
 elif [[ "$MAINTENANCE" == true ]]; then
   refuse_if_running "$NORMAL_NAME" "normal"
-  refuse_if_running "$DIND_NAME" "dind"
+  refuse_if_running "$DIND_NAME" "dind" "$DIND_RUNTIME_ARGS"
   CONTAINER_NAME="$MAINT_NAME"
 else
   refuse_if_running "$MAINT_NAME" "maintenance"
-  refuse_if_running "$DIND_NAME" "dind"
+  refuse_if_running "$DIND_NAME" "dind" "$DIND_RUNTIME_ARGS"
   CONTAINER_NAME="$NORMAL_NAME"
 fi
 
@@ -564,9 +591,9 @@ fi
 check_image_uid_match "$IMAGE_TAG"
 
 # Build image if needed
-if [[ "$FORCE_BUILD" == true ]] || ! $RUNTIME images -q "$IMAGE_TAG" | grep -q .; then
+if [[ "$FORCE_BUILD" == true ]] || ! $RUNTIME $RUNTIME_ARGS images -q "$IMAGE_TAG" | grep -q .; then
   if [[ "$DRY_RUN" == true ]]; then
-    echo "Would build image: $RUNTIME build --network=host --target $BUILD_TARGET -t $IMAGE_TAG $SCRIPT_DIR"
+    echo "Would build image: $RUNTIME $RUNTIME_ARGS build --network=host --target $BUILD_TARGET -t $IMAGE_TAG $SCRIPT_DIR"
   else
     echo "Building image $IMAGE_TAG (target: $BUILD_TARGET)..."
     runtime_build "$IMAGE_TAG" "$BUILD_TARGET" "$SCRIPT_DIR"
@@ -583,22 +610,22 @@ if [[ "$DRY_RUN" == false ]]; then
   if [[ -t 0 && -t 1 ]]; then
     EXEC_TTY=(-it)
   fi
-  if $RUNTIME ps -q -f name="^${CONTAINER_NAME}$" | grep -q .; then
+  if $RUNTIME $RUNTIME_ARGS ps -q -f name="^${CONTAINER_NAME}$" | grep -q .; then
     # Container exists and is running
     echo "Attaching to running container $CONTAINER_NAME..."
     if [[ ${#CMD_ARGS[@]} -gt 0 ]]; then
-      exec $RUNTIME exec "${EXEC_TTY[@]}" "$CONTAINER_NAME" "${CMD_ARGS[@]}"
+      exec $RUNTIME $RUNTIME_ARGS exec "${EXEC_TTY[@]}" "$CONTAINER_NAME" "${CMD_ARGS[@]}"
     else
-      exec $RUNTIME exec -it "$CONTAINER_NAME" zsh
+      exec $RUNTIME $RUNTIME_ARGS exec -it "$CONTAINER_NAME" zsh
     fi
-  elif $RUNTIME ps -aq -f name="^${CONTAINER_NAME}$" | grep -q .; then
+  elif $RUNTIME $RUNTIME_ARGS ps -aq -f name="^${CONTAINER_NAME}$" | grep -q .; then
     # Container exists but is stopped
     echo "Starting stopped container $CONTAINER_NAME..."
-    $RUNTIME start "$CONTAINER_NAME"
+    $RUNTIME $RUNTIME_ARGS start "$CONTAINER_NAME"
     if [[ ${#CMD_ARGS[@]} -gt 0 ]]; then
-      exec $RUNTIME exec "${EXEC_TTY[@]}" "$CONTAINER_NAME" "${CMD_ARGS[@]}"
+      exec $RUNTIME $RUNTIME_ARGS exec "${EXEC_TTY[@]}" "$CONTAINER_NAME" "${CMD_ARGS[@]}"
     else
-      exec $RUNTIME exec -it "$CONTAINER_NAME" zsh
+      exec $RUNTIME $RUNTIME_ARGS exec -it "$CONTAINER_NAME" zsh
     fi
   fi
 fi
@@ -611,7 +638,7 @@ TTY_FLAGS=(-i)
 if [[ -t 0 && -t 1 ]]; then
   TTY_FLAGS=(-it)
 fi
-DOCKER_CMD=($RUNTIME run "${TTY_FLAGS[@]}" --rm --name "$CONTAINER_NAME")
+DOCKER_CMD=($RUNTIME $RUNTIME_ARGS run "${TTY_FLAGS[@]}" --rm --name "$CONTAINER_NAME")
 
 # Capability needed by entrypoint to configure iptables (used in normal mode;
 # harmless when unused in maintenance mode).
@@ -643,13 +670,21 @@ if [[ "$DIND" == true ]]; then
   # to (re-)mount procfs in the spawned container; the default mask makes
   # that fail with "mount proc:/proc ... operation not permitted".
   DOCKER_CMD+=(--security-opt systempaths=unconfined)
+  # label=disable turns off SELinux confinement for the container. On
+  # SELinux hosts (Fedora — including the rootful podman-machine VM on
+  # macOS), the default container_t label blocks the nested runc from
+  # mounting a fresh procfs in the spawned container, surfacing as
+  # `mount proc:/proc ... permission denied`. systempaths=unconfined
+  # alone is not enough; SELinux denies the mount even after the proc
+  # masks are removed. Silently ignored on hosts without SELinux.
+  DOCKER_CMD+=(--security-opt label=disable)
   DOCKER_CMD+=(-v devcontainer-dind:/home/vscode/.local/share/docker)
 fi
 
 # Skip default ports if another dev-* container is already running (they'd collide).
 # Explicit --port requests are left alone so conflicts there still surface.
 if [[ "$DEFAULT_PORTS" == true ]]; then
-  OTHER_DEV=$($RUNTIME ps --format '{{.Names}}' | grep '^dev-' | grep -vx "$CONTAINER_NAME" || true)
+  OTHER_DEV=$($RUNTIME $RUNTIME_ARGS ps --format '{{.Names}}' | grep '^dev-' | grep -vx "$CONTAINER_NAME" || true)
   if [[ -n "$OTHER_DEV" ]]; then
     echo "Note: another dev container is running ($(echo "$OTHER_DEV" | paste -sd, -)); skipping default port forwards." >&2
     DEFAULT_PORTS=false
