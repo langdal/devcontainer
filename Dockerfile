@@ -8,8 +8,15 @@ ARG USER_UID=1000
 ARG USER_GID=1000
 
 # Apply UID/GID override if needed (vscode already exists at 1000:1000
-# in the base image).
+# in the base image). On macOS the host's primary GID is 20, which
+# collides with Ubuntu's `dialout` group; renumber any conflicting
+# group out of the way before remapping vscode.
 RUN if [ "${USER_UID}" != "1000" ] || [ "${USER_GID}" != "1000" ]; then \
+        if getent group "${USER_GID}" >/dev/null 2>&1 \
+           && [ "$(getent group "${USER_GID}" | cut -d: -f1)" != "vscode" ]; then \
+            existing_group="$(getent group "${USER_GID}" | cut -d: -f1)"; \
+            groupmod --gid 65334 "$existing_group"; \
+        fi && \
         groupmod --gid ${USER_GID} vscode && \
         usermod --uid ${USER_UID} --gid ${USER_GID} vscode && \
         chown -R ${USER_UID}:${USER_GID} /home/vscode; \
