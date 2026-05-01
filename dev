@@ -147,6 +147,11 @@ OPTIONS:
 COMMANDS:
   install         Symlink this script into a writable directory on PATH
 
+ENVIRONMENT:
+  DEV_ASSUME_YES=1   Answer yes to the rebuild prompt that triggers when
+                     the image's dev.uid / dev.gid labels do not match
+                     the invoking user's id -u / id -g. Used by tests.
+
 EXAMPLES:
   dev                           # Start or attach to container with default shell
   dev --build                   # Rebuild image and start container
@@ -416,6 +421,35 @@ refuse_if_running() {
   fi
 }
 
+# Remove the workspace's container (running or stopped) and the named
+# volumes for the current invocation's image variant. Used after the
+# user accepts the rebuild prompt; the rebuild path that follows
+# replaces the image and the next container start re-populates the
+# volumes from the freshly-built image.
+cleanup_for_rebuild() {
+  local container="$1" with_dind="$2"
+  if $RUNTIME ps -aq -f name="^${container}$" | grep -q .; then
+    echo "Removing container ${container}…" >&2
+    if ! $RUNTIME rm -f "$container" >/dev/null 2>&1; then
+      echo "Error: failed to remove container ${container}." >&2
+      exit 1
+    fi
+  fi
+  local vols=(devcontainer-mise devcontainer-home)
+  if [[ "$with_dind" == true ]]; then
+    vols+=(devcontainer-dind)
+  fi
+  for v in "${vols[@]}"; do
+    if $RUNTIME volume inspect "$v" >/dev/null 2>&1; then
+      echo "Removing volume ${v}…" >&2
+      if ! $RUNTIME volume rm "$v" >/dev/null 2>&1; then
+        echo "Error: failed to remove volume ${v}." >&2
+        exit 1
+      fi
+    fi
+  done
+}
+
 # Compare host UID/GID to the labels on $IMAGE_TAG. On a clean match (or
 # image absent), return 0. On mismatch, either prompt-and-rebuild
 # (interactive) or print a diagnostic and exit 1 (non-interactive). The
@@ -423,7 +457,6 @@ refuse_if_running() {
 # fatal — the build branch will still rebuild with the right args.
 check_image_uid_match() {
   local tag="$1"
-  # No image yet → nothing to check; the existing build branch will build it.
   if ! $RUNTIME image inspect "$tag" >/dev/null 2>&1; then
     return 0
   fi
@@ -436,14 +469,20 @@ check_image_uid_match() {
         && "$img_uid" == "$HOST_UID" && "$img_gid" == "$HOST_GID" ]]; then
     return 0
   fi
-  # Mismatch (including the empty-label case from older images).
   local img_id="${img_uid:-?}:${img_gid:-?}"
   if [[ "$FORCE_BUILD" == true ]]; then
     echo "Note: image $tag built for UID:GID $img_id; rebuilding for $HOST_UID:$HOST_GID." >&2
+    cleanup_for_rebuild "$CONTAINER_NAME" "$DIND"
     return 0
   fi
   if [[ "$DRY_RUN" == true ]]; then
     echo "Would rebuild $tag for UID:GID $HOST_UID:$HOST_GID (current labels: $img_id)" >&2
+    return 0
+  fi
+  if [[ "${DEV_ASSUME_YES:-0}" == "1" ]]; then
+    echo "Note: image $tag built for UID:GID $img_id; DEV_ASSUME_YES set, rebuilding for $HOST_UID:$HOST_GID." >&2
+    cleanup_for_rebuild "$CONTAINER_NAME" "$DIND"
+    FORCE_BUILD=true
     return 0
   fi
   if [[ ! -t 0 ]]; then
@@ -451,10 +490,23 @@ check_image_uid_match() {
     echo "       Run 'dev --build' to rebuild for UID:GID $HOST_UID:$HOST_GID." >&2
     exit 1
   fi
-  # Interactive prompt path — implemented in Task 3.
-  echo "Error: image $tag was built for UID:GID $img_id, but you are $HOST_UID:$HOST_GID." >&2
-  echo "       Run 'dev --build' to rebuild for UID:GID $HOST_UID:$HOST_GID." >&2
-  exit 1
+  echo "Image $tag was built for UID:GID $img_id, but you are $HOST_UID:$HOST_GID." >&2
+  local vol_list="devcontainer-mise, devcontainer-home"
+  if [[ "$DIND" == true ]]; then
+    vol_list="${vol_list}, devcontainer-dind"
+  fi
+  local reply
+  read -r -p "Rebuild image and remove volumes (${vol_list})? [y/N] " reply
+  case "$reply" in
+    y|Y|yes|YES)
+      cleanup_for_rebuild "$CONTAINER_NAME" "$DIND"
+      FORCE_BUILD=true
+      ;;
+    *)
+      echo "Aborted." >&2
+      exit 1
+      ;;
+  esac
 }
 
 if [[ "$DIND" == true ]]; then
