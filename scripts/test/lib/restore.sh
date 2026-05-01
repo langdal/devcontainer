@@ -70,11 +70,23 @@ restore_host() {
         sudo sysctl -w "$k=$v" >/dev/null 2>&1
     done
 
+    # Only remove packages that THIS scenario installed. The
+    # PKG_INSTALLED_BY_TEST_<name> marker is set by apt_install_remember
+    # iff dpkg reported the package missing before the install. Without
+    # this guard, scenarios that idempotently called apt_install_remember
+    # (no-op when already installed) would still uninstall the package
+    # on cleanup, taking docker.io / podman off the host between scenarios
+    # and breaking everything that follows.
+    local removed_any=0
     for p in "${_RESTORE_PKGS[@]:-}"; do
         [ -z "$p" ] && continue
-        sudo apt-get remove -y "$p" >/dev/null 2>&1 || true
+        local var="PKG_INSTALLED_BY_TEST_${p//-/_}"
+        if [ "${!var:-0}" = "1" ]; then
+            sudo apt-get remove -y "$p" >/dev/null 2>&1 || true
+            removed_any=1
+        fi
     done
-    [ ${#_RESTORE_PKGS[@]} -gt 0 ] && sudo apt-get autoremove -y >/dev/null 2>&1 || true
+    [ "$removed_any" = "1" ] && sudo apt-get autoremove -y >/dev/null 2>&1 || true
 
     return $rc
 }
