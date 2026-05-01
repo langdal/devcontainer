@@ -17,6 +17,21 @@
 # log_pass/log_fail/log_skip.
 set -u
 
+# Remove any root-owned log files left over from a previous run that
+# was invoked directly as root; otherwise the post-drop user can't
+# overwrite them. Cheap and safe regardless.
+if [ "$(id -u)" -eq 0 ]; then
+    rm -f "$(dirname "$0")/last-run.log" "$(dirname "$0")/last-summary.log"
+fi
+
+# Drop privileges first if invoked via sudo. The orchestrator does no
+# work that requires root (it explicitly invokes sudo for apt installs);
+# running ./dev as root would now hit dev's UID 0 refusal, and any
+# artifacts left behind would be root-owned. Must run before anything
+# that touches the workspace path.
+. "$(dirname "$0")/lib/privilege.sh"
+drop_privs_if_root "$@"
+
 WORKSPACE="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$WORKSPACE"
 

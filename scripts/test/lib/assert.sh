@@ -9,6 +9,12 @@
 #   - Each scenario should exit 0 on PASS or SKIP, non-zero on FAIL.
 #   - The orchestrator captures stdout per-scenario and parses these lines.
 
+# Drop privileges if a scenario was invoked as root via `sudo bash …`.
+# Idempotent — when the orchestrator already dropped privileges, this
+# is a no-op. Must run before any state-touching code in the scenario.
+. "$(dirname "${BASH_SOURCE[0]}")/privilege.sh"
+drop_privs_if_root "$@"
+
 SCENARIO_RESULT=""
 
 _scenario_name() {

@@ -36,8 +36,10 @@ if [ "$img_uid" != "$HOST_UID" ] || [ "$img_gid" != "$HOST_GID" ]; then
     exit 1
 fi
 
-in_uid=$(./dev -- id -u vscode 2>/dev/null | tr -d '\r')
-in_gid=$(./dev -- id -g vscode 2>/dev/null | tr -d '\r')
+# entrypoint.sh prints firewall-init's progress to stdout before exec'ing
+# the command; pluck out just the numeric `id` line.
+in_uid=$(./dev -- id -u vscode 2>/dev/null | tr -d '\r' | grep -E '^[0-9]+$' | tail -1)
+in_gid=$(./dev -- id -g vscode 2>/dev/null | tr -d '\r' | grep -E '^[0-9]+$' | tail -1)
 if [ "$in_uid" != "$HOST_UID" ] || [ "$in_gid" != "$HOST_GID" ]; then
     log_fail "in-container vscode is ${in_uid}:${in_gid}, want ${HOST_UID}:${HOST_GID}"
     exit 1
