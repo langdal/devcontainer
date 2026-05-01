@@ -84,6 +84,7 @@ runtime_build() {
   if [[ -n "$target" ]]; then
     extra+=(--target "$target")
   fi
+  extra+=(--build-arg "USER_UID=$HOST_UID" --build-arg "USER_GID=$HOST_GID")
   if [[ "$RUNTIME" == "docker" ]]; then
     docker buildx build --network=host "${extra[@]}" -t "$tag" "$context"
   else
@@ -313,6 +314,16 @@ fi
 
 detect_runtime
 ensure_runtime_ready
+
+# Host identity. Used to (a) bake correct UID/GID into the image at
+# build time, and (b) detect when an existing image was built for a
+# different user.
+HOST_UID=$(id -u)
+HOST_GID=$(id -g)
+if [[ "$HOST_UID" == "0" ]]; then
+  echo "Error: refusing to run dev as root (UID 0). The image creates a non-root 'vscode' user; using UID 0 would conflict with the image's existing root user." >&2
+  exit 1
+fi
 
 # In --dind mode, use the :dind image variant.
 if [[ "$DIND" == true ]]; then

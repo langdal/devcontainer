@@ -1,14 +1,21 @@
 FROM mcr.microsoft.com/devcontainers/base:ubuntu AS base
 
-# Allow UID override for macOS compatibility
+# Allow UID/GID override so the image can be built for the invoking
+# host user. The dev script reads `id -u` / `id -g` and passes both
+# as build-args; the labels are what the dev script later inspects to
+# detect a mismatch on subsequent runs.
 ARG USER_UID=1000
+ARG USER_GID=1000
 
-# Apply UID override if needed (vscode user already exists at UID 1000 in base image)
-RUN if [ "${USER_UID}" != "1000" ]; then \
-        groupmod --gid ${USER_UID} vscode && \
-        usermod --uid ${USER_UID} --gid ${USER_UID} vscode && \
-        chown -R ${USER_UID}:${USER_UID} /home/vscode; \
+# Apply UID/GID override if needed (vscode already exists at 1000:1000
+# in the base image).
+RUN if [ "${USER_UID}" != "1000" ] || [ "${USER_GID}" != "1000" ]; then \
+        groupmod --gid ${USER_GID} vscode && \
+        usermod --uid ${USER_UID} --gid ${USER_GID} vscode && \
+        chown -R ${USER_UID}:${USER_GID} /home/vscode; \
     fi
+
+LABEL dev.uid="${USER_UID}" dev.gid="${USER_GID}"
 
 # Install firewall stack and supporting tools.
 # - iptables/ipset: kernel-level packet filtering
