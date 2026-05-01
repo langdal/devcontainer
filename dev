@@ -416,6 +416,47 @@ refuse_if_running() {
   fi
 }
 
+# Compare host UID/GID to the labels on $IMAGE_TAG. On a clean match (or
+# image absent), return 0. On mismatch, either prompt-and-rebuild
+# (interactive) or print a diagnostic and exit 1 (non-interactive). The
+# explicit `--build` flag and `--dry-run` make this advisory rather than
+# fatal — the build branch will still rebuild with the right args.
+check_image_uid_match() {
+  local tag="$1"
+  # No image yet → nothing to check; the existing build branch will build it.
+  if ! $RUNTIME image inspect "$tag" >/dev/null 2>&1; then
+    return 0
+  fi
+  local img_uid img_gid
+  img_uid=$($RUNTIME image inspect "$tag" \
+      --format '{{ index .Config.Labels "dev.uid" }}' 2>/dev/null)
+  img_gid=$($RUNTIME image inspect "$tag" \
+      --format '{{ index .Config.Labels "dev.gid" }}' 2>/dev/null)
+  if [[ -n "$img_uid" && -n "$img_gid" \
+        && "$img_uid" == "$HOST_UID" && "$img_gid" == "$HOST_GID" ]]; then
+    return 0
+  fi
+  # Mismatch (including the empty-label case from older images).
+  local img_id="${img_uid:-?}:${img_gid:-?}"
+  if [[ "$FORCE_BUILD" == true ]]; then
+    echo "Note: image $tag built for UID:GID $img_id; rebuilding for $HOST_UID:$HOST_GID." >&2
+    return 0
+  fi
+  if [[ "$DRY_RUN" == true ]]; then
+    echo "Would rebuild $tag for UID:GID $HOST_UID:$HOST_GID (current labels: $img_id)" >&2
+    return 0
+  fi
+  if [[ ! -t 0 ]]; then
+    echo "Error: image $tag was built for UID:GID $img_id, but you are $HOST_UID:$HOST_GID." >&2
+    echo "       Run 'dev --build' to rebuild for UID:GID $HOST_UID:$HOST_GID." >&2
+    exit 1
+  fi
+  # Interactive prompt path — implemented in Task 3.
+  echo "Error: image $tag was built for UID:GID $img_id, but you are $HOST_UID:$HOST_GID." >&2
+  echo "       Run 'dev --build' to rebuild for UID:GID $HOST_UID:$HOST_GID." >&2
+  exit 1
+}
+
 if [[ "$DIND" == true ]]; then
   refuse_if_running "$NORMAL_NAME" "normal"
   refuse_if_running "$MAINT_NAME" "maintenance"
@@ -429,6 +470,13 @@ else
   refuse_if_running "$DIND_NAME" "dind"
   CONTAINER_NAME="$NORMAL_NAME"
 fi
+
+# Refuse to attach to an image built for a different host user. This
+# must run AFTER the early --monitor / --*-firewall exits (those act on
+# a running container and shouldn't be blocked by label mismatch) and
+# BEFORE the existing build branch (so a mismatch can short-circuit
+# into a forced rebuild via the path added in Task 3).
+check_image_uid_match "$IMAGE_TAG"
 
 # Build image if needed
 if [[ "$FORCE_BUILD" == true ]] || ! $RUNTIME images -q "$IMAGE_TAG" | grep -q .; then
