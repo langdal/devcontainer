@@ -7,11 +7,18 @@ LIB="$(dirname "$0")/../lib"
 require_platform linux
 trap restore_host EXIT
 
+# podman-docker provides /usr/bin/docker as a shim that calls podman. It
+# Conflicts: with the docker.io package, so installing it on a host that
+# already has docker.io would auto-remove docker.io and not reinstall it
+# during cleanup — taking a real runtime off the host. Skip in that case.
+if dpkg -s docker.io >/dev/null 2>&1; then
+    log_skip "docker.io already installed; podman-docker would conflict and remove it"
+    exit 0
+fi
+
 # Ensure podman is present; install podman-docker (the shim) if missing.
 apt_install_remember podman || { log_skip "could not install podman"; exit 0; }
 apt_install_remember podman-docker || { log_skip "could not install podman-docker"; exit 0; }
-remember_pkg_install podman
-remember_pkg_install podman-docker
 
 # Confirm both 'docker' (shim) and 'podman' resolve.
 if ! command -v docker >/dev/null 2>&1; then
