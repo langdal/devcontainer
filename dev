@@ -645,22 +645,27 @@ if [[ "$DRY_RUN" == false ]]; then
   if [[ -t 0 && -t 1 ]]; then
     EXEC_TTY=(-it)
   fi
+  # The image's USER is root because entrypoint.sh needs root to run
+  # firewall-init.sh / dind-init.sh and only afterwards drops to vscode via
+  # `gosu vscode`. `docker exec` bypasses the entrypoint and uses the image's
+  # configured User, so without --user the second terminal would land as
+  # root. Pin to vscode to match the first terminal.
   if $RUNTIME $RUNTIME_ARGS ps -q -f name="^${CONTAINER_NAME}$" | grep -q .; then
     # Container exists and is running
     echo "Attaching to running container $CONTAINER_NAME..."
     if [[ ${#CMD_ARGS[@]} -gt 0 ]]; then
-      exec $RUNTIME $RUNTIME_ARGS exec "${EXEC_TTY[@]}" "$CONTAINER_NAME" "${CMD_ARGS[@]}"
+      exec $RUNTIME $RUNTIME_ARGS exec --user vscode "${EXEC_TTY[@]}" "$CONTAINER_NAME" "${CMD_ARGS[@]}"
     else
-      exec $RUNTIME $RUNTIME_ARGS exec -it "$CONTAINER_NAME" zsh
+      exec $RUNTIME $RUNTIME_ARGS exec --user vscode -it "$CONTAINER_NAME" zsh
     fi
   elif $RUNTIME $RUNTIME_ARGS ps -aq -f name="^${CONTAINER_NAME}$" | grep -q .; then
     # Container exists but is stopped
     echo "Starting stopped container $CONTAINER_NAME..."
     $RUNTIME $RUNTIME_ARGS start "$CONTAINER_NAME"
     if [[ ${#CMD_ARGS[@]} -gt 0 ]]; then
-      exec $RUNTIME $RUNTIME_ARGS exec "${EXEC_TTY[@]}" "$CONTAINER_NAME" "${CMD_ARGS[@]}"
+      exec $RUNTIME $RUNTIME_ARGS exec --user vscode "${EXEC_TTY[@]}" "$CONTAINER_NAME" "${CMD_ARGS[@]}"
     else
-      exec $RUNTIME $RUNTIME_ARGS exec -it "$CONTAINER_NAME" zsh
+      exec $RUNTIME $RUNTIME_ARGS exec --user vscode -it "$CONTAINER_NAME" zsh
     fi
   fi
 fi
