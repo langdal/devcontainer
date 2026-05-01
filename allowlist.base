@@ -20,6 +20,7 @@ static.crates.io
 mise.jdx.dev
 nodejs.org
 *.nodejs.org
+mise-versions.jdx.dev
 
 # OS packages
 deb.debian.org
