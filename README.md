@@ -266,17 +266,10 @@ Use the `--port` flag to forward additional ports individually.
 
 ## macOS Users
 
-To ensure correct file permissions on macOS, you should build the image with
-your local user's UID. By default, the image uses UID 1000. If your macOS UID
-is 501 (the default), build with:
-
-```bash
-docker build -t generic-devcontainer --build-arg USER_UID=501 .
-```
-
-**Note**: If you change `USER_UID` after the `devcontainer-home` volume already
-exists, you must remove it to avoid file permission mismatches: `docker volume
-rm devcontainer-home`
+`./dev` reads `id -u` / `id -g` and bakes those into the image
+automatically. No manual `--build-arg` is needed. If your host UID/GID
+ever changes, the next `./dev` invocation detects the mismatch and
+prompts to rebuild + wipe the named volumes.
 
 ## Volume Caching
 
@@ -328,6 +321,8 @@ Reset (wipe all user settings and start fresh): `docker volume rm devcontainer-h
 - **Mise Install Failures**: If tools fail to install on startup, check your
 internet connection or `mise.toml` syntax. The container will still start, but
 tools may be missing.
-- **UID Mismatch**: If you experience permission issues with files in
-`/workspace`, ensure you built the image with the correct `USER_UID` matching
-your host user.
+- **UID Mismatch**: `./dev` detects when the image's `dev.uid` /
+  `dev.gid` labels disagree with your `id -u` / `id -g` and prompts
+  to rebuild + wipe the named volumes. If you decline the prompt the
+  script exits non-zero. Set `DEV_ASSUME_YES=1` to accept
+  non-interactively.
