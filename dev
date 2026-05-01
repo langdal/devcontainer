@@ -457,8 +457,19 @@ DOCKER_CMD+=(-v devcontainer-mise:/mise)
 DOCKER_CMD+=(-v devcontainer-home:/home/vscode)
 
 # DinD-specific runtime knobs.
+# SYS_ADMIN is required for rootless dockerd's newuidmap to set up
+# multi-range user-namespace mappings. The kernel checks CAP_SYS_ADMIN
+# in the writer's userns chain when writing /proc/<pid>/uid_map with
+# more than one range; default docker drops this cap from the container's
+# bounding set. This is far less than --privileged: vscode is not in
+# sudoers, so the container's root caps are only reachable via setuid
+# binaries (notably newuidmap), which is exactly the path the rootlesskit
+# stack uses anyway. Without SYS_ADMIN, dockerd-rootless fails at start
+# with "newuidmap: write to uid_map failed: Operation not permitted".
 if [[ "$DIND" == true ]]; then
   DOCKER_CMD+=(--device=/dev/fuse)
+  DOCKER_CMD+=(--device=/dev/net/tun)   # slirp4netns needs tun for nested-container networking
+  DOCKER_CMD+=(--cap-add=SYS_ADMIN)
   DOCKER_CMD+=(--security-opt apparmor=unconfined)
   DOCKER_CMD+=(--security-opt seccomp=unconfined)
   DOCKER_CMD+=(-v devcontainer-dind:/home/vscode/.local/share/docker)

@@ -150,4 +150,6 @@ RUN if ! grep -q '^vscode:' /etc/subuid; then \
 COPY allowlist.dind /etc/devcontainer/allowlist.dind
 COPY --chmod=755 dind-init.sh /usr/local/sbin/dind-init.sh
 
-USER vscode
+# NOTE: do NOT switch USER to vscode here. The entrypoint runs as root in
+# the base image (firewall-init.sh + dind-init.sh both need root) and drops
+# to vscode via gosu. Setting `USER vscode` would break firewall-init.

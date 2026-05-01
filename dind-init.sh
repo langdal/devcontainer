@@ -38,19 +38,34 @@ mkdir -p "$RUN_DIR"
 chown vscode:vscode "$RUN_DIR"
 chmod 0700 "$RUN_DIR"
 
+# RUN_DIR lives under /home/vscode, which is a named volume — so any state
+# the previous container left here (PID files, sockets, rootlesskit state
+# dir, embedded containerd state) will look "live" to the new dockerd and
+# make it refuse to start. The runtime dir is supposed to be ephemeral;
+# wipe everything under it on every container boot.
+find "$RUN_DIR" -mindepth 1 -delete 2>/dev/null || true
+
 touch "$LOG"
 chown vscode:vscode "$LOG"
 
 # 5. Start dockerd-rootless as vscode in the background.
 #    --iptables=false: the container's iptables OUTPUT chain is owned by
 #                       firewall-init.sh; don't fight it.
+#    DOCKERD_ROOTLESS_ROOTLESSKIT_DISABLE_HOST_LOOPBACK=false: dockerd-rootless
+#                       runs in its own slirp4netns, where 127.0.0.1 points
+#                       at the rootless ns's loopback, NOT the container's.
+#                       tinyproxy lives on the container's loopback. Letting
+#                       slirp4netns expose host-loopback makes 10.0.2.2 in
+#                       the rootless ns reach the container's 127.0.0.1, so
+#                       we set HTTPS_PROXY=http://10.0.2.2:8888 here.
 #    HTTPS_PROXY / HTTP_PROXY: registry pulls flow through tinyproxy, which
 #                       is the only outbound path for 80/443.
 gosu vscode env \
     XDG_RUNTIME_DIR="$RUN_DIR" \
     HOME=/home/vscode \
-    HTTPS_PROXY=http://127.0.0.1:8888 \
-    HTTP_PROXY=http://127.0.0.1:8888 \
+    DOCKERD_ROOTLESS_ROOTLESSKIT_DISABLE_HOST_LOOPBACK=false \
+    HTTPS_PROXY=http://10.0.2.2:8888 \
+    HTTP_PROXY=http://10.0.2.2:8888 \
     NO_PROXY=localhost,127.0.0.1 \
     PATH=/usr/local/bin:/usr/bin:/bin \
     nohup /usr/local/bin/dockerd-rootless.sh \
