@@ -6,6 +6,10 @@ registry-1.docker.io
 auth.docker.io
 production.cloudflare.docker.com
 *.cloudfront.net
+# Docker Hub now serves image blob downloads from Cloudflare R2 buckets
+# under randomly-named subdomains of cloudflarestorage.com, e.g.
+# docker-images-prod.<hash>.r2.cloudflarestorage.com.
+*.r2.cloudflarestorage.com
 
 # Microsoft Container Registry (devcontainers/base; multi-arch)
 mcr.microsoft.com

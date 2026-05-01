@@ -41,6 +41,12 @@ if [ -n "${DEVCONTAINER_DIND:-}" ]; then
         echo "FATAL: dind-init.sh failed; refusing to start container" >&2
         exit 1
     fi
+    # Export to entrypoint's env so non-login children (gosu vscode CMD)
+    # see DOCKER_HOST / XDG_RUNTIME_DIR. dind-init.sh also writes these to
+    # /etc/profile.d/dind.sh for interactive shells, but profile.d is only
+    # sourced by login shells.
+    export DOCKER_HOST=unix:///home/vscode/.dind-run/docker.sock
+    export XDG_RUNTIME_DIR=/home/vscode/.dind-run
 fi
 
 # entrypoint.sh runs as root. It runs user-context tasks via gosu vscode,

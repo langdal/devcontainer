@@ -472,6 +472,11 @@ if [[ "$DIND" == true ]]; then
   DOCKER_CMD+=(--cap-add=SYS_ADMIN)
   DOCKER_CMD+=(--security-opt apparmor=unconfined)
   DOCKER_CMD+=(--security-opt seccomp=unconfined)
+  # systempaths=unconfined undoes Docker's default masking of /proc paths
+  # (e.g. /proc/sys/kernel/*). The nested runc inside dockerd-rootless needs
+  # to (re-)mount procfs in the spawned container; the default mask makes
+  # that fail with "mount proc:/proc ... operation not permitted".
+  DOCKER_CMD+=(--security-opt systempaths=unconfined)
   DOCKER_CMD+=(-v devcontainer-dind:/home/vscode/.local/share/docker)
 fi
 
