@@ -12,25 +12,53 @@ A portable, editor-agnostic development container using a plain Dockerfile and a
 # Build the image
 docker build -t generic-devcontainer .
 
-# macOS users (UID 501)
-docker build -t generic-devcontainer --build-arg USER_UID=501 .
-
-# Start/attach to container (from any project directory)
+# Start/attach to container (from any project directory).
+# ./dev reads `id -u`/`id -g` and bakes them into the image automatically;
+# no manual --build-arg is needed on macOS or Linux.
 ./dev
 
 # Run a command inside the container
 ./dev -- npm run dev
 
-# Force rebuild
+# Force rebuild (also triggered automatically on UID/GID mismatch)
 ./dev --build
+
+# Maintenance shell (firewall off, sudo enabled) — for installing system
+# packages or fetching from non-allowlisted hosts. Container is named
+# dev-<dir>-maint and is mutually exclusive with the normal/dind containers.
+./dev --maintenance
+
+# Rootless Docker-in-Docker (separate :dind image, dev-<dir>-dind container).
+./dev --dind
+
+# Toggle the firewall on a running container without restarting:
+./dev --disable-firewall
+./dev --enable-firewall
+
+# Observe firewall behaviour on a running container:
+./dev --monitor       # tail tinyproxy.log
+./dev --monitor-fw    # tcpdump on NFLOG group 1 (iptables drops)
 ```
+
+Useful environment variables for `./dev`:
+
+- `DEV_RUNTIME=docker|podman` — force a runtime when both are installed (default: docker preferred on Linux; podman only on macOS).
+- `DEV_ASSUME_YES=1` — accept the rebuild-and-wipe-volumes prompt non-interactively (used when UID/GID labels disagree with the host).
+- `DEV_SKIP_APPARMOR_CHECK=1` — bypass the `--dind` AppArmor preflight (only safe with a custom profile that grants `userns,`).
+- `DEV_EXTRA_RUN_ARGS=...` — extra args passed to `docker run` (the test orchestrator uses this to inject `--dns=...` when in-container DNS is broken).
 
 ## Tests
 
 There is an automated end-to-end test suite under `scripts/test/`:
 
 ```bash
+# Full matrix
 sudo bash scripts/test/run-all.sh
+
+# Run one scenario directly (each script under scenarios/ is self-contained
+# and uses helpers from scripts/test/lib/). Pass/fail is determined by
+# log_pass/log_fail/log_skip lines.
+bash scripts/test/scenarios/22-cold-start-budget.sh
 ```
 
 The orchestrator needs passwordless `sudo`. It auto-installs `docker.io`,
@@ -38,7 +66,8 @@ The orchestrator needs passwordless `sudo`. It auto-installs `docker.io`,
 missing, auto-detects broken in-container DNS resolvers and sets
 `DEV_EXTRA_RUN_ARGS=--dns=8.8.8.8 --dns=1.1.1.1` if needed, builds both
 the base and `:dind` image targets, then walks every script under
-`scripts/test/scenarios/` and reports a pass/fail/skip table.
+`scripts/test/scenarios/` and reports a pass/fail/skip table. Logs land
+at `scripts/test/last-run.log` and `scripts/test/last-summary.log`.
 
 In addition there are two in-container probes:
 
@@ -76,4 +105,40 @@ Three components, each with a distinct role:
   cache volume. Registry pulls flow through `tinyproxy` via the
   slirp4netns gateway (`HTTPS_PROXY=http://10.0.2.2:8888`). Mutually
   exclusive with `--maintenance` (three-way conflict guard between
-  normal / maintenance / dind containers). See README.md for details.
+  normal / maintenance / dind containers). On Ubuntu 23.10+/Linux 6.x
+  hosts `./dev` preflights `kernel.apparmor_restrict_unprivileged_userns=0`
+  and refuses to start with a remediation message if it is `1`. See
+  README.md for details.
+
+## Firewall (security boundary)
+
+The firewall is the project's primary security feature — the threat model
+is "an AI agent running as `vscode` cannot exfiltrate workspace contents
+to arbitrary hosts." Two layers, enforced in the kernel and at L7:
+
+- **iptables** defaults `OUTPUT` to DROP. DNS is allowed; only the `proxy`
+  user can reach `:80`/`:443`. Raw-socket bypasses by `vscode` are dropped
+  by the kernel owner rule.
+- **tinyproxy** runs in the container and filters HTTPS by hostname
+  (CONNECT). Clients honour `HTTPS_PROXY=http://127.0.0.1:8888`, exported
+  by the entrypoint.
+- **`vscode` has no sudo** in normal mode. There is no path to disable
+  iptables from inside the container.
+
+Two allowlist files merge at container startup (deduplicated):
+
+- `allowlist.base` — baked into the image at `/etc/devcontainer/allowlist.base`
+  (Anthropic, GitHub, common registries, mise, OS mirrors). Edit and rebuild
+  to change.
+- `.devcontainer-allowlist` at the workspace root — optional, read at every
+  container start. No image rebuild needed; restart the container.
+- `allowlist.dind` — additionally merged when DinD is active (Docker Hub,
+  MCR, Quay, GCR, etc.).
+
+Format: one entry per line, `#` comments. Bare hostname matches exactly;
+`*.example.com` matches any subdomain (list both if you need both).
+
+When the firewall is in the way, prefer `--maintenance` (its own container,
+sudo + no firewall) over toggling on the running container — the toggle
+flags do not change the container name, so there is no visible signal that
+the firewall is off.
