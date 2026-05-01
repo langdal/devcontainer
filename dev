@@ -317,6 +317,39 @@ if [[ "$DIND" == true && "$MAINTENANCE" == true ]]; then
   exit 1
 fi
 
+# Linux 6.x kernels gate unprivileged user namespace creation behind an
+# AppArmor check (Ubuntu 23.10+, Pop!_OS, current Debian testing). The
+# sysctl is on by default. dockerd-rootless inside --dind needs to
+# unshare(CLONE_NEWUSER); --security-opt apparmor=unconfined does NOT
+# bypass this — the kernel applies the restriction to "unconfined" tasks
+# too. Without this preflight the container starts, then rootlesskit
+# fails ~15s in with a confusing "fork/exec /proc/self/exe: operation
+# not permitted". Catch it here with a clear remediation instead.
+if [[ "$DIND" == true && -z "${DEV_SKIP_APPARMOR_CHECK:-}" ]]; then
+  _aa_sysfs=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
+  if [[ -r "$_aa_sysfs" ]] && [[ "$(cat "$_aa_sysfs" 2>/dev/null)" == "1" ]]; then
+    cat >&2 <<'EOF'
+Error: kernel.apparmor_restrict_unprivileged_userns=1 on this host.
+
+This blocks rootless dockerd inside --dind from creating its user
+namespace. --security-opt apparmor=unconfined does not bypass this
+kernel-level restriction.
+
+Allow it on this host:
+    sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+Persist across reboots:
+    echo 'kernel.apparmor_restrict_unprivileged_userns=0' \
+      | sudo tee /etc/sysctl.d/99-rootless-userns.conf
+
+Set DEV_SKIP_APPARMOR_CHECK=1 to bypass this preflight (e.g. if you
+have a custom AppArmor profile that grants `userns,`).
+EOF
+    exit 1
+  fi
+  unset _aa_sysfs
+fi
+
 detect_runtime
 ensure_runtime_ready
 

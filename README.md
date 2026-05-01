@@ -211,6 +211,28 @@ traffic appears to the host iptables as originating from `vscode`, which
 the existing owner-rule blocks. Testcontainers' usual loopback-port
 pattern works as expected.
 
+### Host requirements
+
+`--dind` runs `dockerd-rootless` inside the container, which has to create
+nested user namespaces. A few host kernel knobs must permit that:
+
+- `kernel.unprivileged_userns_clone=1` (default on most distros). If `0`,
+  `--dind` fails to start.
+- `kernel.apparmor_restrict_unprivileged_userns=0` on Ubuntu 23.10+ and
+  other AppArmor-enabled hosts running Linux 6.x. Default is `1`, which
+  blocks rootlesskit even with `--security-opt apparmor=unconfined`. To
+  enable:
+
+    ```bash
+    sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+    echo 'kernel.apparmor_restrict_unprivileged_userns=0' \
+      | sudo tee /etc/sysctl.d/99-rootless-userns.conf
+    ```
+
+  The `dev` script preflights this and refuses to start with a remediation
+  message. Set `DEV_SKIP_APPARMOR_CHECK=1` to bypass (e.g. when a custom
+  AppArmor profile grants `userns,`).
+
 ### Host runtime support
 
 - **Linux:** `docker` is preferred when both are installed; `podman` is
