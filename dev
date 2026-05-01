@@ -424,11 +424,19 @@ fi
 
 # Check if container exists and is running
 if [[ "$DRY_RUN" == false ]]; then
+  # Same TTY-detection logic as for `docker run` below: only allocate -t
+  # when both stdin and stdout are terminals. Without this, scripted
+  # invocations (CI, test runners, pipes) fail with "the input device is
+  # not a TTY".
+  EXEC_TTY=(-i)
+  if [[ -t 0 && -t 1 ]]; then
+    EXEC_TTY=(-it)
+  fi
   if $RUNTIME ps -q -f name="^${CONTAINER_NAME}$" | grep -q .; then
     # Container exists and is running
     echo "Attaching to running container $CONTAINER_NAME..."
     if [[ ${#CMD_ARGS[@]} -gt 0 ]]; then
-      exec $RUNTIME exec -it "$CONTAINER_NAME" "${CMD_ARGS[@]}"
+      exec $RUNTIME exec "${EXEC_TTY[@]}" "$CONTAINER_NAME" "${CMD_ARGS[@]}"
     else
       exec $RUNTIME exec -it "$CONTAINER_NAME" zsh
     fi
@@ -437,15 +445,22 @@ if [[ "$DRY_RUN" == false ]]; then
     echo "Starting stopped container $CONTAINER_NAME..."
     $RUNTIME start "$CONTAINER_NAME"
     if [[ ${#CMD_ARGS[@]} -gt 0 ]]; then
-      exec $RUNTIME exec -it "$CONTAINER_NAME" "${CMD_ARGS[@]}"
+      exec $RUNTIME exec "${EXEC_TTY[@]}" "$CONTAINER_NAME" "${CMD_ARGS[@]}"
     else
       exec $RUNTIME exec -it "$CONTAINER_NAME" zsh
     fi
   fi
 fi
 
-# Build docker run command
-DOCKER_CMD=($RUNTIME run -it --rm --name "$CONTAINER_NAME")
+# Build docker run command. Allocate a TTY only when stdin AND stdout are
+# real terminals; otherwise docker rejects -it with "the input device is
+# not a TTY" and any scripted invocation (CI, test orchestrator, piped
+# usage like `./dev -- cmd | tee log`) fails.
+TTY_FLAGS=(-i)
+if [[ -t 0 && -t 1 ]]; then
+  TTY_FLAGS=(-it)
+fi
+DOCKER_CMD=($RUNTIME run "${TTY_FLAGS[@]}" --rm --name "$CONTAINER_NAME")
 
 # Capability needed by entrypoint to configure iptables (used in normal mode;
 # harmless when unused in maintenance mode).
