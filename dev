@@ -27,9 +27,16 @@ detect_runtime() {
     RUNTIME="$DEV_RUNTIME"
     return
   fi
+  # Probe: a binary is "really" a runtime only if it both resolves and
+  # answers --version. A bare `command -v` would be fooled by a stub
+  # (test scenarios that mask a runtime via PATH overlay; broken
+  # symlinks left on a stale PATH; etc.).
+  _runtime_works() {
+    command -v "$1" >/dev/null 2>&1 && "$1" --version >/dev/null 2>&1
+  }
   case "$(uname -s)" in
     Darwin)
-      if command -v podman >/dev/null 2>&1; then
+      if _runtime_works podman; then
         RUNTIME=podman
         return
       fi
@@ -38,11 +45,11 @@ detect_runtime() {
       exit 1
       ;;
     Linux)
-      if command -v docker >/dev/null 2>&1; then
+      if _runtime_works docker; then
         RUNTIME=docker
         return
       fi
-      if command -v podman >/dev/null 2>&1; then
+      if _runtime_works podman; then
         RUNTIME=podman
         return
       fi
@@ -520,6 +527,15 @@ fi
 # Forward GITHUB_TOKEN if set
 if [[ -n ${GITHUB_TOKEN:-} ]]; then
   DOCKER_CMD+=(-e GITHUB_TOKEN)
+fi
+
+# Escape hatch for hosts/test runs that need to inject extra `docker run`
+# args (e.g. --dns=8.8.8.8 on a host with broken IPv6 resolvers, or extra
+# --tmpfs / --label arguments for a CI environment). Word-split with
+# read -ra so callers can pass multiple args in a single env var.
+if [[ -n ${DEV_EXTRA_RUN_ARGS:-} ]]; then
+  read -ra _DEV_EXTRA <<< "$DEV_EXTRA_RUN_ARGS"
+  DOCKER_CMD+=("${_DEV_EXTRA[@]}")
 fi
 
 # Maintenance mode: tell entrypoint.sh to skip firewall init and grant sudo.

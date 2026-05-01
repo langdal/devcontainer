@@ -17,9 +17,10 @@ if ! command -v podman >/dev/null 2>&1; then
     remember_pkg_install podman
 fi
 
-# Mask docker (no shim).
-mask_dir=$(mask_and_prepend docker)
-remember_path_overlay "$mask_dir"
+# Mask docker (no shim). mask_and_prepend mutates the shell's PATH (and
+# registers cleanup); it MUST be called as a plain statement, not via
+# $(...) — the subshell would swallow the PATH export.
+mask_and_prepend docker
 
 if command -v docker >/dev/null 2>&1 && docker --version >/dev/null 2>&1; then
     log_fail "docker should be masked but is reachable"

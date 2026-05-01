@@ -6,10 +6,11 @@ LIB="$(dirname "$0")/../lib"
 . "$LIB/assert.sh"; . "$LIB/runtime.sh"; . "$LIB/restore.sh"
 require_platform linux
 
-# Setup: mask podman if installed.
+# Setup: mask podman if installed. mask_and_prepend mutates the shell's
+# PATH (and registers cleanup), so it MUST be called as a plain statement,
+# not via $(...) — the subshell would swallow the PATH export.
 if command -v podman >/dev/null 2>&1; then
-    mask_dir=$(mask_and_prepend podman)
-    remember_path_overlay "$mask_dir"
+    mask_and_prepend podman
 fi
 trap restore_host EXIT
 

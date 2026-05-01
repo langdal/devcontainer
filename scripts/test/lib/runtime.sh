@@ -26,13 +26,22 @@ prepend_path() {
     export PATH
 }
 
-# Convenience: mask a runtime AND prepend the dir.
+# Mask a runtime, prepend the stub dir to PATH, and register cleanup. After
+# the call returns, the calling shell's PATH has the stub dir at the front,
+# so `command -v <cmd>` resolves to the stub and `<cmd>` exits 127.
+#
+# IMPORTANT: do NOT call this inside `$(...)`. Command substitution runs the
+# function in a subshell, so the PATH export and the _RESTORE_PATHS append
+# would only affect that subshell and disappear before the scenario could
+# observe them. Call it as a plain statement; the masked dir path is also
+# stashed in MASKED_DIR for scenarios that need to reference it.
+MASKED_DIR=""
 mask_and_prepend() {
     local cmd="$1"
-    local d
-    d=$(mask_runtime "$cmd")
-    prepend_path "$d"
-    echo "$d"
+    MASKED_DIR=$(mask_runtime "$cmd")
+    PATH="$MASKED_DIR:$PATH"
+    export PATH
+    _RESTORE_PATHS+=("$MASKED_DIR")
 }
 
 # Apt install a package idempotently and remember whether we installed it.

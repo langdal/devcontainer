@@ -25,7 +25,31 @@ docker build -t generic-devcontainer --build-arg USER_UID=501 .
 ./dev --build
 ```
 
-There is no test suite, linter, or CI pipeline.
+## Tests
+
+There is an automated end-to-end test suite under `scripts/test/`:
+
+```bash
+sudo bash scripts/test/run-all.sh
+```
+
+The orchestrator needs passwordless `sudo`. It auto-installs `docker.io`,
+`docker-buildx`, and `podman` on Debian/Ubuntu hosts if a runtime is
+missing, auto-detects broken in-container DNS resolvers and sets
+`DEV_EXTRA_RUN_ARGS=--dns=8.8.8.8 --dns=1.1.1.1` if needed, builds both
+the base and `:dind` image targets, then walks every script under
+`scripts/test/scenarios/` and reports a pass/fail/skip table.
+
+In addition there are two in-container probes:
+
+- `scripts/verify-firewall.sh` — 12 checks. 7 cover the firewall posture;
+  checks 8–12 activate when `DEVCONTAINER_DIND=1` and verify the rootless
+  dockerd, registry pulls through the proxy, and that nested containers
+  can reach loopback ports but not the internet.
+- `scripts/verify-dind.sh` — heavier checks (smoke build, postgres
+  testcontainers smoke, self-build of this repo's Dockerfile).
+
+There is no linter or CI pipeline.
 
 ## Architecture
 
@@ -44,4 +68,12 @@ Three components, each with a distinct role:
 - **Container runs as user `vscode`** (UID 1000 by default, overridable via `USER_UID` build arg).
 - **Containers are `--rm`** (ephemeral) but the `dev` script reuses a running/stopped container named `dev-<dirname>` before creating a new one.
 - **Base tools** (node LTS, ripgrep, eza, lazygit) are defined in `mise.base.toml` and baked into the image at build time. The file is named `mise.base.toml` rather than `mise.toml` so mise does not treat it as a project config when this repo is itself opened in the devcontainer. Per-project tools come from the consuming project's own `mise.toml` and are installed at container startup.
-- **No Docker-in-Docker** — intentionally removed.
+- **Opt-in Docker-in-Docker** via `./dev --dind`. Builds a separate
+  `generic-devcontainer:dind` image (the `dind` target in the multi-stage
+  Dockerfile) that adds rootless `dockerd`, fuse-overlayfs, and
+  slirp4netns. The container is named `dev-<dir>-dind`, mounts
+  `/dev/fuse` + `/dev/net/tun`, and uses a dedicated `devcontainer-dind`
+  cache volume. Registry pulls flow through `tinyproxy` via the
+  slirp4netns gateway (`HTTPS_PROXY=http://10.0.2.2:8888`). Mutually
+  exclusive with `--maintenance` (three-way conflict guard between
+  normal / maintenance / dind containers). See README.md for details.

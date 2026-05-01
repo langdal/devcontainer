@@ -24,7 +24,11 @@ refuse_normal_due_to() {
     if out=$(./dev -- true 2>&1); then
         log_fail "normal mode should have refused while $running is running"; return 1
     fi
-    expect_grep "$out" "$running .* is running" \
+    # The message is "Error: <label> container <name> is running for this
+    # workspace." — so "<name> is running" sit adjacent with a single space.
+    # Match that, not "<name> .* is running" which would require filler
+    # words between them.
+    expect_grep "$out" "$running is running" \
         || { log_fail "expected refusal mentioning $running; got: $out"; return 1; }
 }
 
@@ -34,7 +38,7 @@ refuse_flag_due_to() {
     if out=$(./dev "$flag" -- true 2>&1); then
         log_fail "$flag should have refused while $running is running"; return 1
     fi
-    expect_grep "$out" "$running .* is running" \
+    expect_grep "$out" "$running is running" \
         || { log_fail "expected refusal mentioning $running; got: $out"; return 1; }
 }
 

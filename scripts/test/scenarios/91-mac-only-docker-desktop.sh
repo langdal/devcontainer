@@ -7,9 +7,9 @@ LIB="$(dirname "$0")/../lib"
 require_platform darwin
 trap restore_host EXIT
 
-# Mask podman so only docker (Docker Desktop) is visible.
-mask_dir=$(mask_and_prepend podman)
-remember_path_overlay "$mask_dir"
+# Mask podman so only docker (Docker Desktop) is visible. mask_and_prepend
+# mutates PATH; call as a plain statement (not via $(...)).
+mask_and_prepend podman
 
 cd "$(dirname "$0")/../../.."
 

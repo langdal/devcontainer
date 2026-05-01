@@ -46,6 +46,45 @@ if ! sudo -n true 2>/dev/null; then
     exit 1
 fi
 
+# ---- Auto-install runtimes if missing ----
+# The orchestrator needs at least docker (or podman) on PATH so the dev
+# script can build images. Install via apt on Debian/Ubuntu hosts.
+if ! command -v docker >/dev/null 2>&1 && ! command -v podman >/dev/null 2>&1; then
+    if command -v apt-get >/dev/null 2>&1; then
+        echo "Installing docker.io + docker-buildx + podman..." | tee -a "$LAST_LOG"
+        sudo apt-get update -qq >/dev/null 2>&1
+        sudo apt-get install -y --no-install-recommends docker.io docker-buildx podman 2>&1 | tail -3 | tee -a "$LAST_LOG"
+        sudo systemctl reset-failed docker.service docker.socket 2>/dev/null || true
+        sudo systemctl start docker 2>/dev/null || true
+    else
+        echo "FATAL: no docker/podman on PATH and apt-get not available." | tee -a "$LAST_LOG"
+        exit 1
+    fi
+fi
+if ! command -v docker >/dev/null 2>&1 && ! command -v podman >/dev/null 2>&1; then
+    echo "FATAL: install attempt finished but no runtime is on PATH." | tee -a "$LAST_LOG"
+    exit 1
+fi
+
+# ---- Inject a deterministic DNS for the test run ----
+# Test scenarios are sensitive to two failure modes from the host's
+# default resolver: (1) AAAA-hang on hosts whose resolver drops IPv6
+# queries silently — every glibc getaddrinfo() inside a default-bridge
+# container stalls ~6s, which breaks tinyproxy and every nested-container
+# DNS chain; (2) intermittent flakiness on auth.docker.io that surfaces
+# as random "Unable to connect" failures partway through the suite.
+# Both are eliminated by pinning the test containers' DNS to 8.8.8.8 +
+# 1.1.1.1 via DEV_EXTRA_RUN_ARGS, which the dev script appends to its
+# `docker run` invocation. This only affects the orchestrator run; normal
+# ./dev usage is unchanged. Override by exporting DEV_EXTRA_RUN_ARGS
+# before invoking, or set SKIP_TEST_DNS_OVERRIDE=1 to keep the host's
+# resolver.
+if [ -z "${DEV_EXTRA_RUN_ARGS:-}" ] && [ -z "${SKIP_TEST_DNS_OVERRIDE:-}" ]; then
+    echo "Setting DEV_EXTRA_RUN_ARGS=--dns=8.8.8.8 --dns=1.1.1.1 for deterministic test DNS." | tee -a "$LAST_LOG"
+    echo "  (set SKIP_TEST_DNS_OVERRIDE=1 to keep the host's resolver.)" | tee -a "$LAST_LOG"
+    export DEV_EXTRA_RUN_ARGS="--dns=8.8.8.8 --dns=1.1.1.1"
+fi
+
 # ---- Build both images up front so scenarios don't race the build ----
 echo "Building images..."
 if ! ./dev --build --dry-run >/dev/null 2>&1; then
