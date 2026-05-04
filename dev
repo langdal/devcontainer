@@ -92,6 +92,17 @@ runtime_build() {
   fi
 }
 
+# Container state predicates. Default to the current connection
+# (RUNTIME_ARGS); pass an explicit connection in $2 to probe a different
+# storage (e.g. DIND_RUNTIME_ARGS to look across the rootful connection on
+# macOS+podman).
+container_running() {
+  $RUNTIME ${2-$RUNTIME_ARGS} ps -q -f name="^$1\$" | grep -q .
+}
+container_exists() {
+  $RUNTIME ${2-$RUNTIME_ARGS} ps -aq -f name="^$1\$" | grep -q .
+}
+
 # Container-runtime extra args. On macOS+podman, the rootless connection
 # cannot pass /dev/net/tun into a container (rootless podman silently drops
 # the device even with --device=/dev/net/tun), which makes the nested
@@ -109,7 +120,6 @@ RUNTIME_ARGS=""
 
 IMAGE_NAME="generic-devcontainer"
 
-# Flags
 DRY_RUN=false
 FORCE_BUILD=false
 DEFAULT_PORTS=false
@@ -261,13 +271,11 @@ install_self() {
   esac
 }
 
-# Handle subcommands before flag parsing
 if [[ ${1:-} == "install" ]]; then
   install_self
   exit 0
 fi
 
-# Parse arguments
 while [[ $# -gt 0 ]]; do
   case $1 in
     --help)
@@ -418,13 +426,13 @@ DIND_NAME="dev-${WORKSPACE_BASENAME}-dind"
 resolve_managed_container() {
   MANAGED_TARGET=""
   MANAGED_NAME=""
-  if $RUNTIME ps -q -f name="^${NORMAL_NAME}$" | grep -q .; then
+  if container_running "$NORMAL_NAME"; then
     MANAGED_TARGET="normal"; MANAGED_NAME="$NORMAL_NAME"; return
   fi
-  if $RUNTIME ps -q -f name="^${DIND_NAME}$" | grep -q .; then
+  if container_running "$DIND_NAME"; then
     MANAGED_TARGET="dind"; MANAGED_NAME="$DIND_NAME"; return
   fi
-  if $RUNTIME ps -q -f name="^${MAINT_NAME}$" | grep -q .; then
+  if container_running "$MAINT_NAME"; then
     MANAGED_TARGET="maint"; MANAGED_NAME="$MAINT_NAME"; return
   fi
 }
@@ -509,7 +517,7 @@ fi
 # dind storage when checking for a running dind container.
 refuse_if_running() {
   local other_name="$1" other_label="$2" extra="${3:-}"
-  if $RUNTIME $extra ps -q -f name="^${other_name}$" | grep -q .; then
+  if container_running "$other_name" "$extra"; then
     echo "Error: ${other_label} container ${other_name} is running for this workspace." >&2
     echo "       Stop it first:  $RUNTIME $extra stop ${other_name}" >&2
     exit 1
@@ -523,7 +531,7 @@ refuse_if_running() {
 # volumes from the freshly-built image.
 cleanup_for_rebuild() {
   local container="$1" with_dind="$2"
-  if $RUNTIME $RUNTIME_ARGS ps -aq -f name="^${container}$" | grep -q .; then
+  if container_exists "$container"; then
     echo "Removing container ${container}…" >&2
     if ! $RUNTIME $RUNTIME_ARGS rm -f "$container" >/dev/null 2>&1; then
       echo "Error: failed to remove container ${container}." >&2
@@ -550,16 +558,19 @@ cleanup_for_rebuild() {
 # (interactive) or print a diagnostic and exit 1 (non-interactive). The
 # explicit `--build` flag and `--dry-run` make this advisory rather than
 # fatal — the build branch will still rebuild with the right args.
+# Sets the global IMAGE_EXISTS so the build path below can skip a separate
+# `images -q` probe.
 check_image_uid_match() {
   local tag="$1"
-  if ! $RUNTIME $RUNTIME_ARGS image inspect "$tag" >/dev/null 2>&1; then
+  local labels img_uid img_gid
+  if ! labels=$($RUNTIME $RUNTIME_ARGS image inspect "$tag" \
+      --format '{{ index .Config.Labels "dev.uid" }} {{ index .Config.Labels "dev.gid" }}' \
+      2>/dev/null); then
+    IMAGE_EXISTS=false
     return 0
   fi
-  local img_uid img_gid
-  img_uid=$($RUNTIME $RUNTIME_ARGS image inspect "$tag" \
-      --format '{{ index .Config.Labels "dev.uid" }}' 2>/dev/null)
-  img_gid=$($RUNTIME $RUNTIME_ARGS image inspect "$tag" \
-      --format '{{ index .Config.Labels "dev.gid" }}' 2>/dev/null)
+  IMAGE_EXISTS=true
+  read -r img_uid img_gid <<< "$labels"
   if [[ -n "$img_uid" && -n "$img_gid" \
         && "$img_uid" == "$HOST_UID" && "$img_gid" == "$HOST_GID" ]]; then
     return 0
@@ -625,8 +636,7 @@ fi
 # into a forced rebuild via the path added in Task 3).
 check_image_uid_match "$IMAGE_TAG"
 
-# Build image if needed
-if [[ "$FORCE_BUILD" == true ]] || ! $RUNTIME $RUNTIME_ARGS images -q "$IMAGE_TAG" | grep -q .; then
+if [[ "$FORCE_BUILD" == true ]] || [[ "$IMAGE_EXISTS" == false ]]; then
   if [[ "$DRY_RUN" == true ]]; then
     echo "Would build image: $RUNTIME $RUNTIME_ARGS build --network=host --target $BUILD_TARGET -t $IMAGE_TAG $SCRIPT_DIR"
   else
@@ -635,56 +645,44 @@ if [[ "$FORCE_BUILD" == true ]] || ! $RUNTIME $RUNTIME_ARGS images -q "$IMAGE_TA
   fi
 fi
 
-# Check if container exists and is running
+# Allocate a TTY only when stdin AND stdout are real terminals; otherwise
+# docker rejects -it with "the input device is not a TTY" and scripted
+# invocations (CI, test runners, piped usage) fail.
+TTY_FLAGS=(-i)
+if [[ -t 0 && -t 1 ]]; then
+  TTY_FLAGS=(-it)
+fi
+
 if [[ "$DRY_RUN" == false ]]; then
-  # Same TTY-detection logic as for `docker run` below: only allocate -t
-  # when both stdin and stdout are terminals. Without this, scripted
-  # invocations (CI, test runners, pipes) fail with "the input device is
-  # not a TTY".
-  EXEC_TTY=(-i)
-  if [[ -t 0 && -t 1 ]]; then
-    EXEC_TTY=(-it)
-  fi
   # The image's USER is root because entrypoint.sh needs root to run
   # firewall-init.sh / dind-init.sh and only afterwards drops to vscode via
   # `gosu vscode`. `docker exec` bypasses the entrypoint and uses the image's
   # configured User, so without --user the second terminal would land as
   # root. Pin to vscode to match the first terminal.
-  if $RUNTIME $RUNTIME_ARGS ps -q -f name="^${CONTAINER_NAME}$" | grep -q .; then
-    # Container exists and is running
+  attach=false
+  if container_running "$CONTAINER_NAME"; then
     echo "Attaching to running container $CONTAINER_NAME..."
-    if [[ ${#CMD_ARGS[@]} -gt 0 ]]; then
-      exec $RUNTIME $RUNTIME_ARGS exec --user vscode "${EXEC_TTY[@]}" "$CONTAINER_NAME" "${CMD_ARGS[@]}"
-    else
-      exec $RUNTIME $RUNTIME_ARGS exec --user vscode -it "$CONTAINER_NAME" zsh
-    fi
-  elif $RUNTIME $RUNTIME_ARGS ps -aq -f name="^${CONTAINER_NAME}$" | grep -q .; then
-    # Container exists but is stopped
+    attach=true
+  elif container_exists "$CONTAINER_NAME"; then
     echo "Starting stopped container $CONTAINER_NAME..."
     $RUNTIME $RUNTIME_ARGS start "$CONTAINER_NAME"
+    attach=true
+  fi
+  if [[ "$attach" == true ]]; then
     if [[ ${#CMD_ARGS[@]} -gt 0 ]]; then
-      exec $RUNTIME $RUNTIME_ARGS exec --user vscode "${EXEC_TTY[@]}" "$CONTAINER_NAME" "${CMD_ARGS[@]}"
+      exec $RUNTIME $RUNTIME_ARGS exec --user vscode "${TTY_FLAGS[@]}" "$CONTAINER_NAME" "${CMD_ARGS[@]}"
     else
-      exec $RUNTIME $RUNTIME_ARGS exec --user vscode -it "$CONTAINER_NAME" zsh
+      exec $RUNTIME $RUNTIME_ARGS exec --user vscode "${TTY_FLAGS[@]}" "$CONTAINER_NAME" zsh
     fi
   fi
 fi
 
-# Build docker run command. Allocate a TTY only when stdin AND stdout are
-# real terminals; otherwise docker rejects -it with "the input device is
-# not a TTY" and any scripted invocation (CI, test orchestrator, piped
-# usage like `./dev -- cmd | tee log`) fails.
-TTY_FLAGS=(-i)
-if [[ -t 0 && -t 1 ]]; then
-  TTY_FLAGS=(-it)
-fi
 DOCKER_CMD=($RUNTIME $RUNTIME_ARGS run "${TTY_FLAGS[@]}" --rm --name "$CONTAINER_NAME")
 
 # Capability needed by entrypoint to configure iptables (used in normal mode;
 # harmless when unused in maintenance mode).
 DOCKER_CMD+=(--cap-add=NET_ADMIN)
 
-# Volume mounts
 DOCKER_CMD+=(-v "$(pwd):/workspace")
 DOCKER_CMD+=(-v devcontainer-mise:/mise)
 DOCKER_CMD+=(-v devcontainer-home:/home/vscode)
@@ -731,19 +729,16 @@ if [[ "$DEFAULT_PORTS" == true ]]; then
   fi
 fi
 
-# Port forwarding
 if [[ "$DEFAULT_PORTS" == true ]]; then
   DOCKER_CMD+=(-p 5173:5173 -p 5174:5174 -p 8080:8080 -p 2345:2345 -p 3000:3000)
 fi
 
-# Extra ports
 if [[ ${#EXTRA_PORTS[@]} -gt 0 ]]; then
   for port in "${EXTRA_PORTS[@]}"; do
     DOCKER_CMD+=(-p "$port:$port")
   done
 fi
 
-# Forward GITHUB_TOKEN if set
 if [[ -n ${GITHUB_TOKEN:-} ]]; then
   DOCKER_CMD+=(-e GITHUB_TOKEN)
 fi
@@ -767,17 +762,14 @@ if [[ "$DIND" == true ]]; then
   DOCKER_CMD+=(-e DEVCONTAINER_DIND=1)
 fi
 
-# Image tag (base or :dind)
 DOCKER_CMD+=("$IMAGE_TAG")
 
-# Command args (default to zsh if none provided)
 if [[ ${#CMD_ARGS[@]} -gt 0 ]]; then
   DOCKER_CMD+=("${CMD_ARGS[@]}")
 else
   DOCKER_CMD+=(zsh)
 fi
 
-# Execute or print
 if [[ "$DRY_RUN" == true ]]; then
   echo "${DOCKER_CMD[*]}"
 else

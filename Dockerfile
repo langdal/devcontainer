@@ -151,35 +151,22 @@ RUN set -eux; \
         rm -f "${bundle}.tgz" "${bundle}.tgz.sha256"; \
     done
 
-# docker compose v2 (CLI plugin). Installed under the system-wide plugin
+# docker compose v2 CLI plugin. Installed under the system-wide plugin
 # path so `docker compose ...` resolves for the rootless dockerd run by
-# vscode. Pinned + sha256 verified, same pattern as the docker bundle.
+# vscode.
 ARG COMPOSE_VERSION=2.30.3
 RUN set -eux; \
     arch="$(uname -m)"; \
     case "$arch" in \
-        x86_64)  compose_arch=x86_64 ;; \
-        aarch64) compose_arch=aarch64 ;; \
+        x86_64|aarch64) ;; \
         *) echo "unsupported arch: $arch" >&2; exit 1 ;; \
     esac; \
-    mkdir -p /usr/local/lib/docker/cli-plugins; \
-    url="https://github.com/docker/compose/releases/download/v${COMPOSE_VERSION}/docker-compose-linux-${compose_arch}"; \
-    curl -fsSLo /usr/local/lib/docker/cli-plugins/docker-compose "${url}"; \
-    curl -fsSLo /tmp/docker-compose.sha256 "${url}.sha256"; \
-    (cd /usr/local/lib/docker/cli-plugins && \
-        awk '{print $1"  docker-compose"}' /tmp/docker-compose.sha256 | sha256sum -c -); \
-    rm -f /tmp/docker-compose.sha256; \
-    chmod 0755 /usr/local/lib/docker/cli-plugins/docker-compose
-
-# Allocate sub-uid/gid range for vscode (newuidmap consumes this for the
-# rootlesskit user namespace). Range is conventional; doesn't conflict with
-# host UIDs because it's container-local.
-RUN if ! grep -q '^vscode:' /etc/subuid; then \
-        echo "vscode:100000:65536" >> /etc/subuid; \
-    fi && \
-    if ! grep -q '^vscode:' /etc/subgid; then \
-        echo "vscode:100000:65536" >> /etc/subgid; \
-    fi
+    url="https://github.com/docker/compose/releases/download/v${COMPOSE_VERSION}/docker-compose-linux-${arch}"; \
+    curl -fsSLo /tmp/docker-compose "${url}"; \
+    expected="$(curl -fsSL "${url}.sha256" | awk '{print $1}')"; \
+    echo "${expected}  /tmp/docker-compose" | sha256sum -c -; \
+    install -D -m 0755 /tmp/docker-compose /usr/local/lib/docker/cli-plugins/docker-compose; \
+    rm -f /tmp/docker-compose
 
 COPY allowlist.dind /etc/devcontainer/allowlist.dind
 COPY --chmod=755 dind-init.sh /usr/local/sbin/dind-init.sh

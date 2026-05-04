@@ -49,19 +49,16 @@ if [ -n "${DEVCONTAINER_DIND:-}" ]; then
     export XDG_RUNTIME_DIR=/home/vscode/.dind-run
 fi
 
-# entrypoint.sh runs as root. It runs user-context tasks via gosu vscode,
-# then exec's gosu vscode for the actual command.
-
 # Run user-context startup tasks as vscode (preserves file ownership under
 # /home/vscode and /mise; ensures 'git config --global' lands in
 # /home/vscode/.gitconfig).
 gosu vscode bash <<'INNER'
 set -u
 
-# Ensure mise shell activation is present in .zshrc (idempotent).
-if [[ -f /home/vscode/.zshrc ]] && ! grep -q 'mise activate zsh' /home/vscode/.zshrc; then
-    # shellcheck disable=SC2016
-    echo 'eval "$(mise activate zsh)"' >> /home/vscode/.zshrc
+# Seed .zshrc from the Dockerfile's staged copy if the home volume came up
+# empty (the volume mount shadows the .zshrc baked into the image).
+if [[ ! -f /home/vscode/.zshrc ]] && [[ -f /etc/skel.devcontainer/.zshrc ]]; then
+    cp /etc/skel.devcontainer/.zshrc /home/vscode/.zshrc
 fi
 
 # Try to install mise-managed tools if a project mise.toml exists.

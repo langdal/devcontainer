@@ -48,41 +48,6 @@ To use this with your project, add a `mise.toml` (or `.mise.toml`) to your
 project root. The container will automatically install the specified tools on
 startup.
 
-### Examples
-
-**Go Setup**:
-
-```toml
-[tools]
-go = "1.24"
-
-[env]
-GOPATH = "/workspace/.go"
-```
-
-**Node/Vite Setup**:
-
-```toml
-[tools]
-node = "22"
-pnpm = "latest"
-```
-
-**Python Setup**:
-
-```toml
-[tools]
-python = "3.12"
-poetry = "latest"
-```
-
-**Rust Setup**:
-
-```toml
-[tools]
-rust = "latest"
-```
-
 ## The `dev` Script
 
 The `dev` script manages the container lifecycle.

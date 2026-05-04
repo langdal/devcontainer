@@ -11,8 +11,9 @@ DATA_DIR=/home/vscode/.local/share/docker
 SOCK="${RUN_DIR}/docker.sock"
 LOG=/var/log/dockerd-rootless.log
 
-# 1. Ensure subuid/subgid range for vscode (no-op when Dockerfile already set it,
-#    matters when --build-arg USER_UID rewrote the user post-image-build).
+# 1. Allocate subuid/subgid range for vscode. Done at runtime (not in the
+#    Dockerfile) because --build-arg USER_UID rewrites the user after the
+#    base image is built. The range is conventional and container-local.
 if ! grep -q '^vscode:' /etc/subuid; then
     echo "vscode:100000:65536" >> /etc/subuid
 fi
