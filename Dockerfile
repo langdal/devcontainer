@@ -151,6 +151,26 @@ RUN set -eux; \
         rm -f "${bundle}.tgz" "${bundle}.tgz.sha256"; \
     done
 
+# docker compose v2 (CLI plugin). Installed under the system-wide plugin
+# path so `docker compose ...` resolves for the rootless dockerd run by
+# vscode. Pinned + sha256 verified, same pattern as the docker bundle.
+ARG COMPOSE_VERSION=2.30.3
+RUN set -eux; \
+    arch="$(uname -m)"; \
+    case "$arch" in \
+        x86_64)  compose_arch=x86_64 ;; \
+        aarch64) compose_arch=aarch64 ;; \
+        *) echo "unsupported arch: $arch" >&2; exit 1 ;; \
+    esac; \
+    mkdir -p /usr/local/lib/docker/cli-plugins; \
+    url="https://github.com/docker/compose/releases/download/v${COMPOSE_VERSION}/docker-compose-linux-${compose_arch}"; \
+    curl -fsSLo /usr/local/lib/docker/cli-plugins/docker-compose "${url}"; \
+    curl -fsSLo /tmp/docker-compose.sha256 "${url}.sha256"; \
+    (cd /usr/local/lib/docker/cli-plugins && \
+        awk '{print $1"  docker-compose"}' /tmp/docker-compose.sha256 | sha256sum -c -); \
+    rm -f /tmp/docker-compose.sha256; \
+    chmod 0755 /usr/local/lib/docker/cli-plugins/docker-compose
+
 # Allocate sub-uid/gid range for vscode (newuidmap consumes this for the
 # rootlesskit user namespace). Range is conventional; doesn't conflict with
 # host UIDs because it's container-local.
