@@ -62,6 +62,13 @@ if ! grep -q '"--cap-add=NET_ADMIN"' .devcontainer/devcontainer.json; then
     log_fail "normal-mode: --cap-add=NET_ADMIN missing from runArgs"
     exit 1
 fi
+# VS Code's overrideCommand=true bypasses the image ENTRYPOINT (passes
+# --entrypoint /bin/sh). The firewall lives in our entrypoint, so we
+# MUST emit overrideCommand=false to keep it on the boot path.
+if ! grep -q '"overrideCommand": false' .devcontainer/devcontainer.json; then
+    log_fail "normal-mode: overrideCommand must be false (entrypoint runs firewall)"
+    exit 1
+fi
 
 # ---------- collision: refuse without --force ----------
 SHA_BEFORE=$(sha256sum .devcontainer/devcontainer.json | awk '{print $1}')
@@ -115,6 +122,10 @@ if ! grep -q '"DEVCONTAINER_DIND": "1"' .devcontainer/devcontainer.json; then
 fi
 if ! grep -q '/dev/fuse' .devcontainer/devcontainer.json; then
     log_fail "dind-mode: --device=/dev/fuse missing"
+    exit 1
+fi
+if ! grep -q '"overrideCommand": false' .devcontainer/devcontainer.json; then
+    log_fail "dind-mode: overrideCommand must be false (entrypoint runs firewall)"
     exit 1
 fi
 

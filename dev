@@ -374,7 +374,7 @@ write_devcontainer_json_normal() {
   "workspaceFolder": "/workspace",
   "remoteUser": "vscode",
   "updateRemoteUserUID": true,
-  "overrideCommand": true,
+  "overrideCommand": false,
   "runArgs": ["--cap-add=NET_ADMIN"],
   "mounts": [
     "source=${devcontainerId}-mise,target=/mise,type=volume",
@@ -401,7 +401,7 @@ write_devcontainer_json_dind() {
   "workspaceFolder": "/workspace",
   "remoteUser": "vscode",
   "updateRemoteUserUID": true,
-  "overrideCommand": true,
+  "overrideCommand": false,
   "containerEnv": {
     "DEVCONTAINER_DIND": "1"
   },

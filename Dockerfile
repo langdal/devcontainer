@@ -101,9 +101,13 @@ WORKDIR /workspace
 # Copy entrypoint script
 COPY --chmod=755 entrypoint.sh /entrypoint.sh
 
-# Use entrypoint for initialization
+# Use entrypoint for initialization. CMD is "sleep infinity" so the
+# container stays alive when something else supplies the long-running
+# foreground process via docker run / docker compose / a devcontainer.json
+# with overrideCommand=false. `./dev` always passes its own command
+# (zsh, or `--`-passthrough), so it never sees this default.
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["zsh"]
+CMD ["sleep", "infinity"]
 
 # ===========================================================================
 # DinD stage: rootless dockerd, fuse-overlayfs, uidmap.
