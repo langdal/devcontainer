@@ -350,8 +350,49 @@ while [[ $# -gt 0 ]]; do
 done
 
 create_dev_container() {
-  echo "Error: create_dev_container not yet implemented" >&2
-  exit 1
+  local target_dir=".devcontainer"
+  local sources=(Dockerfile entrypoint.sh firewall-init.sh \
+                 mise.base.toml allowlist.base)
+  if [[ "$DIND" == true ]]; then
+    sources+=(dind-init.sh allowlist.dind)
+  fi
+  # devcontainer.json is generated, not copied — but it counts toward
+  # the destination set for collision checking.
+  local destinations=("${target_dir}/devcontainer.json")
+  for f in "${sources[@]}"; do
+    destinations+=("${target_dir}/${f}")
+  done
+
+  # Collision check.
+  local existing=()
+  for d in "${destinations[@]}"; do
+    [[ -e "$d" ]] && existing+=("$d")
+  done
+  if [[ ${#existing[@]} -gt 0 && "$FORCE" != true ]]; then
+    echo "Refusing to overwrite:" >&2
+    for d in "${existing[@]}"; do
+      echo "  $d" >&2
+    done
+    echo "Pass --force to overwrite." >&2
+    exit 1
+  fi
+
+  mkdir -p "$target_dir"
+
+  # Copy source files from $SCRIPT_DIR.
+  for f in "${sources[@]}"; do
+    if [[ ! -f "${SCRIPT_DIR}/${f}" ]]; then
+      echo "Error: missing source file ${SCRIPT_DIR}/${f}" >&2
+      exit 1
+    fi
+    cp "${SCRIPT_DIR}/${f}" "${target_dir}/${f}"
+  done
+
+  # devcontainer.json is written in the next task — for now, write a
+  # placeholder so the collision-check logic and file set are testable.
+  printf '{}\n' > "${target_dir}/devcontainer.json"
+
+  echo "Wrote ${target_dir}/ (mode: $([[ "$DIND" == true ]] && echo dind || echo normal))"
 }
 
 if [[ "$CREATE_DC" == true ]]; then
