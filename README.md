@@ -1,215 +1,131 @@
 # Generic Devcontainer
 
-## Overview
+A portable, editor-agnostic dev environment. One Dockerfile, one bash wrapper, per-project tools via [`mise`](https://mise.jdx.dev/). No `devcontainer.json`, no `docker-compose`, no editor lock-in.
 
-This is a portable, editor-agnostic development environment designed to provide
-a consistent experience across different projects and machines. It avoids the
-complexity and editor-lock-in of standard devcontainers by using a simple
-Dockerfile and a `dev` wrapper script. It features `mise` for seamless tool
-management, allowing each project to define its own toolchain (Go, Node,
-Python, etc.) while sharing a persistent base layer.
+## Getting Started
 
-## Quick Start
+You need Docker (Linux) or Podman (macOS/Linux). See [Host requirements](#host-requirements).
 
-Get up and running in 3 steps:
+```bash
+# 1. Clone this repo somewhere convenient
+git clone <this-repo-url> ~/devcontainer
 
-1. **Build the image**:
+# 2. Put the dev script on your PATH
+~/devcontainer/dev install
 
-    ```bash
-    docker build -t generic-devcontainer .
-    ```
+# 3. From any project directory, start the container
+cd ~/projects/my-project
+dev
+```
 
-2. **Start the environment**:
-    Run the `dev` script from your project root:
+The first run builds the image. You land in a Zsh shell at `/workspace` with your project mounted.
 
-    ```bash
-    ./dev
-    ```
+To install per-project tools, drop a `mise.toml` in your project root:
 
-3. **Work**:
-    You are now inside a Zsh shell with all your project tools automatically installed by `mise`.
+```toml
+[tools]
+node = "20"
+go = "1.22"
+python = "3.12"
+```
 
-## Architecture
+`mise install` runs on every container start.
 
-The system consists of three main components:
+## Daily Use
 
-- **Dockerfile**: Defines the base image (Ubuntu-based) with essential tools
-like Git and `mise`. It bakes in common utilities like `ripgrep`, `eza`, and
-`lazygit`.
-- **entrypoint.sh**: Runs when the container starts. It checks for a
-`mise.toml` in your project, installs any missing tools, and configures Git to
-trust the `/workspace` directory.
-- **dev script**: A bash wrapper that automates the `docker run` command. It
-handles volume mounting and port forwarding.
+```bash
+dev                       # start or attach to the container
+dev -- npm test           # run a one-off command in the container
+dev --build               # rebuild the image
+dev --port 9000           # forward an extra port (repeatable)
+dev --default-ports       # forward 5173, 5174, 8080, 2345, 3000
+```
 
-## Per-Project Setup
+Multiple terminals: just run `dev` again — it `exec`s into the running container.
 
-To use this with your project, add a `mise.toml` (or `.mise.toml`) to your
-project root. The container will automatically install the specified tools on
-startup.
+## Container Modes
 
-## The `dev` Script
+Only one mode runs per workspace at a time. The script enforces this with a three-way conflict guard.
 
-The `dev` script manages the container lifecycle.
+| Mode             | When to use                                        | Container name      |
+| ---------------- | -------------------------------------------------- | ------------------- |
+| Normal (default) | Day-to-day work. Firewalled, no sudo.              | `dev-<dir>`         |
+| `--maintenance`  | Install system packages, fetch from blocked hosts. | `dev-<dir>-maint`   |
+| `--dind`         | Run nested Docker (testcontainers, builds).        | `dev-<dir>-dind`    |
 
-**Flags**:
-
-- `--help`: Show the help message and usage examples.
-- `--dry-run`: Print the `docker run` command that would be executed without actually running it.
-- `--build`: Force a rebuild of the `generic-devcontainer` image before starting.
-- `--port PORT`: Add additional port forwarding (e.g., `--port 9000`). This flag can be repeated.
-- `--default-ports`: Forward the default development ports (off by default; see [Port Forwarding](#port-forwarding)).
-- `--maintenance`: Start with the firewall disabled and sudo enabled (see [Firewall](#firewall)).
-- `--`: Pass any remaining arguments as a command to be executed inside the container (e.g., `./dev -- npm run dev`).
+```bash
+dev --maintenance         # firewall off, sudo enabled
+dev --dind                # rootless dockerd inside the container
+```
 
 ## Firewall
 
-The container restricts outbound traffic to a curated allowlist of domains.
-This is intended for running AI agents in a sandbox: an agent running as
-`vscode` cannot exfiltrate workspace contents to arbitrary hosts.
+The container restricts outbound HTTP(S) to a curated allowlist. Threat model: an AI agent running as `vscode` cannot exfiltrate workspace contents to arbitrary hosts.
 
-### How it works
+- iptables defaults `OUTPUT` to DROP. Only the `proxy` user can reach :80/:443.
+- `tinyproxy` filters HTTPS by hostname (CONNECT). Clients honour `HTTPS_PROXY=http://127.0.0.1:8888`, exported by the entrypoint.
+- `vscode` has no sudo in normal mode — there is no path to disable iptables from inside.
 
-- `tinyproxy` runs inside the container and filters HTTPS by hostname (CONNECT).
-- `iptables` defaults `OUTPUT` to DROP and only allows DNS + the `proxy` user
-  reaching :80/:443. An agent process bypassing the proxy via raw sockets
-  cannot match the owner rule and is dropped at the kernel.
-- `vscode` has no sudo in normal mode. There is no path to disable iptables
-  from inside the container.
-- HTTP(S) clients in the container honour `HTTPS_PROXY` / `HTTP_PROXY` env
-  vars, which are exported by the entrypoint to point at `127.0.0.1:8888`.
+### Allowlist files
 
-### Allowlists
+One entry per line, `#` for comments. Bare hostnames match exactly; `*.example.com` matches any subdomain (list both if you need both).
 
-Two layers, merged at container startup:
+- `allowlist.base` — baked into the image. Anthropic, GitHub, common registries, mise, OS mirrors. Edit and rebuild to change.
+- `.devcontainer-allowlist` at the workspace root — optional, read at every container start. Restart the container to pick up changes (no rebuild).
+- `allowlist.dind` — additionally merged in `--dind` mode (Docker Hub, MCR, Quay, GCR, …).
 
-- **Base list** (`allowlist.base` in this repo) is baked into the image at
-  `/etc/devcontainer/allowlist.base`. It includes Anthropic, GitHub, common
-  package registries, mise, and OS package mirrors. Edit this file and
-  rebuild the image to change the base list.
-- **Project list** (`.devcontainer-allowlist` at the workspace root) is
-  optional. Read at every container start; concatenated with the base list
-  and deduplicated. No image rebuild needed — restart the container to pick
-  up changes.
-
-Format: one entry per line, `#` comments. A bare hostname (`github.com`)
-matches that name exactly. A `*.` prefix (`*.github.com`) matches any
-subdomain. List both if you need both.
-
-### Maintenance mode
+### Firewall controls
 
 ```bash
-dev --maintenance
+dev --disable-firewall    # open the firewall on the running container
+dev --enable-firewall     # restore default-deny + allowlist
+dev --monitor             # tail the tinyproxy log
+dev --monitor-fw          # tcpdump on iptables-dropped packets (NFLOG group 1)
 ```
 
-Starts the container with the firewall disabled and sudo enabled. Use this
-for installing system packages, debugging the firewall, or fetching tools
-from non-allowlisted hosts. The maintenance container has a different name
-(`dev-<dir>-maint`), and the normal container is refused while it runs (and
-vice versa) — they would both have `/workspace` mounted and produce
-surprising state.
+These act on whichever workspace container is running (normal or dind). The container name does **not** change when the firewall is toggled, so for longer-lived unrestricted work prefer `--maintenance` — its name (`-maint`) is a visible signal.
 
-### Toggling the firewall on a running container
-
-```bash
-dev --disable-firewall   # open OUTPUT + switch tinyproxy filter to allow-all
-dev --enable-firewall    # rebuild the allowlist filter + restore default-deny
-```
-
-These act on whichever workspace container is running — normal (`dev-<dir>`)
-or dind (`dev-<dir>-dind`) — via `docker exec --user root`, which is
-allowed because both containers have `CAP_NET_ADMIN`. Maintenance has no
-firewall, so the commands refuse with a clear error if only the
-maintenance container is running. Disable opens both layers: it flushes
-iptables OUTPUT and rewrites `/etc/tinyproxy/filter` to a permissive regex,
-then SIGHUPs tinyproxy so existing `HTTPS_PROXY`-honoring shells get
-through too. Enable re-runs `firewall-init.sh`, which rebuilds the filter
-from the allowlist and SIGHUPs tinyproxy to reload it.
-
-`--monitor` (tail `/var/log/tinyproxy.log`) and `--monitor-fw` (tcpdump on
-NFLOG group 1) likewise auto-detect normal vs. dind.
-
-Caveat: the container name does not change when the firewall is toggled,
-so there is no visible signal that the firewall is off. For longer-lived
-work prefer `--maintenance`.
-
-### Verifying the firewall
-
-A helper script probes posture:
+To verify the firewall posture from inside:
 
 ```bash
 dev -- /workspace/scripts/verify-firewall.sh
 ```
 
-In normal mode all 7 checks pass; in maintenance mode 5 are skipped.
-
 ## Docker-in-Docker
 
-Opt-in mode that runs a rootless `dockerd` inside the dev container so the
-agent can use the `docker` CLI for testcontainers and occasional builds —
-without `--privileged`, without mounting a host docker socket, and
-without breaking the firewall.
+Run a rootless `dockerd` inside the container — for the `docker` CLI, testcontainers, and image builds — without `--privileged` and without breaking the firewall.
 
 ```bash
 dev --dind
+docker ps   # nested daemon
 ```
 
-### How it works
+Registry pulls flow through tinyproxy and are filtered against the same allowlist machinery (extended with `allowlist.dind`). Nested containers' outbound traffic still appears to the host iptables as originating from `vscode`, which the owner-rule blocks. Loopback ports (the testcontainers pattern) work as expected.
 
-- A separate image tag `generic-devcontainer:dind` (built via the multi-stage
-  Dockerfile's `dind` target) adds `dockerd-rootless`, `fuse-overlayfs`,
-  `slirp4netns`, and `uidmap` on top of the base image.
-- The container is named `dev-<dir>-dind`; mutually exclusive with
-  `--maintenance` and the normal mode (three-way conflict guard).
-- `--device=/dev/fuse`, `--security-opt apparmor=unconfined`, and
-  `--security-opt seccomp=unconfined` are required for the rootlesskit
-  user namespace.
-- A dedicated named volume `devcontainer-dind:/home/vscode/.local/share/docker`
-  preserves the image cache across container restarts and `--build` rebuilds.
-- The entrypoint launches `dockerd-rootless.sh` as `vscode` with
-  `HTTPS_PROXY=http://127.0.0.1:8888` and `--iptables=false`. Registry
-  pulls flow through `tinyproxy` and are filtered against the same
-  allowlist machinery as everything else.
-- An additional `allowlist.dind` (Docker Hub, MCR, Quay, GCR, etc.) is
-  merged into the tinyproxy filter only when DinD is active.
+A separate `devcontainer-dind` named volume preserves the nested image cache across rebuilds.
 
-### Security boundary
+```bash
+dev --dind -- /workspace/scripts/verify-firewall.sh   # 12 checks
+dev --dind -- /workspace/scripts/verify-dind.sh       # heavier smoke tests
+```
 
-The agent inside `--dind` mode is no more powerful for outbound traffic
-than in normal mode: `tinyproxy` still gates everything. Nested containers
-run their own slirp4netns inside `vscode`'s user namespace; their outbound
-traffic appears to the host iptables as originating from `vscode`, which
-the existing owner-rule blocks. Testcontainers' usual loopback-port
-pattern works as expected.
+## Persistence
 
-### Host requirements
+Two named volumes preserve state across container restarts and rebuilds:
 
-`--dind` runs `dockerd-rootless` inside the container, which has to create
-nested user namespaces. A few host kernel knobs must permit that:
+- `devcontainer-mise:/mise` — installed tools and caches
+- `devcontainer-home:/home/vscode` — shell history, git config, SSH keys, dotfiles
 
-- `kernel.unprivileged_userns_clone=1` (default on most distros). If `0`,
-  `--dind` fails to start.
-- `kernel.apparmor_restrict_unprivileged_userns=0` on Ubuntu 23.10+ and
-  other AppArmor-enabled hosts running Linux 6.x. Default is `1`, which
-  blocks rootlesskit even with `--security-opt apparmor=unconfined`. To
-  enable:
+`--dind` adds `devcontainer-dind` for the nested image cache.
 
-    ```bash
-    sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-    echo 'kernel.apparmor_restrict_unprivileged_userns=0' \
-      | sudo tee /etc/sysctl.d/99-rootless-userns.conf
-    ```
+```bash
+docker volume rm devcontainer-mise devcontainer-home
+```
 
-  The `dev` script preflights this and refuses to start with a remediation
-  message. Set `DEV_SKIP_APPARMOR_CHECK=1` to bypass (e.g. when a custom
-  AppArmor profile grants `userns,`).
+## Host Requirements
 
-### Host runtime support
-
-- **Linux:** `docker` is preferred when both are installed; `podman` is
-  used otherwise. Override with `DEV_RUNTIME=docker` or `DEV_RUNTIME=podman`.
-- **macOS:** `podman` only. Docker Desktop is explicitly unsupported. Make
-  sure the podman VM is running:
+- **Linux**: `docker` or `podman`. Docker is preferred when both are installed. Override with `DEV_RUNTIME=docker` or `DEV_RUNTIME=podman`.
+- **macOS**: `podman` only — Docker Desktop is not supported.
 
   ```bash
   brew install podman
@@ -217,105 +133,64 @@ nested user namespaces. A few host kernel knobs must permit that:
   podman machine start
   ```
 
-### Verification
+- **`--dind` on Ubuntu 23.10+ / Linux 6.x**: `dev` preflights `kernel.apparmor_restrict_unprivileged_userns`. If it's `1`:
 
-The DinD-aware checks in `verify-firewall.sh` activate inside `--dind`:
+  ```bash
+  sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+  echo 'kernel.apparmor_restrict_unprivileged_userns=0' \
+    | sudo tee /etc/sysctl.d/99-rootless-userns.conf
+  ```
 
-```bash
-dev --dind -- /workspace/scripts/verify-firewall.sh
+  Set `DEV_SKIP_APPARMOR_CHECK=1` to bypass (e.g. with a custom AppArmor profile that grants `userns,`).
+
+The script reads `id -u` / `id -g` and bakes them into the image. If your host UID/GID later changes, the next `dev` invocation detects the mismatch and prompts to rebuild + wipe volumes.
+
+## `dev` Flags
+
+```
+dev [OPTIONS] [-- COMMAND...]
+dev install
+
+OPTIONS:
+  --help               Show help
+  --dry-run            Print the docker command without running it
+  --build              Force rebuild of the image
+  --port PORT          Forward an additional port (repeatable)
+  --default-ports      Forward 5173, 5174, 8080, 2345, 3000
+  --maintenance        Start with firewall off and sudo enabled
+  --dind               Start with rootless docker available inside
+  --monitor            Tail the firewall proxy log of the running container
+  --monitor-fw         Stream iptables-dropped packets of the running container
+  --disable-firewall   Open the firewall on the running container
+  --enable-firewall    Restore the firewall on the running container
+  --                   Pass the rest as a command into the container
+
+COMMANDS:
+  install              Symlink this script into a writable directory on PATH
 ```
 
-In `--dind` mode all 12 checks should pass.
+### Environment variables
 
-For the heavier in-container checks (smoke build, postgres testcontainers
-smoke, self-build):
+- `DEV_RUNTIME=docker|podman` — force a runtime when both are installed.
+- `DEV_ASSUME_YES=1` — accept the rebuild-and-wipe-volumes prompt non-interactively.
+- `DEV_SKIP_APPARMOR_CHECK=1` — bypass the `--dind` AppArmor preflight.
+- `DEV_EXTRA_RUN_ARGS=...` — extra args appended to `docker run`.
+- `GITHUB_TOKEN` — passed through to the container if set on the host.
 
-```bash
-dev --dind -- /workspace/scripts/verify-dind.sh
-```
+## Architecture
 
-The full edge-case matrix lives under `scripts/test/`. Run it on a VM:
+Three components:
 
-```bash
-bash scripts/test/run-all.sh
-```
+- **Dockerfile** — Multi-stage build on `mcr.microsoft.com/devcontainers/base:ubuntu`. Bakes mise + base tools (node, ripgrep, eza, lazygit) into `/mise/`. The `dind` target adds rootless dockerd, fuse-overlayfs, slirp4netns.
+- **entrypoint.sh** — Runs on every container start. Sets up the firewall (or skips it in maintenance mode), runs `mise install` if a `mise.toml` is in `/workspace`, marks `/workspace` as a safe git directory, then `exec`s the shell.
+- **dev** — Host-side wrapper. Manages container lifecycle: image build, container reuse, volume mounts, port forwarding, mode selection, firewall toggling.
 
-This builds both images, runs every scenario in `scripts/test/scenarios/`,
-and reports a final pass/fail/skip table. See
-`docs/superpowers/specs/2026-04-30-dind-design.md` for the design and
-the full coverage map.
+## Tests
 
-## Port Forwarding
-
-By default, no ports are forwarded. Pass `--default-ports` to forward a
-common set of development ports from the container to your host:
-
-- `5173`, `5174`: Standard Vite/Frontend ports.
-- `8080`: Common web server port.
-- `2345`: Default port for Delve (Go debugger).
-- `3000`: Common Node.js/Rails/React port.
-
-Use the `--port` flag to forward additional ports individually.
-
-## macOS Users
-
-`./dev` reads `id -u` / `id -g` and bakes those into the image
-automatically. No manual `--build-arg` is needed. If your host UID/GID
-ever changes, the next `./dev` invocation detects the mismatch and
-prompts to rebuild + wipe the named volumes.
-
-## Volume Caching
-
-Two named Docker volumes are used to persist data across container restarts and different projects:
-
-- `devcontainer-mise:/mise` — persists all `mise` data (installed tools, caches)
-- `devcontainer-home:/home/vscode` — persists user home directory (configs, history, dotfiles)
-
-To clear the cache and reinstall tools from scratch:
+End-to-end suite under `scripts/test/` (needs passwordless `sudo`):
 
 ```bash
-docker volume rm devcontainer-mise
+sudo bash scripts/test/run-all.sh
 ```
 
-To reset all user settings and start fresh:
-
-```bash
-docker volume rm devcontainer-home
-```
-
-To reset both:
-
-```bash
-docker volume rm devcontainer-mise devcontainer-home
-```
-
-## Home Directory Persistence
-
-The `devcontainer-home` named volume backs the entire `/home/vscode` directory.
-This ensures your shell environment and personal configurations are preserved
-even when the container is removed or the image is rebuilt.
-
-User settings that persist:
-
-- Zsh history and shell customizations (`.zshrc` aliases, functions)
-- Git configuration (`.gitconfig`)
-- Editor configurations (Nvim, etc.)
-- SSH keys and known hosts
-
-On first run, the volume is auto-populated from the image, including the
-oh-my-zsh setup and mise activation. After image rebuilds, if the mise
-activation line is ever missing from your `.zshrc`, the entrypoint re-adds it
-automatically.
-
-Reset (wipe all user settings and start fresh): `docker volume rm devcontainer-home`
-
-## Troubleshooting
-
-- **Mise Install Failures**: If tools fail to install on startup, check your
-internet connection or `mise.toml` syntax. The container will still start, but
-tools may be missing.
-- **UID Mismatch**: `./dev` detects when the image's `dev.uid` /
-  `dev.gid` labels disagree with your `id -u` / `id -g` and prompts
-  to rebuild + wipe the named volumes. If you decline the prompt the
-  script exits non-zero. Set `DEV_ASSUME_YES=1` to accept
-  non-interactively.
+Builds both image targets, walks every script under `scripts/test/scenarios/`, and reports a pass/fail/skip table. Logs at `scripts/test/last-run.log` and `scripts/test/last-summary.log`.
