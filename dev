@@ -129,6 +129,8 @@ MONITOR=false
 MONITOR_FW=false
 DISABLE_FW=false
 ENABLE_FW=false
+CREATE_DC=false
+FORCE=false
 EXTRA_PORTS=()
 CMD_ARGS=()
 
@@ -326,6 +328,14 @@ while [[ $# -gt 0 ]]; do
       ENABLE_FW=true
       shift
       ;;
+    --create-dev-container)
+      CREATE_DC=true
+      shift
+      ;;
+    --force)
+      FORCE=true
+      shift
+      ;;
     --)
       shift
       CMD_ARGS=("$@")
@@ -338,6 +348,33 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+create_dev_container() {
+  echo "Error: create_dev_container not yet implemented" >&2
+  exit 1
+}
+
+if [[ "$CREATE_DC" == true ]]; then
+  # Allowed companions: --dind, --force. Reject everything else.
+  bad=()
+  [[ "$DRY_RUN"     == true ]] && bad+=(--dry-run)
+  [[ "$FORCE_BUILD" == true ]] && bad+=(--build)
+  [[ "$DEFAULT_PORTS" == true ]] && bad+=(--default-ports)
+  [[ "$MAINTENANCE" == true ]] && bad+=(--maintenance)
+  [[ "$MONITOR"     == true ]] && bad+=(--monitor)
+  [[ "$MONITOR_FW"  == true ]] && bad+=(--monitor-fw)
+  [[ "$DISABLE_FW"  == true ]] && bad+=(--disable-firewall)
+  [[ "$ENABLE_FW"   == true ]] && bad+=(--enable-firewall)
+  [[ ${#EXTRA_PORTS[@]} -gt 0 ]] && bad+=(--port)
+  [[ ${#CMD_ARGS[@]}  -gt 0 ]] && bad+=("--")
+  if [[ ${#bad[@]} -gt 0 ]]; then
+    echo "Error: --create-dev-container does not compose with: ${bad[*]}" >&2
+    echo "       Allowed companions: --dind, --force." >&2
+    exit 1
+  fi
+  create_dev_container
+  exit 0
+fi
 
 if [[ "$DIND" == true && "$MAINTENANCE" == true ]]; then
   echo "Error: --dind and --maintenance are mutually exclusive." >&2
