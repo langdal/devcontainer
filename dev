@@ -173,6 +173,15 @@ OPTIONS:
                   Re-run firewall-init.sh on the running workspace container
                   (normal or dind) to rebuild the allowlist filter and
                   restore the default-deny iptables policy.
+  --create-dev-container
+                  Generate a self-contained .devcontainer/ in the
+                  current directory (devcontainer.json + Dockerfile +
+                  support files). VS Code's "Reopen in Container" will
+                  build and attach to it. Compose with --dind for the
+                  Docker-in-Docker variant. Use --force to overwrite
+                  existing files.
+  --force         Overwrite existing files when used with
+                  --create-dev-container.
   --              Pass remaining arguments as command to container
 
 COMMANDS:
@@ -197,6 +206,8 @@ EXAMPLES:
   dev --enable-firewall         # Restore the firewall on the running container
   dev -- npm run dev            # Run custom command in container
   dev install                   # Install 'dev' onto your PATH
+  dev --create-dev-container             # Scaffold .devcontainer/ for VS Code
+  dev --create-dev-container --dind      # Scaffold dind-mode .devcontainer/
 
 EOF
 }
@@ -458,7 +469,16 @@ create_dev_container() {
     write_devcontainer_json_normal "${target_dir}/devcontainer.json"
   fi
 
-  echo "Wrote ${target_dir}/ (mode: $([[ "$DIND" == true ]] && echo dind || echo normal))"
+  local mode_label="normal"
+  [[ "$DIND" == true ]] && mode_label="dind"
+  echo "Wrote ${target_dir}/ (${mode_label} mode)."
+  echo
+  echo "Next steps:"
+  echo "  1. Open this directory in VS Code:   code ."
+  echo "  2. When prompted, choose 'Reopen in Container'."
+  echo "  3. (Optional) Add a workspace-root .devcontainer-allowlist"
+  echo "     for project-specific firewall hostnames; firewall-init.sh"
+  echo "     merges it at container startup."
 }
 
 if [[ "$CREATE_DC" == true ]]; then
