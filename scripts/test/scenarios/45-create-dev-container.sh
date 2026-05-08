@@ -22,6 +22,11 @@ parse_json() {
     jq -e . "$1" >/dev/null 2>&1
 }
 
+# JSONC validator: strip line comments, then validate as JSON.
+parse_jsonc() {
+    sed 's:^[[:space:]]*//.*$::' "$1" | jq -e . >/dev/null 2>&1
+}
+
 # ---------- normal mode: clean dir ----------
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK" "${WORK}_b" "${WORK}_d"' EXIT
@@ -96,8 +101,8 @@ for f in devcontainer.json Dockerfile entrypoint.sh firewall-init.sh \
         exit 1
     fi
 done
-if ! parse_json .devcontainer/devcontainer.json; then
-    log_fail "dind-mode: devcontainer.json is not valid JSON"
+if ! parse_jsonc .devcontainer/devcontainer.json; then
+    log_fail "dind-mode: devcontainer.json is not valid JSONC"
     exit 1
 fi
 if ! grep -q '"target": "dind"' .devcontainer/devcontainer.json; then

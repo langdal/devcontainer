@@ -375,8 +375,42 @@ JSON
 
 write_devcontainer_json_dind() {
   local out="$1"
-  echo "Error: dind devcontainer.json not yet implemented" >&2
-  exit 1
+  cat > "$out" <<'JSON'
+{
+  // dind mode requires kernel.apparmor_restrict_unprivileged_userns=0
+  // on Ubuntu 23.10+ / Linux 6.x hosts. See README.md for the
+  // host-side preflight (rootless dockerd needs CLONE_NEWUSER).
+  "name": "generic-devcontainer-dind",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".",
+    "target": "dind"
+  },
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
+  "workspaceFolder": "/workspace",
+  "remoteUser": "vscode",
+  "updateRemoteUserUID": true,
+  "overrideCommand": true,
+  "containerEnv": {
+    "DEVCONTAINER_DIND": "1"
+  },
+  "runArgs": [
+    "--cap-add=NET_ADMIN",
+    "--cap-add=SYS_ADMIN",
+    "--device=/dev/fuse",
+    "--device=/dev/net/tun",
+    "--security-opt", "apparmor=unconfined",
+    "--security-opt", "seccomp=unconfined",
+    "--security-opt", "systempaths=unconfined",
+    "--security-opt", "label=disable"
+  ],
+  "mounts": [
+    "source=${devcontainerId}-mise,target=/mise,type=volume",
+    "source=${devcontainerId}-home,target=/home/vscode,type=volume",
+    "source=${devcontainerId}-dind,target=/home/vscode/.local/share/docker,type=volume"
+  ]
+}
+JSON
 }
 
 create_dev_container() {
