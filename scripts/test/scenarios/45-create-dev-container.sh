@@ -17,9 +17,9 @@ if [ ! -x "$DEV" ]; then
     exit 1
 fi
 
-# JSON validator: prefer python3 (always present on test hosts).
+# JSON validator: jq is in the base image and on most test hosts.
 parse_json() {
-    python3 -m json.tool "$1" >/dev/null 2>&1
+    jq -e . "$1" >/dev/null 2>&1
 }
 
 # ---------- normal mode: clean dir ----------

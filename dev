@@ -349,6 +349,36 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+write_devcontainer_json_normal() {
+  local out="$1"
+  cat > "$out" <<'JSON'
+{
+  "name": "generic-devcontainer",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".",
+    "target": "base"
+  },
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
+  "workspaceFolder": "/workspace",
+  "remoteUser": "vscode",
+  "updateRemoteUserUID": true,
+  "overrideCommand": true,
+  "runArgs": ["--cap-add=NET_ADMIN"],
+  "mounts": [
+    "source=${devcontainerId}-mise,target=/mise,type=volume",
+    "source=${devcontainerId}-home,target=/home/vscode,type=volume"
+  ]
+}
+JSON
+}
+
+write_devcontainer_json_dind() {
+  local out="$1"
+  echo "Error: dind devcontainer.json not yet implemented" >&2
+  exit 1
+}
+
 create_dev_container() {
   local target_dir=".devcontainer"
   local sources=(Dockerfile entrypoint.sh firewall-init.sh \
@@ -388,9 +418,11 @@ create_dev_container() {
     cp "${SCRIPT_DIR}/${f}" "${target_dir}/${f}"
   done
 
-  # devcontainer.json is written in the next task — for now, write a
-  # placeholder so the collision-check logic and file set are testable.
-  printf '{}\n' > "${target_dir}/devcontainer.json"
+  if [[ "$DIND" == true ]]; then
+    write_devcontainer_json_dind "${target_dir}/devcontainer.json"
+  else
+    write_devcontainer_json_normal "${target_dir}/devcontainer.json"
+  fi
 
   echo "Wrote ${target_dir}/ (mode: $([[ "$DIND" == true ]] && echo dind || echo normal))"
 }
