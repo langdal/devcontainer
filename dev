@@ -583,21 +583,28 @@ DIND_NAME="dev-${WORKSPACE_BASENAME}-dind"
 
 # Resolve which workspace container the management commands below should
 # target. Picks the running one among normal / dind / maint. Sets:
-#   MANAGED_TARGET = "normal" | "dind" | "maint" | ""   (empty = none running)
-#   MANAGED_NAME   = the container name (when MANAGED_TARGET is non-empty)
+#   MANAGED_TARGET       = "normal" | "dind" | "maint" | ""   (empty = none running)
+#   MANAGED_NAME         = the container name (when MANAGED_TARGET is non-empty)
+#   MANAGED_RUNTIME_ARGS = runtime connection args for that container's storage
+# Each name is looked up in its own storage so the cross-storage split on
+# macOS+podman (dind lives in the rootful connection, normal/maint in the
+# default rootless one) does not hide a running container from the
+# auto-detect — that hole used to make e.g. `dev --disable-firewall` blind
+# to a running dind container.
 # Only one of the three can be running at a time — enforced by the
 # three-way conflict guard further down.
 resolve_managed_container() {
   MANAGED_TARGET=""
   MANAGED_NAME=""
-  if container_running "$NORMAL_NAME"; then
-    MANAGED_TARGET="normal"; MANAGED_NAME="$NORMAL_NAME"; return
+  MANAGED_RUNTIME_ARGS=""
+  if container_running "$NORMAL_NAME" ""; then
+    MANAGED_TARGET="normal"; MANAGED_NAME="$NORMAL_NAME"; MANAGED_RUNTIME_ARGS=""; return
   fi
-  if container_running "$DIND_NAME"; then
-    MANAGED_TARGET="dind"; MANAGED_NAME="$DIND_NAME"; return
+  if container_running "$DIND_NAME" "$DIND_RUNTIME_ARGS"; then
+    MANAGED_TARGET="dind"; MANAGED_NAME="$DIND_NAME"; MANAGED_RUNTIME_ARGS="$DIND_RUNTIME_ARGS"; return
   fi
-  if container_running "$MAINT_NAME"; then
-    MANAGED_TARGET="maint"; MANAGED_NAME="$MAINT_NAME"; return
+  if container_running "$MAINT_NAME" ""; then
+    MANAGED_TARGET="maint"; MANAGED_NAME="$MAINT_NAME"; MANAGED_RUNTIME_ARGS=""; return
   fi
 }
 
@@ -615,7 +622,7 @@ if [[ "$MONITOR" == true || "$MONITOR_FW" == true ]]; then
   fi
   resolve_managed_container
   if [[ -z "$MANAGED_TARGET" ]]; then
-    echo "Error: no dev container is running for this workspace (looked for ${NORMAL_NAME}, ${DIND_NAME}). Start one with 'dev' or 'dev --dind' first." >&2
+    echo "Error: no dev container is running for this workspace (looked for ${NORMAL_NAME}, ${DIND_NAME}, ${MAINT_NAME}). Start one with 'dev', 'dev --dind', or 'dev --maintenance' first." >&2
     exit 1
   fi
   if [[ "$MANAGED_TARGET" == "maint" ]]; then
@@ -623,11 +630,11 @@ if [[ "$MONITOR" == true || "$MONITOR_FW" == true ]]; then
     exit 1
   fi
   if [[ "$MONITOR" == true ]]; then
-    exec $RUNTIME exec -it "$MANAGED_NAME" tail -F /var/log/tinyproxy.log
+    exec $RUNTIME $MANAGED_RUNTIME_ARGS exec -it "$MANAGED_NAME" tail -F /var/log/tinyproxy.log
   else
     # tcpdump on the NFLOG group set by firewall-init.sh. Needs CAP_NET_ADMIN
     # (the container already has it) and root inside the container.
-    exec $RUNTIME exec -it --user root "$MANAGED_NAME" \
+    exec $RUNTIME $MANAGED_RUNTIME_ARGS exec -it --user root "$MANAGED_NAME" \
         tcpdump -i nflog:1 -nn -l
   fi
 fi
@@ -646,7 +653,7 @@ if [[ "$DISABLE_FW" == true || "$ENABLE_FW" == true ]]; then
   fi
   resolve_managed_container
   if [[ -z "$MANAGED_TARGET" ]]; then
-    echo "Error: no dev container is running for this workspace (looked for ${NORMAL_NAME}, ${DIND_NAME}). Start one with 'dev' or 'dev --dind' first." >&2
+    echo "Error: no dev container is running for this workspace (looked for ${NORMAL_NAME}, ${DIND_NAME}, ${MAINT_NAME}). Start one with 'dev', 'dev --dind', or 'dev --maintenance' first." >&2
     exit 1
   fi
   if [[ "$MANAGED_TARGET" == "maint" ]]; then
@@ -657,7 +664,7 @@ if [[ "$DISABLE_FW" == true || "$ENABLE_FW" == true ]]; then
     # Open the kernel egress AND switch tinyproxy to allow-all (permissive
     # filter + SIGHUP) so HTTP_PROXY-honoring clients in existing shells
     # also get through, not just direct/--noproxy traffic.
-    exec $RUNTIME exec --user root "$MANAGED_NAME" sh -c "
+    exec $RUNTIME $MANAGED_RUNTIME_ARGS exec --user root "$MANAGED_NAME" sh -c "
       set -e
       iptables -F OUTPUT
       iptables -P OUTPUT ACCEPT
@@ -670,7 +677,7 @@ if [[ "$DISABLE_FW" == true || "$ENABLE_FW" == true ]]; then
       echo 'firewall disabled'
     "
   else
-    exec $RUNTIME exec --user root "$MANAGED_NAME" /usr/local/sbin/firewall-init.sh
+    exec $RUNTIME $MANAGED_RUNTIME_ARGS exec --user root "$MANAGED_NAME" /usr/local/sbin/firewall-init.sh
   fi
 fi
 
