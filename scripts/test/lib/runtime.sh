@@ -1,4 +1,5 @@
 # scripts/test/lib/runtime.sh
+# shellcheck shell=bash
 #
 # Helpers around the host runtime (docker / podman) that scenarios use
 # beyond what `dev` itself does.

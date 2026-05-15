@@ -3,7 +3,12 @@
 # platform: linux
 set -u
 LIB="$(dirname "$0")/../lib"
-. "$LIB/assert.sh"; . "$LIB/runtime.sh"; . "$LIB/restore.sh"
+# shellcheck source=scripts/test/lib/assert.sh
+. "$LIB/assert.sh"
+# shellcheck source=scripts/test/lib/runtime.sh
+. "$LIB/runtime.sh"
+# shellcheck source=scripts/test/lib/restore.sh
+. "$LIB/restore.sh"
 require_platform linux
 trap restore_host EXIT
 
@@ -28,7 +33,7 @@ if ! command -v podman >/dev/null 2>&1; then
     log_fail "podman missing"; exit 1
 fi
 
-cd "$(dirname "$0")/../../.."
+cd "$(dirname "$0")/../../.." || exit 1
 out=$(./dev --dry-run 2>&1) || { log_fail "dev --dry-run failed: $out"; exit 1; }
 # detect_runtime prefers docker — even when docker is the podman shim. That's
 # correct: dev does not (and should not) try to inspect what 'docker' really is.

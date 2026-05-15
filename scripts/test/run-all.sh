@@ -29,11 +29,12 @@ fi
 # running ./dev as root would now hit dev's UID 0 refusal, and any
 # artifacts left behind would be root-owned. Must run before anything
 # that touches the workspace path.
+# shellcheck source=scripts/test/lib/privilege.sh
 . "$(dirname "$0")/lib/privilege.sh"
 drop_privs_if_root "$@"
 
 WORKSPACE="$(cd "$(dirname "$0")/../.." && pwd)"
-cd "$WORKSPACE"
+cd "$WORKSPACE" || exit 1
 
 LOG_DIR="$WORKSPACE/scripts/test"
 LAST_LOG="$LOG_DIR/last-run.log"
@@ -109,12 +110,12 @@ if ! ./dev --build -- true 2>&1 | tee -a "$LAST_LOG"; then
     echo "FATAL: failed to build base image" | tee -a "$LAST_LOG"
     exit 1
 fi
-docker rm -f dev-$(basename "$WORKSPACE") 2>/dev/null || true
+docker rm -f "dev-$(basename "$WORKSPACE")" 2>/dev/null || true
 if ! ./dev --build --dind -- true 2>&1 | tee -a "$LAST_LOG"; then
     echo "FATAL: failed to build :dind image" | tee -a "$LAST_LOG"
     exit 1
 fi
-docker rm -f dev-$(basename "$WORKSPACE")-dind 2>/dev/null || true
+docker rm -f "dev-$(basename "$WORKSPACE")"-dind 2>/dev/null || true
 
 # ---- Walk scenarios ----
 PASS=0; FAIL=0; SKIP=0

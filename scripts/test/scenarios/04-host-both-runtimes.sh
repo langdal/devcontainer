@@ -3,7 +3,12 @@
 # platform: linux
 set -u
 LIB="$(dirname "$0")/../lib"
-. "$LIB/assert.sh"; . "$LIB/runtime.sh"; . "$LIB/restore.sh"
+# shellcheck source=scripts/test/lib/assert.sh
+. "$LIB/assert.sh"
+# shellcheck source=scripts/test/lib/runtime.sh
+. "$LIB/runtime.sh"
+# shellcheck source=scripts/test/lib/restore.sh
+. "$LIB/restore.sh"
 require_platform linux
 trap restore_host EXIT
 
@@ -15,7 +20,7 @@ fi
 apt_install_remember podman || { log_skip "could not install podman"; exit 0; }
 remember_pkg_install podman
 
-cd "$(dirname "$0")/../../.."
+cd "$(dirname "$0")/../../.." || exit 1
 out=$(./dev --dry-run 2>&1) || { log_fail "dev --dry-run failed: $out"; exit 1; }
 if expect_grep "$out" '^docker run '; then
     log_pass "both runtimes installed: dev prefers docker"

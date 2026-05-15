@@ -3,7 +3,12 @@
 # platform: linux
 set -u
 LIB="$(dirname "$0")/../lib"
-. "$LIB/assert.sh"; . "$LIB/runtime.sh"; . "$LIB/restore.sh"
+# shellcheck source=scripts/test/lib/assert.sh
+. "$LIB/assert.sh"
+# shellcheck source=scripts/test/lib/runtime.sh
+. "$LIB/runtime.sh"
+# shellcheck source=scripts/test/lib/restore.sh
+. "$LIB/restore.sh"
 require_platform linux
 trap restore_host EXIT
 
@@ -14,7 +19,7 @@ fi
 apt_install_remember podman || { log_skip "could not install podman"; exit 0; }
 remember_pkg_install podman
 
-cd "$(dirname "$0")/../../.."
+cd "$(dirname "$0")/../../.." || exit 1
 
 # 1. With both installed, DEV_RUNTIME=podman should force podman.
 out=$(DEV_RUNTIME=podman ./dev --dry-run 2>&1) || { log_fail "DEV_RUNTIME=podman failed: $out"; exit 1; }

@@ -1,3 +1,9 @@
 scripts/test/last-run.log
 scripts/test/last-summary.log
 *.local.*
+
+# CI artifacts (written by scripts/test/run-in-vm.sh)
+scripts/test/last-run-*.log
+scripts/test/last-summary-*.log
+scripts/test/serial-*.log
+scripts/test/cloud-init-output-*.log
