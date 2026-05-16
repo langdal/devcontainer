@@ -1,4 +1,5 @@
 # scripts/test/lib/assert.sh
+# shellcheck shell=bash
 #
 # Logging + assertion helpers for scenario scripts. Source this at the top
 # of each scenario.
@@ -12,10 +13,11 @@
 # Drop privileges if a scenario was invoked as root via `sudo bash …`.
 # Idempotent — when the orchestrator already dropped privileges, this
 # is a no-op. Must run before any state-touching code in the scenario.
+# shellcheck source=scripts/test/lib/privilege.sh
 . "$(dirname "${BASH_SOURCE[0]}")/privilege.sh"
 drop_privs_if_root "$@"
 
-SCENARIO_RESULT=""
+export SCENARIO_RESULT=""
 
 _scenario_name() {
     basename "${BASH_SOURCE[2]:-${BASH_SOURCE[1]:-unknown}}" .sh

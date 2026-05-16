@@ -3,11 +3,14 @@
 # platform: linux
 set -u
 LIB="$(dirname "$0")/../lib"
-. "$LIB/assert.sh"; . "$LIB/restore.sh"
+# shellcheck source=scripts/test/lib/assert.sh
+. "$LIB/assert.sh"
+# shellcheck source=scripts/test/lib/restore.sh
+. "$LIB/restore.sh"
 require_platform linux
 trap restore_host EXIT
 
-cd "$(dirname "$0")/../../.."
+cd "$(dirname "$0")/../../.." || exit 1
 WS=$(basename "$(pwd)")
 D="dev-${WS}-dind"
 remember_container "$D"
@@ -19,7 +22,7 @@ docker rm -f "$D" 2>/dev/null
 # tell whether a -v / mount inside the nested container reaches the host.
 HOST_SENTINEL="/etc/test-host-sentinel-$$"
 sudo sh -c "echo HOST > $HOST_SENTINEL"
-remember_pkg_install_marker() { :; }   # no-op; sentinel cleanup below
+# Cleanup of the host sentinel is folded into the EXIT trap below.
 trap 'sudo rm -f '"$HOST_SENTINEL"'; restore_host' EXIT
 
 # Drop a different sentinel into the dev container's /etc.

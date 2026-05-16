@@ -3,11 +3,14 @@
 # platform: linux
 set -u
 LIB="$(dirname "$0")/../lib"
-. "$LIB/assert.sh"; . "$LIB/restore.sh"
+# shellcheck source=scripts/test/lib/assert.sh
+. "$LIB/assert.sh"
+# shellcheck source=scripts/test/lib/restore.sh
+. "$LIB/restore.sh"
 require_platform linux
 trap restore_host EXIT
 
-cd "$(dirname "$0")/../../.."
+cd "$(dirname "$0")/../../.." || exit 1
 WS=$(basename "$(pwd)")
 D="dev-${WS}-dind"
 remember_container "$D"
@@ -26,6 +29,7 @@ if [ -f "$ALLOWLIST" ]; then
 fi
 echo "$SENTINEL" >> "$ALLOWLIST"
 
+# shellcheck disable=SC2317  # invoked via trap
 cleanup_extra() {
     if [ -f "$ALLOWLIST.bak" ]; then
         mv "$ALLOWLIST.bak" "$ALLOWLIST"
@@ -39,7 +43,7 @@ trap 'cleanup_extra; restore_host' EXIT
 filter=$(./dev --dind -- cat /etc/tinyproxy/filter 2>&1) \
     || { log_fail "could not read /etc/tinyproxy/filter inside container"; exit 1; }
 
-escaped=$(echo "$SENTINEL" | sed 's/\./\\\\./g')
+escaped="${SENTINEL//./\\\\.}"
 if echo "$filter" | grep -Eq "^\\^${escaped}\\\$$"; then
     log_pass ".devcontainer-allowlist entry merged into the DinD filter"
     exit 0

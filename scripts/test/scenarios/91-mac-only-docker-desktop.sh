@@ -3,7 +3,12 @@
 # platform: darwin
 set -u
 LIB="$(dirname "$0")/../lib"
-. "$LIB/assert.sh"; . "$LIB/runtime.sh"; . "$LIB/restore.sh"
+# shellcheck source=scripts/test/lib/assert.sh
+. "$LIB/assert.sh"
+# shellcheck source=scripts/test/lib/runtime.sh
+. "$LIB/runtime.sh"
+# shellcheck source=scripts/test/lib/restore.sh
+. "$LIB/restore.sh"
 require_platform darwin
 trap restore_host EXIT
 
@@ -11,7 +16,7 @@ trap restore_host EXIT
 # mutates PATH; call as a plain statement (not via $(...)).
 mask_and_prepend podman
 
-cd "$(dirname "$0")/../../.."
+cd "$(dirname "$0")/../../.." || exit 1
 
 if out=$(./dev --dind -- true 2>&1); then
     log_fail "expected dev to refuse Docker Desktop on macOS; got: $out"

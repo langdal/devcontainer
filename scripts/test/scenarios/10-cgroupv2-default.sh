@@ -3,7 +3,10 @@
 # platform: linux
 set -u
 LIB="$(dirname "$0")/../lib"
-. "$LIB/assert.sh"; . "$LIB/restore.sh"
+# shellcheck source=scripts/test/lib/assert.sh
+. "$LIB/assert.sh"
+# shellcheck source=scripts/test/lib/restore.sh
+. "$LIB/restore.sh"
 require_platform linux
 trap restore_host EXIT
 
@@ -13,13 +16,13 @@ if ! grep -q 'cgroup2' /proc/mounts; then
     exit 0
 fi
 
-cd "$(dirname "$0")/../../.."
-docker rm -f dev-$(basename "$(pwd)")-dind 2>/dev/null
+cd "$(dirname "$0")/../../.." || exit 1
+docker rm -f "dev-$(basename "$(pwd)")"-dind 2>/dev/null
 
 if ! ./dev --dind -- docker version >/dev/null 2>&1; then
     log_fail "dev --dind on cgroup v2 failed; check dockerd-rootless.log"
     exit 1
 fi
-docker rm -f dev-$(basename "$(pwd)")-dind 2>/dev/null
+docker rm -f "dev-$(basename "$(pwd)")"-dind 2>/dev/null
 log_pass "cgroup v2 + rootless dockerd works"
 exit 0

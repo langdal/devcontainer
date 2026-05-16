@@ -7,6 +7,7 @@
 # dind mode. Pure host-side file manipulation; no container is started.
 set -u
 LIB="$(dirname "$0")/../lib"
+# shellcheck source=scripts/test/lib/assert.sh
 . "$LIB/assert.sh"
 
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
@@ -31,7 +32,7 @@ parse_jsonc() {
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK" "${WORK}_b" "${WORK}_d"' EXIT
 
-cd "$WORK"
+cd "$WORK" || exit 1
 if ! "$DEV" --create-dev-container >/dev/null 2>&1; then
     log_fail "normal-mode generation failed in clean dir"
     exit 1
@@ -96,7 +97,7 @@ fi
 # ---------- dind mode: clean dir ----------
 WORK_D="${WORK}_d"
 mkdir -p "$WORK_D"
-cd "$WORK_D"
+cd "$WORK_D" || exit 1
 if ! "$DEV" --create-dev-container --dind >/dev/null 2>&1; then
     log_fail "dind-mode generation failed"
     exit 1
@@ -132,7 +133,7 @@ fi
 # ---------- mutual exclusion: rejects --build ----------
 WORK_B="${WORK}_b"
 mkdir -p "$WORK_B"
-cd "$WORK_B"
+cd "$WORK_B" || exit 1
 if "$DEV" --create-dev-container --build >/dev/null 2>&1; then
     log_fail "should reject --create-dev-container --build"
     exit 1

@@ -1,4 +1,5 @@
 # scripts/test/lib/privilege.sh
+# shellcheck shell=bash
 #
 # When the orchestrator (or a single scenario) is invoked via `sudo …`,
 # this helper re-execs the calling script as the original user with the

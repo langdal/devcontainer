@@ -6,11 +6,16 @@
 # and into the in-container vscode user.
 set -u
 LIB="$(dirname "$0")/../lib"
-. "$LIB/assert.sh"; . "$LIB/runtime.sh"; . "$LIB/restore.sh"
+# shellcheck source=scripts/test/lib/assert.sh
+. "$LIB/assert.sh"
+# shellcheck source=scripts/test/lib/runtime.sh
+. "$LIB/runtime.sh"
+# shellcheck source=scripts/test/lib/restore.sh
+. "$LIB/restore.sh"
 require_platform linux
 trap restore_host EXIT
 
-cd "$(dirname "$0")/../../.."
+cd "$(dirname "$0")/../../.." || exit 1
 WS=$(basename "$(pwd)")
 remember_container "dev-${WS}"
 

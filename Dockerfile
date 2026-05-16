@@ -1,5 +1,10 @@
 FROM mcr.microsoft.com/devcontainers/base:ubuntu AS base
 
+# Use bash with pipefail for every RUN. This catches early-pipeline
+# failures (e.g. `curl … | sh` failing on the curl side) that the
+# default `sh -c` swallows.
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
 # Allow UID/GID override so the image can be built for the invoking
 # host user. The dev script reads `id -u` / `id -g` and passes both
 # as build-args; the labels are what the dev script later inspects to
@@ -31,6 +36,7 @@ LABEL dev.uid="${USER_UID}" dev.gid="${USER_GID}"
 # - gosu: clean privilege drop in the entrypoint
 # - iproute2: 'ss' for tinyproxy bind verification
 # - tcpdump: read NFLOG group for `dev --monitor-fw`
+# hadolint ignore=DL3008
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         iptables \
@@ -74,7 +80,10 @@ COPY --chown=vscode:vscode mise.base.toml /mise/config.toml
 USER vscode
 RUN mise install
 
-# Add mise shell activation to zsh
+# Add mise shell activation to zsh. Single quotes are intentional — we
+# want the literal '$(mise activate zsh)' written to .zshrc, not the
+# build-time expansion.
+# hadolint ignore=DL3059,SC2016
 RUN echo 'eval "$(mise activate zsh)"' >> /home/vscode/.zshrc
 
 # Stage reference copy of managed home files for entrypoint sync
@@ -85,7 +94,9 @@ RUN mkdir -p /etc/skel.devcontainer && \
 # --- Firewall staging ---
 # Ensure the 'proxy' system user exists (the tinyproxy package may already
 # create it). iptables -m owner uses this UID to allow only the proxy process
-# out on 80/443.
+# out on 80/443. The image intentionally finalises as root: entrypoint.sh
+# runs firewall-init.sh (needs root) and then drops to vscode via gosu.
+# hadolint ignore=DL3002
 USER root
 RUN id proxy >/dev/null 2>&1 || \
         useradd --system --no-create-home --shell /usr/sbin/nologin proxy
@@ -115,6 +126,12 @@ CMD ["sleep", "infinity"]
 # Used by `dev --dind`. Adds the rootless docker bundle on top of base.
 # ===========================================================================
 FROM base AS dind
+# Reassert pipefail for the dind stage (SHELL doesn't always carry across
+# multi-stage builds for some static analysers).
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+# Like the base image, dind stays as root: entrypoint runs firewall-init.sh
+# and dind-init.sh as root before dropping to vscode via gosu.
+# hadolint ignore=DL3002
 USER root
 
 # fuse-overlayfs   - storage driver for rootless docker
@@ -122,6 +139,7 @@ USER root
 # slirp4netns      - per-container network stack for rootless docker
 # dbus-user-session- enables systemd-style user session paths if present
 # iproute2         - already in base, listed for clarity
+# hadolint ignore=DL3008
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         fuse-overlayfs \
@@ -135,6 +153,9 @@ RUN apt-get update && \
 # sha256 verification means the image is reproducible from a known good
 # tarball and survives the firewall (download.docker.com is allowlisted).
 ARG DOCKER_VERSION=27.3.1
+# 'cd /tmp' here is local to this RUN; WORKDIR would change the WORKDIR
+# globally for the image and the image's working directory is /workspace.
+# hadolint ignore=DL3003
 RUN set -eux; \
     arch="$(uname -m)"; \
     case "$arch" in \

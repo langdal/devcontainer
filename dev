@@ -97,9 +97,11 @@ runtime_build() {
 # storage (e.g. DIND_RUNTIME_ARGS to look across the rootful connection on
 # macOS+podman).
 container_running() {
+  # shellcheck disable=SC2086  # intentional word-splitting of RUNTIME_ARGS
   $RUNTIME ${2-$RUNTIME_ARGS} ps -q -f name="^$1\$" | grep -q .
 }
 container_exists() {
+  # shellcheck disable=SC2086  # intentional word-splitting of RUNTIME_ARGS
   $RUNTIME ${2-$RUNTIME_ARGS} ps -aq -f name="^$1\$" | grep -q .
 }
 
@@ -687,10 +689,11 @@ fi
 # extra runtime args so a non-dind invocation can still reach into the
 # dind storage when checking for a running dind container.
 refuse_if_running() {
-  local other_name="$1" other_label="$2" extra="${3:-}"
-  if container_running "$other_name" "$extra"; then
+  local other_name="$1" other_label="$2" extra_args="${3:-}"
+  if container_running "$other_name" "$extra_args"; then
     echo "Error: ${other_label} container ${other_name} is running for this workspace." >&2
-    echo "       Stop it first:  $RUNTIME $extra stop ${other_name}" >&2
+    # shellcheck disable=SC2086  # intentional word-splitting of $extra_args
+    echo "       Stop it first:  $RUNTIME $extra_args stop ${other_name}" >&2
     exit 1
   fi
 }
@@ -848,6 +851,7 @@ if [[ "$DRY_RUN" == false ]]; then
   fi
 fi
 
+# shellcheck disable=SC2206  # intentional word-splitting of RUNTIME_ARGS into array
 DOCKER_CMD=($RUNTIME $RUNTIME_ARGS run "${TTY_FLAGS[@]}" --rm --name "$CONTAINER_NAME")
 
 # Capability needed by entrypoint to configure iptables (used in normal mode;
@@ -924,8 +928,14 @@ if [[ -n ${DEV_EXTRA_RUN_ARGS:-} ]]; then
 fi
 
 # Maintenance mode: tell entrypoint.sh to skip firewall init and grant sudo.
+# Also passes through /dev/kvm when present on the host, so developers can
+# exercise scripts/test/run-in-vm.sh (KVM-accelerated QEMU) from inside the
+# sandbox. Gracefully skipped on macOS hosts (no /dev/kvm).
 if [[ "$MAINTENANCE" == true ]]; then
   DOCKER_CMD+=(-e DEVCONTAINER_MAINTENANCE=1)
+  if [[ -e /dev/kvm ]]; then
+    DOCKER_CMD+=(--device=/dev/kvm)
+  fi
 fi
 
 # DinD mode: tell entrypoint.sh to start dockerd-rootless.

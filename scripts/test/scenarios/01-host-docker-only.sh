@@ -3,7 +3,12 @@
 # platform: linux
 set -u
 LIB="$(dirname "$0")/../lib"
-. "$LIB/assert.sh"; . "$LIB/runtime.sh"; . "$LIB/restore.sh"
+# shellcheck source=scripts/test/lib/assert.sh
+. "$LIB/assert.sh"
+# shellcheck source=scripts/test/lib/runtime.sh
+. "$LIB/runtime.sh"
+# shellcheck source=scripts/test/lib/restore.sh
+. "$LIB/restore.sh"
 require_platform linux
 
 # Setup: mask podman if installed. mask_and_prepend mutates the shell's
@@ -24,7 +29,7 @@ if command -v podman >/dev/null 2>&1 && podman --version >/dev/null 2>&1; then
     exit 1
 fi
 
-cd "$(dirname "$0")/../../.."
+cd "$(dirname "$0")/../../.." || exit 1
 out=$(./dev --dry-run 2>&1) || { log_fail "dev --dry-run failed: $out"; exit 1; }
 if expect_grep "$out" '^docker run '; then
     log_pass "docker-only host: dev uses docker"

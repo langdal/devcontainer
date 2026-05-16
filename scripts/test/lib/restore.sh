@@ -1,4 +1,5 @@
 # scripts/test/lib/restore.sh
+# shellcheck shell=bash
 #
 # Snapshot/restore primitives. Scenarios call snapshot_* before mutating
 # host state, then `trap restore_host EXIT` to ensure cleanup.
@@ -86,7 +87,9 @@ restore_host() {
             removed_any=1
         fi
     done
-    [ "$removed_any" = "1" ] && sudo apt-get autoremove -y >/dev/null 2>&1 || true
+    if [ "$removed_any" = "1" ]; then
+        sudo apt-get autoremove -y >/dev/null 2>&1 || true
+    fi
 
     return $rc
 }
