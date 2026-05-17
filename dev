@@ -6,6 +6,25 @@ set -euo pipefail
 # version literal by hand — touch the marker comment if reformatting.
 VERSION="1.0.0-rc.1" # x-release-please-version
 
+# Display version. Prefers `git describe` when SCRIPT_DIR is a git checkout
+# so a branch ahead of the latest tag reports e.g. `v1.0.0-rc.1-3-g5b7cdf5`
+# (or `…-dirty`) instead of lying with the stale literal. Falls back to the
+# release-please–managed $VERSION literal when there is no git checkout
+# (image-baked installs, copied script, etc.). Image build labels and the
+# version-mismatch rebuild prompt still use $VERSION — those need a value
+# that's stable across commits.
+resolve_dev_version() {
+  if command -v git >/dev/null 2>&1 && [[ -d "$SCRIPT_DIR/.git" ]]; then
+    local described
+    described=$(git -C "$SCRIPT_DIR" describe --tags --always --dirty 2>/dev/null || true)
+    if [[ -n "$described" ]]; then
+      printf '%s\n' "$described"
+      return
+    fi
+  fi
+  printf '%s\n' "$VERSION"
+}
+
 # Resolve the real directory of this script, following symlinks.
 # Needed so --build finds the Dockerfile when invoked via an installed symlink.
 resolve_script_dir() {
@@ -90,6 +109,13 @@ runtime_build() {
     extra+=(--target "$target")
   fi
   extra+=(--build-arg "USER_UID=$HOST_UID" --build-arg "USER_GID=$HOST_GID")
+  extra+=(--build-arg "DEV_VERSION=$VERSION")
+  # Pass GITHUB_TOKEN as a BuildKit secret so `mise install` can hit the
+  # GitHub API authenticated. Secrets are not persisted in image layers.
+  # Both docker buildx and podman build accept --secret id=...,env=...
+  if [[ -n ${GITHUB_TOKEN:-} ]]; then
+    extra+=(--secret "id=github_token,env=GITHUB_TOKEN")
+  fi
   if [[ "$RUNTIME" == "docker" ]]; then
     docker buildx build --network=host "${extra[@]}" -t "$tag" "$context"
   else
@@ -138,8 +164,15 @@ DISABLE_FW=false
 ENABLE_FW=false
 CREATE_DC=false
 FORCE=false
+SELF_UPDATE=false
 EXTRA_PORTS=()
 CMD_ARGS=()
+
+# Populated by check_image_uid_match's single `image inspect` call so that
+# check_image_version_match doesn't need to re-inspect, and the build path
+# below can skip a separate `images -q` probe.
+IMAGE_EXISTS=false
+IMAGE_VERSION=""
 
 usage() {
   cat <<EOF
@@ -190,6 +223,12 @@ OPTIONS:
                   existing files.
   --force         Overwrite existing files when used with
                   --create-dev-container.
+  --self-update   Update the dev script's git checkout to the latest
+                  released tag (the same source used by install.sh).
+                  Requires SCRIPT_DIR to be a clean git checkout. The
+                  image will prompt for a rebuild on the next 'dev' run
+                  via the existing version-mismatch check. Composes with
+                  --dry-run.
   --              Pass remaining arguments as command to container
 
 COMMANDS:
@@ -199,9 +238,10 @@ ENVIRONMENT:
   DEV_RUNTIME=docker|podman
                      Force a runtime when both are installed. Default:
                      docker preferred on Linux; podman only on macOS.
-  DEV_ASSUME_YES=1   Answer yes to the rebuild prompt that triggers when
-                     the image's dev.uid / dev.gid labels do not match
-                     the invoking user's id -u / id -g. Used by tests.
+  DEV_ASSUME_YES=1   Answer yes to the rebuild prompts triggered by a
+                     UID/GID label mismatch or a dev-script version
+                     mismatch (image's dev.version label vs the running
+                     script's --version). Used by tests.
   DEV_SKIP_APPARMOR_CHECK=1
                      Bypass the --dind AppArmor preflight (only safe with
                      a custom profile that grants 'userns,').
@@ -210,7 +250,9 @@ ENVIRONMENT:
                      (e.g. --dns=8.8.8.8 on a host with broken IPv6
                      resolvers).
   GITHUB_TOKEN       If set on the host, passed through into the container
-                     as an env var.
+                     as an env var, and also forwarded to image builds as a
+                     BuildKit secret so 'mise install' can hit the GitHub
+                     API authenticated (avoids the 60/hr anonymous limit).
 
 EXAMPLES:
   dev                           # Start or attach to container with default shell
@@ -226,6 +268,8 @@ EXAMPLES:
   dev --enable-firewall         # Restore the firewall on the running container
   dev -- npm run dev            # Run custom command in container
   dev install                   # Install 'dev' onto your PATH
+  dev --self-update             # Update the checkout to the latest tag
+  dev --self-update --dry-run   # Show what --self-update would do
   dev --create-dev-container             # Scaffold .devcontainer/ for VS Code
   dev --create-dev-container --dind      # Scaffold dind-mode .devcontainer/
 
@@ -304,6 +348,107 @@ install_self() {
   esac
 }
 
+# Reject companion flags that don't compose with the active subcommand.
+# Pass the subcommand label and a comma-separated allow-list; anything set
+# outside that list is reported and the script exits 1.
+forbid_companions() {
+  local subcmd="$1" allowed_csv="$2" bad=()
+  _maybe_bad() {
+    local name="$1" set_to="$2"
+    if [[ "$set_to" != true ]]; then return 0; fi
+    if [[ "$name" == "$subcmd" ]]; then return 0; fi  # the subcommand's own flag is implicit
+    case ",$allowed_csv," in *",$name,"*) return 0;; esac
+    bad+=("$name")
+  }
+  _maybe_bad --dry-run              "$DRY_RUN"
+  _maybe_bad --build                "$FORCE_BUILD"
+  _maybe_bad --default-ports        "$DEFAULT_PORTS"
+  _maybe_bad --maintenance          "$MAINTENANCE"
+  _maybe_bad --dind                 "$DIND"
+  _maybe_bad --monitor              "$MONITOR"
+  _maybe_bad --monitor-fw           "$MONITOR_FW"
+  _maybe_bad --disable-firewall     "$DISABLE_FW"
+  _maybe_bad --enable-firewall      "$ENABLE_FW"
+  _maybe_bad --create-dev-container "$CREATE_DC"
+  _maybe_bad --force                "$FORCE"
+  _maybe_bad --self-update          "$SELF_UPDATE"
+  [[ ${#EXTRA_PORTS[@]} -gt 0 ]] && _maybe_bad --port true
+  [[ ${#CMD_ARGS[@]}    -gt 0 ]] && _maybe_bad --     true
+  if [[ ${#bad[@]} -gt 0 ]]; then
+    local allowed_pretty="${allowed_csv//,/, }"
+    echo "Error: $subcmd does not compose with: ${bad[*]}" >&2
+    echo "       Allowed companion(s): ${allowed_pretty:-none}." >&2
+    exit 1
+  fi
+}
+
+# --self-update: pull the latest tag in the script's git checkout in place.
+# Detection model: we treat "installed via install.sh OR manual git clone" as
+# the same case — both produce a git checkout at SCRIPT_DIR. The git checkout
+# itself is the source of truth for the installed version (`git describe`),
+# so there is no separate marker file to drift out of sync with reality.
+self_update() {
+  if ! command -v git >/dev/null 2>&1; then
+    echo "Error: git is required for --self-update." >&2
+    exit 1
+  fi
+  if [[ ! -d "$SCRIPT_DIR/.git" ]]; then
+    echo "Error: $SCRIPT_DIR is not a git checkout — --self-update only works" >&2
+    echo "       on install-script (or manual git-clone) installations." >&2
+    echo "       Re-install via:" >&2
+    echo "         curl -fsSL https://raw.githubusercontent.com/langdal/devcontainer/main/install.sh | bash" >&2
+    exit 1
+  fi
+  if [[ -n "$(git -C "$SCRIPT_DIR" status --porcelain 2>/dev/null)" ]]; then
+    echo "Error: uncommitted changes in $SCRIPT_DIR — commit, stash, or reset" >&2
+    echo "       before retrying. Self-update refuses to clobber local edits." >&2
+    exit 1
+  fi
+  local origin_url
+  origin_url="$(git -C "$SCRIPT_DIR" remote get-url origin 2>/dev/null || true)"
+  if [[ -z "$origin_url" ]]; then
+    echo "Error: no 'origin' remote configured in $SCRIPT_DIR." >&2
+    exit 1
+  fi
+  local current_desc current_tag
+  current_desc="$(git -C "$SCRIPT_DIR" describe --tags --always 2>/dev/null || echo "unknown")"
+  current_tag="$(git -C "$SCRIPT_DIR" describe --tags --exact-match HEAD 2>/dev/null || true)"
+
+  if [[ "$DRY_RUN" == true ]]; then
+    echo "Would run: git -C $SCRIPT_DIR fetch --tags --prune origin"
+  else
+    echo ">> fetching tags from $origin_url"
+    git -C "$SCRIPT_DIR" fetch --tags --prune origin
+  fi
+
+  # Same sort as install.sh: version:refname picks the highest semver tag.
+  local latest
+  latest="$(git -C "$SCRIPT_DIR" ls-remote --tags --refs --sort='version:refname' origin 2>/dev/null \
+    | awk -F/ '{print $NF}' \
+    | tail -1)"
+  if [[ -z "$latest" ]]; then
+    echo "Error: no tags advertised by origin ($origin_url)." >&2
+    exit 1
+  fi
+
+  if [[ -n "$current_tag" && "$current_tag" == "$latest" ]]; then
+    echo "Already up to date: $current_tag"
+    return 0
+  fi
+
+  echo ">> latest tag: $latest"
+  echo ">> current:    ${current_tag:-$current_desc}"
+
+  if [[ "$DRY_RUN" == true ]]; then
+    echo "Would run: git -C $SCRIPT_DIR checkout --quiet --force $latest"
+    return 0
+  fi
+
+  git -C "$SCRIPT_DIR" checkout --quiet --force "$latest"
+  echo "Updated dev to $latest. The image will prompt for a rebuild on the"
+  echo "next 'dev' run (or run 'dev --build' now to rebuild immediately)."
+}
+
 if [[ ${1:-} == "install" ]]; then
   install_self
   exit 0
@@ -316,7 +461,7 @@ while [[ $# -gt 0 ]]; do
       exit 0
       ;;
     --version)
-      echo "dev $VERSION"
+      echo "dev $(resolve_dev_version)"
       exit 0
       ;;
     --dry-run)
@@ -369,6 +514,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --force)
       FORCE=true
+      shift
+      ;;
+    --self-update)
+      SELF_UPDATE=true
       shift
       ;;
     --)
@@ -506,24 +655,14 @@ create_dev_container() {
 }
 
 if [[ "$CREATE_DC" == true ]]; then
-  # Allowed companions: --dind, --force. Reject everything else.
-  bad=()
-  [[ "$DRY_RUN"     == true ]] && bad+=(--dry-run)
-  [[ "$FORCE_BUILD" == true ]] && bad+=(--build)
-  [[ "$DEFAULT_PORTS" == true ]] && bad+=(--default-ports)
-  [[ "$MAINTENANCE" == true ]] && bad+=(--maintenance)
-  [[ "$MONITOR"     == true ]] && bad+=(--monitor)
-  [[ "$MONITOR_FW"  == true ]] && bad+=(--monitor-fw)
-  [[ "$DISABLE_FW"  == true ]] && bad+=(--disable-firewall)
-  [[ "$ENABLE_FW"   == true ]] && bad+=(--enable-firewall)
-  [[ ${#EXTRA_PORTS[@]} -gt 0 ]] && bad+=(--port)
-  [[ ${#CMD_ARGS[@]}  -gt 0 ]] && bad+=("--")
-  if [[ ${#bad[@]} -gt 0 ]]; then
-    echo "Error: --create-dev-container does not compose with: ${bad[*]}" >&2
-    echo "       Allowed companions: --dind, --force." >&2
-    exit 1
-  fi
+  forbid_companions --create-dev-container "--dind,--force"
   create_dev_container
+  exit 0
+fi
+
+if [[ "$SELF_UPDATE" == true ]]; then
+  forbid_companions --self-update "--dry-run"
+  self_update
   exit 0
 fi
 
@@ -597,26 +736,18 @@ else
   BUILD_TARGET="base"
 fi
 
-# Container naming: normal mode uses dev-<dir>, maintenance uses dev-<dir>-maint.
-# Refuse to start one mode while the other is already running for the same
-# workspace — both would share /workspace and produce surprising state.
 WORKSPACE_BASENAME="$(basename "$(pwd)")"
 NORMAL_NAME="dev-${WORKSPACE_BASENAME}"
 MAINT_NAME="dev-${WORKSPACE_BASENAME}-maint"
 DIND_NAME="dev-${WORKSPACE_BASENAME}-dind"
 
-# Resolve which workspace container the management commands below should
-# target. Picks the running one among normal / dind / maint. Sets:
+# Resolve which workspace container the management commands target. Sets:
 #   MANAGED_TARGET       = "normal" | "dind" | "maint" | ""   (empty = none running)
 #   MANAGED_NAME         = the container name (when MANAGED_TARGET is non-empty)
 #   MANAGED_RUNTIME_ARGS = runtime connection args for that container's storage
-# Each name is looked up in its own storage so the cross-storage split on
-# macOS+podman (dind lives in the rootful connection, normal/maint in the
-# default rootless one) does not hide a running container from the
-# auto-detect — that hole used to make e.g. `dev --disable-firewall` blind
-# to a running dind container.
-# Only one of the three can be running at a time — enforced by the
-# three-way conflict guard further down.
+# Each name is looked up in its own storage because on macOS+podman the dind
+# container lives in the rootful connection while normal/maint live in the
+# default rootless one — a single-storage probe would miss the dind container.
 resolve_managed_container() {
   MANAGED_TARGET=""
   MANAGED_NAME=""
@@ -632,6 +763,23 @@ resolve_managed_container() {
   fi
 }
 
+# Shared preamble for management commands that need a running firewall-capable
+# container (--monitor, --monitor-fw, --disable-firewall, --enable-firewall).
+# Exits with a clear error if nothing is running, or if the only running
+# container is maintenance (which has no firewall).
+require_workspace_firewall_container() {
+  local op="$1"
+  resolve_managed_container
+  if [[ -z "$MANAGED_TARGET" ]]; then
+    echo "Error: no dev container is running for this workspace (looked for ${NORMAL_NAME}, ${DIND_NAME}, ${MAINT_NAME}). Start one with 'dev', 'dev --dind', or 'dev --maintenance' first." >&2
+    exit 1
+  fi
+  if [[ "$MANAGED_TARGET" == "maint" ]]; then
+    echo "Error: maintenance container ${MAINT_NAME} has no firewall — $op is meaningless in maintenance mode." >&2
+    exit 1
+  fi
+}
+
 # --monitor / --monitor-fw: read firewall logs from the running workspace
 # container (normal or dind — both run firewall-init.sh and have the same
 # tinyproxy + NFLOG stack). Maintenance mode has no firewall.
@@ -644,15 +792,7 @@ if [[ "$MONITOR" == true || "$MONITOR_FW" == true ]]; then
     echo "Error: --monitor* and --maintenance are mutually exclusive (no firewall in maintenance mode)." >&2
     exit 1
   fi
-  resolve_managed_container
-  if [[ -z "$MANAGED_TARGET" ]]; then
-    echo "Error: no dev container is running for this workspace (looked for ${NORMAL_NAME}, ${DIND_NAME}, ${MAINT_NAME}). Start one with 'dev', 'dev --dind', or 'dev --maintenance' first." >&2
-    exit 1
-  fi
-  if [[ "$MANAGED_TARGET" == "maint" ]]; then
-    echo "Error: maintenance container ${MAINT_NAME} has no firewall — --monitor/--monitor-fw are meaningless in maintenance mode." >&2
-    exit 1
-  fi
+  require_workspace_firewall_container "--monitor/--monitor-fw"
   if [[ "$MONITOR" == true ]]; then
     exec $RUNTIME $MANAGED_RUNTIME_ARGS exec -it "$MANAGED_NAME" tail -F /var/log/tinyproxy.log
   else
@@ -675,15 +815,7 @@ if [[ "$DISABLE_FW" == true || "$ENABLE_FW" == true ]]; then
     echo "Error: --disable-firewall/--enable-firewall and --maintenance are mutually exclusive (no firewall in maintenance mode)." >&2
     exit 1
   fi
-  resolve_managed_container
-  if [[ -z "$MANAGED_TARGET" ]]; then
-    echo "Error: no dev container is running for this workspace (looked for ${NORMAL_NAME}, ${DIND_NAME}, ${MAINT_NAME}). Start one with 'dev', 'dev --dind', or 'dev --maintenance' first." >&2
-    exit 1
-  fi
-  if [[ "$MANAGED_TARGET" == "maint" ]]; then
-    echo "Error: maintenance container ${MAINT_NAME} has no firewall — --disable-firewall/--enable-firewall are meaningless in maintenance mode." >&2
-    exit 1
-  fi
+  require_workspace_firewall_container "--disable-firewall/--enable-firewall"
   if [[ "$DISABLE_FW" == true ]]; then
     # Open the kernel egress AND switch tinyproxy to allow-all (permissive
     # filter + SIGHUP) so HTTP_PROXY-honoring clients in existing shells
@@ -759,14 +891,17 @@ cleanup_for_rebuild() {
 check_image_uid_match() {
   local tag="$1"
   local labels img_uid img_gid
+  # Single inspect retrieves all three labels we care about; IMAGE_VERSION
+  # is stashed for check_image_version_match so it doesn't re-inspect.
   if ! labels=$($RUNTIME $RUNTIME_ARGS image inspect "$tag" \
-      --format '{{ index .Config.Labels "dev.uid" }} {{ index .Config.Labels "dev.gid" }}' \
+      --format '{{ index .Config.Labels "dev.uid" }} {{ index .Config.Labels "dev.gid" }} {{ index .Config.Labels "dev.version" }}' \
       2>/dev/null); then
     IMAGE_EXISTS=false
+    IMAGE_VERSION=""
     return 0
   fi
   IMAGE_EXISTS=true
-  read -r img_uid img_gid <<< "$labels"
+  read -r img_uid img_gid IMAGE_VERSION <<< "$labels"
   if [[ -n "$img_uid" && -n "$img_gid" \
         && "$img_uid" == "$HOST_UID" && "$img_gid" == "$HOST_GID" ]]; then
     return 0
@@ -811,6 +946,50 @@ check_image_uid_match() {
   esac
 }
 
+# Compare the dev-script's $VERSION to the image's dev.version label.
+# Unlike the UID check this is advisory: a stale image still works, so
+# declining the prompt continues with the existing image. Sets
+# FORCE_BUILD=true only when the user (or DEV_ASSUME_YES) opts in.
+# Volumes are NOT wiped — they're version-agnostic.
+check_image_version_match() {
+  local tag="$1"
+  if [[ "$IMAGE_EXISTS" != true ]]; then
+    return 0
+  fi
+  if [[ "$FORCE_BUILD" == true ]]; then
+    return 0
+  fi
+  # IMAGE_VERSION was populated by check_image_uid_match's inspect call.
+  if [[ "$IMAGE_VERSION" == "$VERSION" ]]; then
+    return 0
+  fi
+  local img_label="${IMAGE_VERSION:-<missing>}"
+  if [[ "$DRY_RUN" == true ]]; then
+    echo "Would rebuild $tag for dev version $VERSION (image label: $img_label)" >&2
+    return 0
+  fi
+  if [[ "${DEV_ASSUME_YES:-0}" == "1" ]]; then
+    echo "Note: image $tag built with dev version $img_label; DEV_ASSUME_YES set, rebuilding for $VERSION." >&2
+    FORCE_BUILD=true
+    return 0
+  fi
+  if [[ ! -t 0 ]]; then
+    echo "Note: image $tag built with dev version $img_label; current dev script is $VERSION. Run 'dev --build' to rebuild." >&2
+    return 0
+  fi
+  echo "Image $tag was built with dev version $img_label; current dev script is $VERSION." >&2
+  local reply
+  read -r -p "Rebuild image? [y/N] " reply
+  case "$reply" in
+    y|Y|yes|YES)
+      FORCE_BUILD=true
+      ;;
+    *)
+      echo "Continuing with existing image. Run 'dev --build' later to rebuild." >&2
+      ;;
+  esac
+}
+
 if [[ "$DIND" == true ]]; then
   refuse_if_running "$NORMAL_NAME" "normal"
   refuse_if_running "$MAINT_NAME" "maintenance"
@@ -825,12 +1004,15 @@ else
   CONTAINER_NAME="$NORMAL_NAME"
 fi
 
-# Refuse to attach to an image built for a different host user. This
-# must run AFTER the early --monitor / --*-firewall exits (those act on
-# a running container and shouldn't be blocked by label mismatch) and
-# BEFORE the existing build branch (so a mismatch can short-circuit
-# into a forced rebuild via the path added in Task 3).
+# Compare host UID/GID and dev-script version to the labels on $IMAGE_TAG.
+# UID mismatch is fatal (mounted volumes are owned by the old UID), so
+# the UID check runs first and short-circuits the version check via
+# FORCE_BUILD when it triggers a rebuild. Version mismatch is advisory:
+# the image still works, it's just stale.
 check_image_uid_match "$IMAGE_TAG"
+if [[ "$FORCE_BUILD" != true ]]; then
+  check_image_version_match "$IMAGE_TAG"
+fi
 
 if [[ "$FORCE_BUILD" == true ]] || [[ "$IMAGE_EXISTS" == false ]]; then
   if [[ "$DRY_RUN" == true ]]; then

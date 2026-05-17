@@ -84,9 +84,21 @@ RUN mkdir -p /mise && chown -R vscode:vscode /mise
 # does not get picked up as a mise config when this repo itself is opened)
 COPY --chown=vscode:vscode mise.base.toml /mise/config.toml
 
-# Switch to vscode user and install base tools
+# Switch to vscode user and install base tools.
+# Optionally consume a BuildKit secret named `github_token` so mise can
+# authenticate against the GitHub API when fetching release assets — the
+# unauthenticated rate limit (60/hr) is easy to exhaust on a cold build.
+# The mount is non-required; builds without the secret still work, they
+# just fall back to anonymous requests.
 USER vscode
-RUN mise install
+RUN --mount=type=secret,id=github_token,uid=1000 \
+    if [ -s /run/secrets/github_token ]; then \
+        GITHUB_TOKEN="$(cat /run/secrets/github_token)" \
+        GITHUB_API_TOKEN="$(cat /run/secrets/github_token)" \
+        mise install; \
+    else \
+        mise install; \
+    fi
 
 # Add mise shell activation to zsh. Single quotes are intentional — we
 # want the literal '$(mise activate zsh)' written to .zshrc, not the
@@ -119,6 +131,13 @@ WORKDIR /workspace
 
 # Copy entrypoint script
 COPY --chmod=755 entrypoint.sh /entrypoint.sh
+
+# Stamp the dev-script version onto the image so `./dev` can detect when
+# an image was built by an older script and prompt for a rebuild. Kept as
+# the last LABEL layer so version bumps don't bust the heavy layers above;
+# the dind stage inherits this label via FROM base.
+ARG DEV_VERSION=unknown
+LABEL dev.version="${DEV_VERSION}"
 
 # Use entrypoint for initialization. CMD is "sleep infinity" so the
 # container stays alive when something else supplies the long-running
