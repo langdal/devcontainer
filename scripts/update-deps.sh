@@ -3,6 +3,9 @@
 #
 # What this script touches (one entry per location we hard-pin a version):
 #   mise.base.toml               node, ripgrep, eza, lazygit, neovim
+#                                (baked into the runtime container image)
+#   mise.toml                    shellcheck, hadolint, actionlint, jq
+#                                (developer tools for this repo)
 #   Dockerfile                   base image digest, ARG MISE_VERSION,
 #                                ARG DOCKER_VERSION, ARG COMPOSE_VERSION
 #   .github/workflows/*.yml      pinned action SHAs (re-resolve current
@@ -101,37 +104,61 @@ prompt_apply() {
 }
 
 # Small HTTPS helper. Uses GITHUB_TOKEN when present to dodge the
-# unauthenticated 60/hour API limit.
+# unauthenticated 60/hour API limit. On HTTP failure (notably 403 rate-
+# limit), prints stderr context and returns 1 so callers can bail; never
+# returns an empty success — that would let later sed steps wipe pins.
 ghapi() {
-    local args=(-fsSL)
+    local url="$1" body status args
+    args=(-sS -w '\n%{http_code}\n')
     [ -n "${GITHUB_TOKEN:-}" ] && args+=(-H "Authorization: Bearer $GITHUB_TOKEN")
-    curl "${args[@]}" "$1"
+    body=$(curl "${args[@]}" "$url" 2>&1) || {
+        echo "ghapi: curl failed for $url: $body" >&2
+        return 1
+    }
+    status=$(printf '%s' "$body" | tail -1)
+    body=$(printf '%s' "$body" | sed '$d')
+    if [ "$status" != "200" ]; then
+        echo "ghapi: HTTP $status for $url" >&2
+        if [ "$status" = "403" ] && [ -z "${GITHUB_TOKEN:-}" ]; then
+            echo "       (likely rate-limited; export GITHUB_TOKEN to raise the limit)" >&2
+        fi
+        return 1
+    fi
+    printf '%s\n' "$body"
 }
 
 # Resolve a tag (e.g. v4) to a commit SHA. GitHub returns annotated tags as
 # an indirection (object.type == "tag"); follow it once to get the commit.
+# Returns 1 (no output) on any HTTP/JSON failure so callers can refuse to
+# rewrite pins with an empty value.
 action_sha() {
     local repo="$1" tag="$2" ref_json sha type
-    ref_json=$(ghapi "https://api.github.com/repos/${repo}/git/refs/tags/${tag}")
-    sha=$(jq -r '.object.sha' <<<"$ref_json")
-    type=$(jq -r '.object.type' <<<"$ref_json")
+    ref_json=$(ghapi "https://api.github.com/repos/${repo}/git/refs/tags/${tag}") || return 1
+    sha=$(jq -r '.object.sha // empty' <<<"$ref_json")
+    type=$(jq -r '.object.type // empty' <<<"$ref_json")
+    [ -n "$sha" ] || return 1
     if [ "$type" = "tag" ]; then
-        sha=$(ghapi "https://api.github.com/repos/${repo}/git/tags/${sha}" \
-              | jq -r '.object.sha')
+        local tag_json
+        tag_json=$(ghapi "https://api.github.com/repos/${repo}/git/tags/${sha}") || return 1
+        sha=$(jq -r '.object.sha // empty' <<<"$tag_json")
+        [ -n "$sha" ] || return 1
     fi
     echo "$sha"
 }
 
 gh_latest_tag() {
-    ghapi "https://api.github.com/repos/$1/releases/latest" | jq -r '.tag_name'
+    local body
+    body=$(ghapi "https://api.github.com/repos/$1/releases/latest") || return 1
+    jq -r '.tag_name // empty' <<<"$body"
 }
 
 # Walk recent releases, return the first tag matching $2 (extended regex).
 # Used to keep us on the current major version family for projects whose
 # `releases/latest` jumps majors aggressively (docker/compose, moby/moby).
 gh_latest_tag_matching() {
-    ghapi "https://api.github.com/repos/$1/releases?per_page=50" \
-        | jq -r '.[] | select(.prerelease|not) | .tag_name' \
+    local body
+    body=$(ghapi "https://api.github.com/repos/$1/releases?per_page=50") || return 1
+    jq -r '.[] | select(.prerelease|not) | .tag_name' <<<"$body" \
         | grep -E "$2" \
         | head -1
 }
@@ -139,27 +166,27 @@ gh_latest_tag_matching() {
 # --- mise tools -------------------------------------------------------------
 
 check_mise_tool() {
-    local key="$1" query="${2:-$1}" current latest
+    local file="$1" key="$2" query="${3:-$2}" current latest
     current=$(awk -v k="$key" '
         $1 == k && $2 == "=" { gsub(/"/, "", $3); print $3; exit }
-    ' mise.base.toml)
+    ' "$file")
     if [ -z "$current" ]; then
-        new "mise.base.toml  ${key}  (not pinned)"
+        new "${file}  ${key}  (not pinned)"
         return 0
     fi
     if ! command -v mise >/dev/null 2>&1; then return 0; fi
     latest=$(mise latest "$query" 2>/dev/null || true)
     if [ -z "$latest" ]; then
-        new "mise.base.toml  ${key}  (mise latest failed)"
+        new "${file}  ${key}  (mise latest failed)"
         return 0
     fi
     if [ "$current" = "$latest" ]; then
-        ok "mise.base.toml  ${key} = ${current}"
+        ok "${file}  ${key} = ${current}"
     else
-        new "mise.base.toml  ${key}: ${current}  ->  ${latest}"
+        new "${file}  ${key}: ${current}  ->  ${latest}"
         if prompt_apply; then
-            sed -i.bak -E "s|^(${key} = )\"${current}\"|\\1\"${latest}\"|" mise.base.toml
-            rm -f mise.base.toml.bak
+            sed -i.bak -E "s|^(${key} = )\"${current}\"|\\1\"${latest}\"|" "$file"
+            rm -f "${file}.bak"
         fi
     fi
 }
@@ -178,11 +205,13 @@ check_base_image() {
     latest_digest=$(curl -fsSL \
         -H "Accept: application/vnd.oci.image.index.v1+json" \
         "https://mcr.microsoft.com/v2/devcontainers/base/manifests/${tag}" \
-        -D - -o /dev/null \
+        -D - -o /dev/null 2>/dev/null \
         | awk 'tolower($1) == "docker-content-digest:" {print $2}' \
         | tr -d '\r\n ')
-    if [ -z "$latest_digest" ]; then
-        new "Dockerfile  base image  (could not fetch manifest)"
+    # Belt-and-braces: refuse to proceed unless we got an actual sha256
+    # digest. An empty/garbage value would otherwise be sed'd in.
+    if [ -z "$latest_digest" ] || [ "${latest_digest#sha256:}" = "$latest_digest" ]; then
+        new "Dockerfile  base image  (could not fetch manifest digest; skipping)"
         return 0
     fi
     if [ "$current_digest" = "$latest_digest" ]; then
@@ -211,11 +240,15 @@ check_dockerfile_arg() {
     fi
     latest=$(gh_latest_tag_matching "$repo" "$pattern" || true)
     if [ -z "$latest" ]; then
-        new "Dockerfile  ARG ${arg}  (no release matched /${pattern}/)"
+        new "Dockerfile  ARG ${arg}  (no release matched /${pattern}/, or API lookup failed)"
         return 0
     fi
     if [ -n "$strip_prefix" ]; then
         latest="${latest#${strip_prefix}}"
+    fi
+    if [ -z "$latest" ]; then
+        new "Dockerfile  ARG ${arg}  (stripped version was empty; skipping)"
+        return 0
     fi
     if [ "$current" = "$latest" ]; then
         ok  "Dockerfile  ARG ${arg} = ${current}"
@@ -233,12 +266,18 @@ check_dockerfile_arg() {
 check_action() {
     local file="$1" repo="$2" tag="$3"
     local current latest
-    current=$(grep -oE "${repo//\//\\/}@[0-9a-f]{40}" "$file" | head -1 | cut -d@ -f2)
+    # Slashes are not metacharacters in extended REs — pass the repo
+    # verbatim to grep -oE. Any 40-hex run right after '@' is the pin.
+    current=$(grep -oE "${repo}@[0-9a-f]{40}" "$file" | head -1 | cut -d@ -f2)
     if [ -z "$current" ]; then
-        new "${file}  ${repo}@${tag}  (no SHA-pin found)"
+        new "${file}  ${repo}@${tag}  (no SHA-pin found in file)"
         return 0
     fi
-    latest=$(action_sha "$repo" "$tag")
+    latest=$(action_sha "$repo" "$tag" || true)
+    if [ -z "$latest" ]; then
+        new "${file}  ${repo}@${tag}  (could not resolve latest SHA; skipping)"
+        return 0
+    fi
     if [ "$current" = "$latest" ]; then
         ok  "${file}  ${repo}@${tag}  ${current:0:12}"
     else
@@ -261,7 +300,11 @@ check_lint_pin() {
     current=$(awk -v v="$ver_var" '
         $0 ~ "^"v"=" { sub("^"v"=", ""); gsub(/"/, ""); print; exit }
     ' scripts/lint.sh)
-    latest=$(gh_latest_tag "$repo")
+    latest=$(gh_latest_tag "$repo" || true)
+    if [ -z "$latest" ]; then
+        new "scripts/lint.sh  ${ver_var}  (could not resolve latest; skipping)"
+        return 0
+    fi
     latest="${latest#v}"
     if [ "$current" = "$latest" ]; then
         ok  "scripts/lint.sh  ${ver_var} = ${current}"
@@ -287,12 +330,19 @@ check_lint_pin() {
 
 # --- Run all checks --------------------------------------------------------
 
-echo "=== mise.base.toml tools ==="
-check_mise_tool node "node@lts"
-check_mise_tool ripgrep
-check_mise_tool eza
-check_mise_tool lazygit
-check_mise_tool neovim
+echo "=== mise.base.toml tools (baked into the container image) ==="
+check_mise_tool mise.base.toml node "node@lts"
+check_mise_tool mise.base.toml ripgrep
+check_mise_tool mise.base.toml eza
+check_mise_tool mise.base.toml lazygit
+check_mise_tool mise.base.toml neovim
+
+echo
+echo "=== mise.toml tools (developer tooling for this repo) ==="
+check_mise_tool mise.toml shellcheck
+check_mise_tool mise.toml hadolint
+check_mise_tool mise.toml actionlint
+check_mise_tool mise.toml jq
 
 echo
 echo "=== Dockerfile ==="
