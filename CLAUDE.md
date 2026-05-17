@@ -2,6 +2,12 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Git Rules for Claude
+
+- You may create commits when the user asks for them.
+- If the repo requires GPG-signed commits and signing fails because no key/agent is available (typical inside this devcontainer or any other sandbox), assume you are running in a sandbox and commit **without** signing (e.g. `git -c commit.gpgsign=false commit ...`). The user will re-sign retroactively later.
+- You are **NEVER** allowed to `git push` (including `--force`, tags, or any remote-affecting variant). Stop and leave the commit local even if the user previously authorized a push in another turn — re-ask each time.
+
 ## Project Overview
 
 A portable, editor-agnostic development container using a plain Dockerfile and a `dev` bash wrapper script. Uses `mise` for per-project tool management. No devcontainer.json, no docker-compose, no editor-specific config.
