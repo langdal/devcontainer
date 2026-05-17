@@ -1,6 +1,21 @@
 #!/bin/bash
 set -u
 
+# --- Suppress AAAA lookups when the container has no IPv6 connectivity ---
+# Docker's default bridge is IPv4-only, so AAAA results can't be used anyway.
+# Some upstream resolvers (typical home routers, also systemd-resolved when it
+# forwards to one) silently drop AAAA queries, which makes glibc's parallel
+# A+AAAA getaddrinfo() intermittently return EAI_AGAIN. Tinyproxy surfaces
+# this as "Temporary failure in name resolution" for the majority of requests.
+# `getent`-style callers escape this via AI_ADDRCONFIG; tinyproxy and many
+# others do not. The fix is identical to what AI_ADDRCONFIG would do: skip
+# AAAA when there's no IPv6 default route.
+if [ -z "$(ip -6 route show default 2>/dev/null)" ] \
+   && [ -w /etc/resolv.conf ] \
+   && ! grep -qE '^options[^#]*\bno-aaaa\b' /etc/resolv.conf; then
+    echo 'options no-aaaa' >> /etc/resolv.conf
+fi
+
 # --- Firewall (skipped in maintenance mode) ---
 if [ -z "${DEVCONTAINER_MAINTENANCE:-}" ]; then
     if ! /usr/local/sbin/firewall-init.sh; then
