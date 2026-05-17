@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/langdal/devcontainer/compare/v1.0.0...v1.0.1) (2026-05-17)
+
+
+### Bug Fixes
+
+* **install:** ignore prerelease tags when resolving default REF ([#6](https://github.com/langdal/devcontainer/issues/6)) ([b87e951](https://github.com/langdal/devcontainer/commit/b87e951bab9161199aa8d39d167c59858ae3817e))
+
 ## [1.0.0](https://github.com/langdal/devcontainer/compare/v1.0.0-rc.1...v1.0.0) (2026-05-17)
 
 
