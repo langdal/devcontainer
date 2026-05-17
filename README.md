@@ -6,14 +6,32 @@ A portable, editor-agnostic dev environment. One Dockerfile, one bash wrapper, p
 
 You need Docker (Linux) or Podman (macOS/Linux). See [Host requirements](#host-requirements).
 
+### Install in one line
+
+Clones into `${XDG_DATA_HOME:-~/.local/share}/devcontainer` and symlinks the `dev` script onto your PATH:
+
 ```bash
-# 1. Clone this repo somewhere convenient
-git clone <this-repo-url> ~/devcontainer
+curl -fsSL https://raw.githubusercontent.com/langdal/devcontainer/main/install.sh | bash
+```
 
-# 2. Put the dev script on your PATH
+Pin to a specific release:
+
+```bash
+REF=v1.0.0 curl -fsSL https://raw.githubusercontent.com/langdal/devcontainer/main/install.sh | bash
+```
+
+Override the install location with `INSTALL_DIR=...`. Re-running upgrades the existing checkout.
+
+### Manual install
+
+```bash
+git clone https://github.com/langdal/devcontainer.git ~/devcontainer
 ~/devcontainer/dev install
+```
 
-# 3. From any project directory, start the container
+### First use
+
+```bash
 cd ~/projects/my-project
 dev
 ```
