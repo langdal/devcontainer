@@ -152,21 +152,27 @@ dev [OPTIONS] [-- COMMAND...]
 dev install
 
 OPTIONS:
-  --help               Show help
-  --dry-run            Print the docker command without running it
-  --build              Force rebuild of the image
-  --port PORT          Forward an additional port (repeatable)
-  --default-ports      Forward 5173, 5174, 8080, 2345, 3000
-  --maintenance        Start with firewall off and sudo enabled
-  --dind               Start with rootless docker available inside
-  --monitor            Tail the firewall proxy log of the running container
-  --monitor-fw         Stream iptables-dropped packets of the running container
-  --disable-firewall   Open the firewall on the running container
-  --enable-firewall    Restore the firewall on the running container
-  --                   Pass the rest as a command into the container
+  --help                  Show help
+  --version               Print the dev script version and exit
+  --dry-run               Print the docker command without running it
+  --build                 Force rebuild of the image
+  --port PORT             Forward an additional port (repeatable)
+  --default-ports         Forward 5173, 5174, 8080, 2345, 3000
+  --maintenance           Start with firewall off and sudo enabled
+  --dind                  Start with rootless docker available inside
+  --monitor               Tail the firewall proxy log of the running container
+  --monitor-fw            Stream iptables-dropped packets of the running container
+  --disable-firewall      Open the firewall on the running container
+  --enable-firewall       Restore the firewall on the running container
+  --create-dev-container  Scaffold a self-contained .devcontainer/ for VS Code
+                          in the current directory (compose with --dind for
+                          the DinD variant)
+  --force                 Overwrite existing files when used with
+                          --create-dev-container
+  --                      Pass the rest as a command into the container
 
 COMMANDS:
-  install              Symlink this script into a writable directory on PATH
+  install                 Symlink this script into a writable directory on PATH
 ```
 
 ### Environment variables

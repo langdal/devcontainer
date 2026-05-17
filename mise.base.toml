@@ -1,6 +1,9 @@
+# Base tools baked into the devcontainer image. Pinned for reproducibility
+# and to limit the blast radius of a supply-chain compromise; bump
+# deliberately. Per-project tools live in the consumer repo's mise.toml.
 [tools]
-node = "lts"
-ripgrep = "latest"
-eza = "latest"
-lazygit = "latest"
-neovim = "latest"
+node = "24.15.0"
+ripgrep = "15.1.0"
+eza = "0.23.4"
+lazygit = "0.61.1"
+neovim = "0.12.2"

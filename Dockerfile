@@ -1,4 +1,8 @@
-FROM mcr.microsoft.com/devcontainers/base:ubuntu AS base
+# Pinned to a sha256 digest so the same image is reproduced byte-for-byte.
+# Bump the digest deliberately by re-running:
+#     docker manifest inspect mcr.microsoft.com/devcontainers/base:ubuntu \
+#         | grep -i digest
+FROM mcr.microsoft.com/devcontainers/base:ubuntu@sha256:7ee7da33a68d997971660d91ecc8372e55a38a777c3c6bd6808daf91928052db AS base
 
 # Use bash with pipefail for every RUN. This catches early-pipeline
 # failures (e.g. `curl … | sh` failing on the curl side) that the
@@ -56,8 +60,12 @@ RUN rm -f /etc/sudoers.d/vscode /etc/sudoers.d/nopasswd && \
         grep -rEl '^[[:space:]]*vscode[[:space:]]' /etc/sudoers.d/ | xargs -r rm -f; \
     fi
 
-# Install mise to /usr/local/bin/mise
-RUN curl -fsSL https://mise.run | MISE_INSTALL_PATH=/usr/local/bin/mise sh
+# Install mise to /usr/local/bin/mise. Version is pinned so the same mise
+# binary is fetched on every build; the installer script itself is fetched
+# from https://mise.run and is small / vendor-published, so we trust TLS.
+ARG MISE_VERSION=v2026.5.10
+RUN curl -fsSL https://mise.run \
+    | MISE_INSTALL_PATH=/usr/local/bin/mise MISE_VERSION="${MISE_VERSION}" sh
 
 # Set mise environment variables (critical for baked tools pattern)
 ENV MISE_DATA_DIR="/mise" \
