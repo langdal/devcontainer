@@ -187,7 +187,7 @@ RUN set -eux; \
 # docker compose v2 CLI plugin. Installed under the system-wide plugin
 # path so `docker compose ...` resolves for the rootless dockerd run by
 # vscode.
-ARG COMPOSE_VERSION=2.30.3
+ARG COMPOSE_VERSION=2.40.3
 RUN set -eux; \
     arch="$(uname -m)"; \
     case "$arch" in \
