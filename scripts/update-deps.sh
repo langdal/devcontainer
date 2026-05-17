@@ -244,7 +244,7 @@ check_dockerfile_arg() {
         return 0
     fi
     if [ -n "$strip_prefix" ]; then
-        latest="${latest#${strip_prefix}}"
+        latest="${latest#"${strip_prefix}"}"
     fi
     if [ -z "$latest" ]; then
         new "Dockerfile  ARG ${arg}  (stripped version was empty; skipping)"
