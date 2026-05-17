@@ -168,6 +168,12 @@ SELF_UPDATE=false
 EXTRA_PORTS=()
 CMD_ARGS=()
 
+# Populated by check_image_uid_match's single `image inspect` call so that
+# check_image_version_match doesn't need to re-inspect, and the build path
+# below can skip a separate `images -q` probe.
+IMAGE_EXISTS=false
+IMAGE_VERSION=""
+
 usage() {
   cat <<EOF
 Usage: dev [OPTIONS] [-- COMMAND...]
@@ -340,6 +346,40 @@ install_self() {
       echo "Skipped. You can add it later with: echo '$compdef_line' >> ~/.zshrc"
       ;;
   esac
+}
+
+# Reject companion flags that don't compose with the active subcommand.
+# Pass the subcommand label and a comma-separated allow-list; anything set
+# outside that list is reported and the script exits 1.
+forbid_companions() {
+  local subcmd="$1" allowed_csv="$2" bad=()
+  _maybe_bad() {
+    local name="$1" set_to="$2"
+    if [[ "$set_to" != true ]]; then return 0; fi
+    if [[ "$name" == "$subcmd" ]]; then return 0; fi  # the subcommand's own flag is implicit
+    case ",$allowed_csv," in *",$name,"*) return 0;; esac
+    bad+=("$name")
+  }
+  _maybe_bad --dry-run              "$DRY_RUN"
+  _maybe_bad --build                "$FORCE_BUILD"
+  _maybe_bad --default-ports        "$DEFAULT_PORTS"
+  _maybe_bad --maintenance          "$MAINTENANCE"
+  _maybe_bad --dind                 "$DIND"
+  _maybe_bad --monitor              "$MONITOR"
+  _maybe_bad --monitor-fw           "$MONITOR_FW"
+  _maybe_bad --disable-firewall     "$DISABLE_FW"
+  _maybe_bad --enable-firewall      "$ENABLE_FW"
+  _maybe_bad --create-dev-container "$CREATE_DC"
+  _maybe_bad --force                "$FORCE"
+  _maybe_bad --self-update          "$SELF_UPDATE"
+  [[ ${#EXTRA_PORTS[@]} -gt 0 ]] && _maybe_bad --port true
+  [[ ${#CMD_ARGS[@]}    -gt 0 ]] && _maybe_bad --     true
+  if [[ ${#bad[@]} -gt 0 ]]; then
+    local allowed_pretty="${allowed_csv//,/, }"
+    echo "Error: $subcmd does not compose with: ${bad[*]}" >&2
+    echo "       Allowed companion(s): ${allowed_pretty:-none}." >&2
+    exit 1
+  fi
 }
 
 # --self-update: pull the latest tag in the script's git checkout in place.
@@ -615,49 +655,13 @@ create_dev_container() {
 }
 
 if [[ "$CREATE_DC" == true ]]; then
-  # Allowed companions: --dind, --force. Reject everything else.
-  bad=()
-  [[ "$DRY_RUN"     == true ]] && bad+=(--dry-run)
-  [[ "$FORCE_BUILD" == true ]] && bad+=(--build)
-  [[ "$DEFAULT_PORTS" == true ]] && bad+=(--default-ports)
-  [[ "$MAINTENANCE" == true ]] && bad+=(--maintenance)
-  [[ "$MONITOR"     == true ]] && bad+=(--monitor)
-  [[ "$MONITOR_FW"  == true ]] && bad+=(--monitor-fw)
-  [[ "$DISABLE_FW"  == true ]] && bad+=(--disable-firewall)
-  [[ "$ENABLE_FW"   == true ]] && bad+=(--enable-firewall)
-  [[ ${#EXTRA_PORTS[@]} -gt 0 ]] && bad+=(--port)
-  [[ ${#CMD_ARGS[@]}  -gt 0 ]] && bad+=("--")
-  if [[ ${#bad[@]} -gt 0 ]]; then
-    echo "Error: --create-dev-container does not compose with: ${bad[*]}" >&2
-    echo "       Allowed companions: --dind, --force." >&2
-    exit 1
-  fi
+  forbid_companions --create-dev-container "--dind,--force"
   create_dev_container
   exit 0
 fi
 
 if [[ "$SELF_UPDATE" == true ]]; then
-  # --self-update only composes with --dry-run; everything else would either
-  # be ignored or actively misleading (e.g. --build before the new tree is
-  # checked out).
-  bad=()
-  [[ "$FORCE_BUILD"   == true ]] && bad+=(--build)
-  [[ "$DEFAULT_PORTS" == true ]] && bad+=(--default-ports)
-  [[ "$MAINTENANCE"   == true ]] && bad+=(--maintenance)
-  [[ "$DIND"          == true ]] && bad+=(--dind)
-  [[ "$MONITOR"       == true ]] && bad+=(--monitor)
-  [[ "$MONITOR_FW"    == true ]] && bad+=(--monitor-fw)
-  [[ "$DISABLE_FW"    == true ]] && bad+=(--disable-firewall)
-  [[ "$ENABLE_FW"     == true ]] && bad+=(--enable-firewall)
-  [[ "$CREATE_DC"     == true ]] && bad+=(--create-dev-container)
-  [[ "$FORCE"         == true ]] && bad+=(--force)
-  [[ ${#EXTRA_PORTS[@]} -gt 0 ]] && bad+=(--port)
-  [[ ${#CMD_ARGS[@]}    -gt 0 ]] && bad+=("--")
-  if [[ ${#bad[@]} -gt 0 ]]; then
-    echo "Error: --self-update does not compose with: ${bad[*]}" >&2
-    echo "       Allowed companion: --dry-run." >&2
-    exit 1
-  fi
+  forbid_companions --self-update "--dry-run"
   self_update
   exit 0
 fi
@@ -732,26 +736,18 @@ else
   BUILD_TARGET="base"
 fi
 
-# Container naming: normal mode uses dev-<dir>, maintenance uses dev-<dir>-maint.
-# Refuse to start one mode while the other is already running for the same
-# workspace — both would share /workspace and produce surprising state.
 WORKSPACE_BASENAME="$(basename "$(pwd)")"
 NORMAL_NAME="dev-${WORKSPACE_BASENAME}"
 MAINT_NAME="dev-${WORKSPACE_BASENAME}-maint"
 DIND_NAME="dev-${WORKSPACE_BASENAME}-dind"
 
-# Resolve which workspace container the management commands below should
-# target. Picks the running one among normal / dind / maint. Sets:
+# Resolve which workspace container the management commands target. Sets:
 #   MANAGED_TARGET       = "normal" | "dind" | "maint" | ""   (empty = none running)
 #   MANAGED_NAME         = the container name (when MANAGED_TARGET is non-empty)
 #   MANAGED_RUNTIME_ARGS = runtime connection args for that container's storage
-# Each name is looked up in its own storage so the cross-storage split on
-# macOS+podman (dind lives in the rootful connection, normal/maint in the
-# default rootless one) does not hide a running container from the
-# auto-detect — that hole used to make e.g. `dev --disable-firewall` blind
-# to a running dind container.
-# Only one of the three can be running at a time — enforced by the
-# three-way conflict guard further down.
+# Each name is looked up in its own storage because on macOS+podman the dind
+# container lives in the rootful connection while normal/maint live in the
+# default rootless one — a single-storage probe would miss the dind container.
 resolve_managed_container() {
   MANAGED_TARGET=""
   MANAGED_NAME=""
@@ -767,6 +763,23 @@ resolve_managed_container() {
   fi
 }
 
+# Shared preamble for management commands that need a running firewall-capable
+# container (--monitor, --monitor-fw, --disable-firewall, --enable-firewall).
+# Exits with a clear error if nothing is running, or if the only running
+# container is maintenance (which has no firewall).
+require_workspace_firewall_container() {
+  local op="$1"
+  resolve_managed_container
+  if [[ -z "$MANAGED_TARGET" ]]; then
+    echo "Error: no dev container is running for this workspace (looked for ${NORMAL_NAME}, ${DIND_NAME}, ${MAINT_NAME}). Start one with 'dev', 'dev --dind', or 'dev --maintenance' first." >&2
+    exit 1
+  fi
+  if [[ "$MANAGED_TARGET" == "maint" ]]; then
+    echo "Error: maintenance container ${MAINT_NAME} has no firewall — $op is meaningless in maintenance mode." >&2
+    exit 1
+  fi
+}
+
 # --monitor / --monitor-fw: read firewall logs from the running workspace
 # container (normal or dind — both run firewall-init.sh and have the same
 # tinyproxy + NFLOG stack). Maintenance mode has no firewall.
@@ -779,15 +792,7 @@ if [[ "$MONITOR" == true || "$MONITOR_FW" == true ]]; then
     echo "Error: --monitor* and --maintenance are mutually exclusive (no firewall in maintenance mode)." >&2
     exit 1
   fi
-  resolve_managed_container
-  if [[ -z "$MANAGED_TARGET" ]]; then
-    echo "Error: no dev container is running for this workspace (looked for ${NORMAL_NAME}, ${DIND_NAME}, ${MAINT_NAME}). Start one with 'dev', 'dev --dind', or 'dev --maintenance' first." >&2
-    exit 1
-  fi
-  if [[ "$MANAGED_TARGET" == "maint" ]]; then
-    echo "Error: maintenance container ${MAINT_NAME} has no firewall — --monitor/--monitor-fw are meaningless in maintenance mode." >&2
-    exit 1
-  fi
+  require_workspace_firewall_container "--monitor/--monitor-fw"
   if [[ "$MONITOR" == true ]]; then
     exec $RUNTIME $MANAGED_RUNTIME_ARGS exec -it "$MANAGED_NAME" tail -F /var/log/tinyproxy.log
   else
@@ -810,15 +815,7 @@ if [[ "$DISABLE_FW" == true || "$ENABLE_FW" == true ]]; then
     echo "Error: --disable-firewall/--enable-firewall and --maintenance are mutually exclusive (no firewall in maintenance mode)." >&2
     exit 1
   fi
-  resolve_managed_container
-  if [[ -z "$MANAGED_TARGET" ]]; then
-    echo "Error: no dev container is running for this workspace (looked for ${NORMAL_NAME}, ${DIND_NAME}, ${MAINT_NAME}). Start one with 'dev', 'dev --dind', or 'dev --maintenance' first." >&2
-    exit 1
-  fi
-  if [[ "$MANAGED_TARGET" == "maint" ]]; then
-    echo "Error: maintenance container ${MAINT_NAME} has no firewall — --disable-firewall/--enable-firewall are meaningless in maintenance mode." >&2
-    exit 1
-  fi
+  require_workspace_firewall_container "--disable-firewall/--enable-firewall"
   if [[ "$DISABLE_FW" == true ]]; then
     # Open the kernel egress AND switch tinyproxy to allow-all (permissive
     # filter + SIGHUP) so HTTP_PROXY-honoring clients in existing shells
@@ -894,14 +891,17 @@ cleanup_for_rebuild() {
 check_image_uid_match() {
   local tag="$1"
   local labels img_uid img_gid
+  # Single inspect retrieves all three labels we care about; IMAGE_VERSION
+  # is stashed for check_image_version_match so it doesn't re-inspect.
   if ! labels=$($RUNTIME $RUNTIME_ARGS image inspect "$tag" \
-      --format '{{ index .Config.Labels "dev.uid" }} {{ index .Config.Labels "dev.gid" }}' \
+      --format '{{ index .Config.Labels "dev.uid" }} {{ index .Config.Labels "dev.gid" }} {{ index .Config.Labels "dev.version" }}' \
       2>/dev/null); then
     IMAGE_EXISTS=false
+    IMAGE_VERSION=""
     return 0
   fi
   IMAGE_EXISTS=true
-  read -r img_uid img_gid <<< "$labels"
+  read -r img_uid img_gid IMAGE_VERSION <<< "$labels"
   if [[ -n "$img_uid" && -n "$img_gid" \
         && "$img_uid" == "$HOST_UID" && "$img_gid" == "$HOST_GID" ]]; then
     return 0
@@ -959,16 +959,11 @@ check_image_version_match() {
   if [[ "$FORCE_BUILD" == true ]]; then
     return 0
   fi
-  local img_version
-  if ! img_version=$($RUNTIME $RUNTIME_ARGS image inspect "$tag" \
-      --format '{{ index .Config.Labels "dev.version" }}' \
-      2>/dev/null); then
+  # IMAGE_VERSION was populated by check_image_uid_match's inspect call.
+  if [[ "$IMAGE_VERSION" == "$VERSION" ]]; then
     return 0
   fi
-  if [[ "$img_version" == "$VERSION" ]]; then
-    return 0
-  fi
-  local img_label="${img_version:-<missing>}"
+  local img_label="${IMAGE_VERSION:-<missing>}"
   if [[ "$DRY_RUN" == true ]]; then
     echo "Would rebuild $tag for dev version $VERSION (image label: $img_label)" >&2
     return 0
