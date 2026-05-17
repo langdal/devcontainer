@@ -6,14 +6,32 @@ A portable, editor-agnostic dev environment. One Dockerfile, one bash wrapper, p
 
 You need Docker (Linux) or Podman (macOS/Linux). See [Host requirements](#host-requirements).
 
+### Install in one line
+
+Clones into `${XDG_DATA_HOME:-~/.local/share}/devcontainer` and symlinks the `dev` script onto your PATH:
+
 ```bash
-# 1. Clone this repo somewhere convenient
-git clone <this-repo-url> ~/devcontainer
+curl -fsSL https://raw.githubusercontent.com/langdal/devcontainer/main/install.sh | bash
+```
 
-# 2. Put the dev script on your PATH
+Pin to a specific release:
+
+```bash
+REF=v1.0.0 curl -fsSL https://raw.githubusercontent.com/langdal/devcontainer/main/install.sh | bash
+```
+
+Override the install location with `INSTALL_DIR=...`. Re-running upgrades the existing checkout.
+
+### Manual install
+
+```bash
+git clone https://github.com/langdal/devcontainer.git ~/devcontainer
 ~/devcontainer/dev install
+```
 
-# 3. From any project directory, start the container
+### First use
+
+```bash
 cd ~/projects/my-project
 dev
 ```
@@ -152,21 +170,27 @@ dev [OPTIONS] [-- COMMAND...]
 dev install
 
 OPTIONS:
-  --help               Show help
-  --dry-run            Print the docker command without running it
-  --build              Force rebuild of the image
-  --port PORT          Forward an additional port (repeatable)
-  --default-ports      Forward 5173, 5174, 8080, 2345, 3000
-  --maintenance        Start with firewall off and sudo enabled
-  --dind               Start with rootless docker available inside
-  --monitor            Tail the firewall proxy log of the running container
-  --monitor-fw         Stream iptables-dropped packets of the running container
-  --disable-firewall   Open the firewall on the running container
-  --enable-firewall    Restore the firewall on the running container
-  --                   Pass the rest as a command into the container
+  --help                  Show help
+  --version               Print the dev script version and exit
+  --dry-run               Print the docker command without running it
+  --build                 Force rebuild of the image
+  --port PORT             Forward an additional port (repeatable)
+  --default-ports         Forward 5173, 5174, 8080, 2345, 3000
+  --maintenance           Start with firewall off and sudo enabled
+  --dind                  Start with rootless docker available inside
+  --monitor               Tail the firewall proxy log of the running container
+  --monitor-fw            Stream iptables-dropped packets of the running container
+  --disable-firewall      Open the firewall on the running container
+  --enable-firewall       Restore the firewall on the running container
+  --create-dev-container  Scaffold a self-contained .devcontainer/ for VS Code
+                          in the current directory (compose with --dind for
+                          the DinD variant)
+  --force                 Overwrite existing files when used with
+                          --create-dev-container
+  --                      Pass the rest as a command into the container
 
 COMMANDS:
-  install              Symlink this script into a writable directory on PATH
+  install                 Symlink this script into a writable directory on PATH
 ```
 
 ### Environment variables

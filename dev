@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Released version of the dev script. Bumped automatically by release-please
+# (see release-please-config.json's `extra-files` entry); do not edit the
+# version literal by hand — touch the marker comment if reformatting.
+VERSION="0.1.0" # x-release-please-version
+
 # Resolve the real directory of this script, following symlinks.
 # Needed so --build finds the Dockerfile when invoked via an installed symlink.
 resolve_script_dir() {
@@ -145,6 +150,7 @@ Run or attach to the generic devcontainer.
 
 OPTIONS:
   --help          Show this help message
+  --version       Print the dev script version and exit
   --dry-run       Print docker command without executing
   --build         Force rebuild the image
   --port PORT     Add additional port forwarding (repeatable)
@@ -190,9 +196,21 @@ COMMANDS:
   install         Symlink this script into a writable directory on PATH
 
 ENVIRONMENT:
+  DEV_RUNTIME=docker|podman
+                     Force a runtime when both are installed. Default:
+                     docker preferred on Linux; podman only on macOS.
   DEV_ASSUME_YES=1   Answer yes to the rebuild prompt that triggers when
                      the image's dev.uid / dev.gid labels do not match
                      the invoking user's id -u / id -g. Used by tests.
+  DEV_SKIP_APPARMOR_CHECK=1
+                     Bypass the --dind AppArmor preflight (only safe with
+                     a custom profile that grants 'userns,').
+  DEV_EXTRA_RUN_ARGS=...
+                     Extra args appended to the runtime 'run' invocation
+                     (e.g. --dns=8.8.8.8 on a host with broken IPv6
+                     resolvers).
+  GITHUB_TOKEN       If set on the host, passed through into the container
+                     as an env var.
 
 EXAMPLES:
   dev                           # Start or attach to container with default shell
@@ -295,6 +313,10 @@ while [[ $# -gt 0 ]]; do
   case $1 in
     --help)
       usage
+      exit 0
+      ;;
+    --version)
+      echo "dev $VERSION"
       exit 0
       ;;
     --dry-run)

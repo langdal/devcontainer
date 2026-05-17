@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Install shellcheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck
       - name: Run lint
@@ -29,7 +29,7 @@ jobs:
       matrix:
         distro: [fedora, debian, ubuntu]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Install QEMU + tools
         run: |
@@ -57,7 +57,7 @@ jobs:
           fi
 
       - name: Restore image cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.cache/devcontainer-ci/images/${{ matrix.distro }}
           key: vm-image-${{ matrix.distro }}-${{ hashFiles(format('scripts/test/vms/{0}.conf', matrix.distro)) }}
@@ -67,7 +67,7 @@ jobs:
 
       - name: Upload run logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: logs-${{ matrix.distro }}
           path: |
@@ -76,3 +76,16 @@ jobs:
             scripts/test/serial-${{ matrix.distro }}.log
             scripts/test/cloud-init-output-${{ matrix.distro }}.log
           if-no-files-found: ignore
+
+  ci:
+    if: always()
+    needs: [lint, vm-matrix]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 1
+    steps:
+      - name: Verify all required jobs passed
+        run: |
+          if [[ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
+            echo "One or more required jobs failed or were cancelled" >&2
+            exit 1
+          fi

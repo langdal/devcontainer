@@ -1,0 +1,18 @@
+# Developer tools for working on this repo (lint + maintenance scripts).
+# Pinned so contributors and CI converge on the same versions; bump
+# deliberately via `scripts/update-deps.sh`.
+#
+# This file is distinct from `mise.base.toml`, which lists tools baked
+# into the devcontainer image. Anything here is "needed to develop on
+# the devcontainer itself", not "available inside every container".
+#
+# Tools and where they're used:
+#   shellcheck   scripts/lint.sh  (required; lint.sh aborts if missing)
+#   hadolint     scripts/lint.sh  (Dockerfile linting; lint.sh self-installs as fallback)
+#   actionlint   scripts/lint.sh  (workflow linting; lint.sh self-installs as fallback)
+#   jq           scripts/update-deps.sh  (required to parse GitHub API)
+[tools]
+shellcheck = "0.11.0"
+hadolint = "2.14.0"
+actionlint = "1.7.12"
+jq = "1.8.1"
