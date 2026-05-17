@@ -37,13 +37,17 @@ if ! command -v docker >/dev/null 2>&1 && ! command -v podman >/dev/null 2>&1; t
     echo "         run a container. See README.md > Host requirements."
 fi
 
-# Resolve REF (default = latest semver tag advertised by origin). We use
-# git ls-remote to avoid jq/curl-on-GitHub-API dependencies and the
-# unauthenticated rate limit. `--sort=version:refname` sorts semver-ish
-# refs naturally; the last entry is the highest version.
+# Resolve REF (default = latest stable semver tag advertised by origin).
+# We use git ls-remote to avoid jq/curl-on-GitHub-API dependencies and
+# the unauthenticated rate limit. `--sort=version:refname` orders
+# semver-ish refs naturally, but without a versionsort.suffix hint it
+# ranks `v1.0.0-rc.1` after `v1.0.0` (longer string wins on tie). Filter
+# to strict `vMAJOR.MINOR.PATCH` tags so prereleases (-rc, -beta, ...)
+# never become the default install target.
 if [ -z "$REF" ]; then
     REF=$(git ls-remote --tags --refs --sort='version:refname' "$REPO_URL" 2>/dev/null \
           | awk -F/ '{print $NF}' \
+          | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' \
           | tail -1)
     if [ -z "$REF" ]; then
         REF="main"
