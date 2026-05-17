@@ -90,6 +90,7 @@ runtime_build() {
     extra+=(--target "$target")
   fi
   extra+=(--build-arg "USER_UID=$HOST_UID" --build-arg "USER_GID=$HOST_GID")
+  extra+=(--build-arg "DEV_VERSION=$VERSION")
   if [[ "$RUNTIME" == "docker" ]]; then
     docker buildx build --network=host "${extra[@]}" -t "$tag" "$context"
   else
@@ -199,9 +200,10 @@ ENVIRONMENT:
   DEV_RUNTIME=docker|podman
                      Force a runtime when both are installed. Default:
                      docker preferred on Linux; podman only on macOS.
-  DEV_ASSUME_YES=1   Answer yes to the rebuild prompt that triggers when
-                     the image's dev.uid / dev.gid labels do not match
-                     the invoking user's id -u / id -g. Used by tests.
+  DEV_ASSUME_YES=1   Answer yes to the rebuild prompts triggered by a
+                     UID/GID label mismatch or a dev-script version
+                     mismatch (image's dev.version label vs the running
+                     script's --version). Used by tests.
   DEV_SKIP_APPARMOR_CHECK=1
                      Bypass the --dind AppArmor preflight (only safe with
                      a custom profile that grants 'userns,').
@@ -811,6 +813,55 @@ check_image_uid_match() {
   esac
 }
 
+# Compare the dev-script's $VERSION to the image's dev.version label.
+# Unlike the UID check this is advisory: a stale image still works, so
+# declining the prompt continues with the existing image. Sets
+# FORCE_BUILD=true only when the user (or DEV_ASSUME_YES) opts in.
+# Volumes are NOT wiped — they're version-agnostic.
+check_image_version_match() {
+  local tag="$1"
+  if [[ "$IMAGE_EXISTS" != true ]]; then
+    return 0
+  fi
+  if [[ "$FORCE_BUILD" == true ]]; then
+    return 0
+  fi
+  local img_version
+  if ! img_version=$($RUNTIME $RUNTIME_ARGS image inspect "$tag" \
+      --format '{{ index .Config.Labels "dev.version" }}' \
+      2>/dev/null); then
+    return 0
+  fi
+  if [[ "$img_version" == "$VERSION" ]]; then
+    return 0
+  fi
+  local img_label="${img_version:-<missing>}"
+  if [[ "$DRY_RUN" == true ]]; then
+    echo "Would rebuild $tag for dev version $VERSION (image label: $img_label)" >&2
+    return 0
+  fi
+  if [[ "${DEV_ASSUME_YES:-0}" == "1" ]]; then
+    echo "Note: image $tag built with dev version $img_label; DEV_ASSUME_YES set, rebuilding for $VERSION." >&2
+    FORCE_BUILD=true
+    return 0
+  fi
+  if [[ ! -t 0 ]]; then
+    echo "Note: image $tag built with dev version $img_label; current dev script is $VERSION. Run 'dev --build' to rebuild." >&2
+    return 0
+  fi
+  echo "Image $tag was built with dev version $img_label; current dev script is $VERSION." >&2
+  local reply
+  read -r -p "Rebuild image? [y/N] " reply
+  case "$reply" in
+    y|Y|yes|YES)
+      FORCE_BUILD=true
+      ;;
+    *)
+      echo "Continuing with existing image. Run 'dev --build' later to rebuild." >&2
+      ;;
+  esac
+}
+
 if [[ "$DIND" == true ]]; then
   refuse_if_running "$NORMAL_NAME" "normal"
   refuse_if_running "$MAINT_NAME" "maintenance"
@@ -825,12 +876,15 @@ else
   CONTAINER_NAME="$NORMAL_NAME"
 fi
 
-# Refuse to attach to an image built for a different host user. This
-# must run AFTER the early --monitor / --*-firewall exits (those act on
-# a running container and shouldn't be blocked by label mismatch) and
-# BEFORE the existing build branch (so a mismatch can short-circuit
-# into a forced rebuild via the path added in Task 3).
+# Compare host UID/GID and dev-script version to the labels on $IMAGE_TAG.
+# UID mismatch is fatal (mounted volumes are owned by the old UID), so
+# the UID check runs first and short-circuits the version check via
+# FORCE_BUILD when it triggers a rebuild. Version mismatch is advisory:
+# the image still works, it's just stale.
 check_image_uid_match "$IMAGE_TAG"
+if [[ "$FORCE_BUILD" != true ]]; then
+  check_image_version_match "$IMAGE_TAG"
+fi
 
 if [[ "$FORCE_BUILD" == true ]] || [[ "$IMAGE_EXISTS" == false ]]; then
   if [[ "$DRY_RUN" == true ]]; then

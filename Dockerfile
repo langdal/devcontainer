@@ -120,6 +120,13 @@ WORKDIR /workspace
 # Copy entrypoint script
 COPY --chmod=755 entrypoint.sh /entrypoint.sh
 
+# Stamp the dev-script version onto the image so `./dev` can detect when
+# an image was built by an older script and prompt for a rebuild. Kept as
+# the last LABEL layer so version bumps don't bust the heavy layers above;
+# the dind stage inherits this label via FROM base.
+ARG DEV_VERSION=unknown
+LABEL dev.version="${DEV_VERSION}"
+
 # Use entrypoint for initialization. CMD is "sleep infinity" so the
 # container stays alive when something else supplies the long-running
 # foreground process via docker run / docker compose / a devcontainer.json

@@ -196,7 +196,7 @@ COMMANDS:
 ### Environment variables
 
 - `DEV_RUNTIME=docker|podman` — force a runtime when both are installed.
-- `DEV_ASSUME_YES=1` — accept the rebuild-and-wipe-volumes prompt non-interactively.
+- `DEV_ASSUME_YES=1` — accept the rebuild prompts non-interactively (UID/GID mismatch also wipes named volumes; version mismatch rebuilds the image only).
 - `DEV_SKIP_APPARMOR_CHECK=1` — bypass the `--dind` AppArmor preflight.
 - `DEV_EXTRA_RUN_ARGS=...` — extra args appended to `docker run`.
 - `GITHUB_TOKEN` — passed through to the container if set on the host.
