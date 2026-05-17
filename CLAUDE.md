@@ -7,6 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - You may create commits when the user asks for them.
 - If the repo requires GPG-signed commits and signing fails because no key/agent is available (typical inside this devcontainer or any other sandbox), assume you are running in a sandbox and commit **without** signing (e.g. `git -c commit.gpgsign=false commit ...`). The user will re-sign retroactively later.
 - You are **NEVER** allowed to `git push` (including `--force`, tags, or any remote-affecting variant). Stop and leave the commit local even if the user previously authorized a push in another turn — re-ask each time.
+- When you finish an implementation without committing, end the summary with a proposed one-line commit message in [Conventional Commits](https://www.conventionalcommits.org/) style (`type(scope): subject`, ~72 char max, imperative mood). This repo uses release-please, so the type drives the next version bump — pick `feat:` for user-visible additions, `fix:` for bug fixes, `chore:`/`docs:`/`refactor:`/`test:`/`ci:` for non-shipping changes. Format as a fenced bash block so the user can copy it directly.
 
 ## Project Overview
 

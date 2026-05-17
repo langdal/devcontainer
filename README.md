@@ -22,6 +22,15 @@ REF=v1.0.0 curl -fsSL https://raw.githubusercontent.com/langdal/devcontainer/mai
 
 Override the install location with `INSTALL_DIR=...`. Re-running upgrades the existing checkout.
 
+Once installed, upgrade in place at any time:
+
+```bash
+dev --self-update          # checkout the latest tag in the install dir
+dev --self-update --dry-run  # show what would change
+```
+
+`--self-update` works whether you installed via the one-liner or manually with `git clone`. It only requires that the `dev` script lives in a clean git checkout; uncommitted edits abort the operation. The image rebuild prompt fires automatically on the next `dev` run if the script version changed.
+
 ### Manual install
 
 ```bash
