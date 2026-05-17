@@ -76,3 +76,16 @@ jobs:
             scripts/test/serial-${{ matrix.distro }}.log
             scripts/test/cloud-init-output-${{ matrix.distro }}.log
           if-no-files-found: ignore
+
+  ci:
+    if: always()
+    needs: [lint, vm-matrix]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 1
+    steps:
+      - name: Verify all required jobs passed
+        run: |
+          if [[ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
+            echo "One or more required jobs failed or were cancelled" >&2
+            exit 1
+          fi
