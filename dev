@@ -110,6 +110,12 @@ runtime_build() {
   fi
   extra+=(--build-arg "USER_UID=$HOST_UID" --build-arg "USER_GID=$HOST_GID")
   extra+=(--build-arg "DEV_VERSION=$VERSION")
+  # Pass GITHUB_TOKEN as a BuildKit secret so `mise install` can hit the
+  # GitHub API authenticated. Secrets are not persisted in image layers.
+  # Both docker buildx and podman build accept --secret id=...,env=...
+  if [[ -n ${GITHUB_TOKEN:-} ]]; then
+    extra+=(--secret "id=github_token,env=GITHUB_TOKEN")
+  fi
   if [[ "$RUNTIME" == "docker" ]]; then
     docker buildx build --network=host "${extra[@]}" -t "$tag" "$context"
   else
@@ -238,7 +244,9 @@ ENVIRONMENT:
                      (e.g. --dns=8.8.8.8 on a host with broken IPv6
                      resolvers).
   GITHUB_TOKEN       If set on the host, passed through into the container
-                     as an env var.
+                     as an env var, and also forwarded to image builds as a
+                     BuildKit secret so 'mise install' can hit the GitHub
+                     API authenticated (avoids the 60/hr anonymous limit).
 
 EXAMPLES:
   dev                           # Start or attach to container with default shell
