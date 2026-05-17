@@ -6,6 +6,25 @@ set -euo pipefail
 # version literal by hand — touch the marker comment if reformatting.
 VERSION="1.0.0-rc.1" # x-release-please-version
 
+# Display version. Prefers `git describe` when SCRIPT_DIR is a git checkout
+# so a branch ahead of the latest tag reports e.g. `v1.0.0-rc.1-3-g5b7cdf5`
+# (or `…-dirty`) instead of lying with the stale literal. Falls back to the
+# release-please–managed $VERSION literal when there is no git checkout
+# (image-baked installs, copied script, etc.). Image build labels and the
+# version-mismatch rebuild prompt still use $VERSION — those need a value
+# that's stable across commits.
+resolve_dev_version() {
+  if command -v git >/dev/null 2>&1 && [[ -d "$SCRIPT_DIR/.git" ]]; then
+    local described
+    described=$(git -C "$SCRIPT_DIR" describe --tags --always --dirty 2>/dev/null || true)
+    if [[ -n "$described" ]]; then
+      printf '%s\n' "$described"
+      return
+    fi
+  fi
+  printf '%s\n' "$VERSION"
+}
+
 # Resolve the real directory of this script, following symlinks.
 # Needed so --build finds the Dockerfile when invoked via an installed symlink.
 resolve_script_dir() {
@@ -394,7 +413,7 @@ while [[ $# -gt 0 ]]; do
       exit 0
       ;;
     --version)
-      echo "dev $VERSION"
+      echo "dev $(resolve_dev_version)"
       exit 0
       ;;
     --dry-run)
