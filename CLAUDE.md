@@ -96,7 +96,8 @@ Three components, each with a distinct role:
 - **Two named Docker volumes** persist state: `devcontainer-mise:/mise` (tools/caches) and `devcontainer-home:/home/vscode` (shell history, git config, SSH keys).
 - **Container runs as user `vscode`** (UID 1000 by default, overridable via `USER_UID` build arg).
 - **Containers are `--rm`** (ephemeral) but the `dev` script reuses a running/stopped container named `dev-<dirname>` before creating a new one.
-- **Base tools** (node LTS, ripgrep, eza, lazygit) are defined in `mise.base.toml` and baked into the image at build time. The file is named `mise.base.toml` rather than `mise.toml` so mise does not treat it as a project config when this repo is itself opened in the devcontainer. Per-project tools come from the consuming project's own `mise.toml` and are installed at container startup.
+- **Base tools** (node LTS, ripgrep, eza, lazygit, neovim) are defined in `mise.base.toml` and baked into the image at build time. The name is deliberate: mise auto-discovers `mise.toml` / `.mise.toml`, so the baked-tools list lives under a non-discoverable name to keep it separable from the project-level `mise.toml` that consumers (and this repo itself) place at the workspace root.
+- **Developer tools** for working on *this* repo (shellcheck, hadolint, actionlint, jq) live in a workspace-root `mise.toml`. Running `mise install` from the repo root installs them; `entrypoint.sh` also runs `mise install` automatically when the container starts with `/workspace/mise.toml` present. Per-project tools in *consuming* projects come from their own `mise.toml`.
 - **Opt-in Docker-in-Docker** via `./dev --dind`. Builds a separate
   `generic-devcontainer:dind` image (the `dind` target in the multi-stage
   Dockerfile) that adds rootless `dockerd`, fuse-overlayfs, and
