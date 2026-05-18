@@ -110,6 +110,30 @@ iptables -A OUTPUT -m owner --uid-owner "$PROXY_UID" \
                   -p tcp -m multiport --dports 80,443 -j ACCEPT
 iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
 
+# Optional: punch a hole to specific ports on the host gateway. Set by
+# `dev --host-port PORT`, which also adds --add-host=host.docker.internal:host-gateway
+# at run time. Scoped to the gateway IP only so the firewall still default-drops
+# every other destination. Fail-closed: if the hostname doesn't resolve or any
+# port is invalid, the firewall does not come up.
+if [ -n "${DEVCONTAINER_HOST_PORTS:-}" ]; then
+    HOST_GW="$(getent ahostsv4 host.docker.internal 2>/dev/null | awk 'NR==1 {print $1}')" || true
+    if [ -z "$HOST_GW" ]; then
+        echo "firewall-init: DEVCONTAINER_HOST_PORTS set but host.docker.internal does not resolve" >&2
+        exit 1
+    fi
+    IFS=',' read -ra _HOST_PORTS <<< "$DEVCONTAINER_HOST_PORTS"
+    for port in "${_HOST_PORTS[@]}"; do
+        port="${port//[[:space:]]/}"
+        [ -z "$port" ] && continue
+        if ! [[ "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+            echo "firewall-init: invalid host port '$port' in DEVCONTAINER_HOST_PORTS" >&2
+            exit 1
+        fi
+        iptables -A OUTPUT -p tcp -d "$HOST_GW" --dport "$port" -j ACCEPT
+    done
+    echo "firewall-init: opened host gateway $HOST_GW for ports: $DEVCONTAINER_HOST_PORTS"
+fi
+
 # Log packets that fell through every ACCEPT above — i.e. exactly what the
 # default-DROP policy is about to discard. Rate-limited so a noisy app cannot
 # flood the netlink buffer. Read with `tcpdump -i nflog:1` (see `dev --monitor-fw`).

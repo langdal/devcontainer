@@ -66,6 +66,7 @@ dev -- npm test           # run a one-off command in the container
 dev --build               # rebuild the image
 dev --port 9000           # forward an extra port (repeatable)
 dev --default-ports       # forward 5173, 5174, 8080, 2345, 3000
+dev --host-port 8080      # allow egress to host.docker.internal:8080
 ```
 
 Multiple terminals: just run `dev` again — it `exec`s into the running container.
@@ -111,6 +112,16 @@ dev --monitor-fw          # tcpdump on iptables-dropped packets (NFLOG group 1)
 ```
 
 These act on whichever workspace container is running (normal or dind). The container name does **not** change when the firewall is toggled, so for longer-lived unrestricted work prefer `--maintenance` — its name (`-maint`) is a visible signal.
+
+### Reaching a host service (e.g. local LLM)
+
+`dev --host-port 8080` (repeatable) is a scoped escape hatch for talking to a service on the Docker host. It:
+
+- adds `--add-host=host.docker.internal:host-gateway` so the hostname resolves to the host gateway IP,
+- passes `DEVCONTAINER_HOST_PORTS=8080[,…]` into the container,
+- and `firewall-init.sh` adds an iptables `ACCEPT` rule for **only that port to that gateway IP**.
+
+Everything else stays default-deny. Use it instead of `--network host` or `--disable-firewall` when an agent inside the container needs to call out to a local model server, a metrics endpoint, etc. From inside the container: `curl http://host.docker.internal:8080/...`.
 
 To verify the firewall posture from inside:
 
@@ -185,6 +196,10 @@ OPTIONS:
   --build                 Force rebuild of the image
   --port PORT             Forward an additional port (repeatable)
   --default-ports         Forward 5173, 5174, 8080, 2345, 3000
+  --host-port PORT        Allow egress to host.docker.internal:PORT
+                          (repeatable). Adds an iptables ACCEPT for the host
+                          gateway only — the firewall stays default-deny
+                          everywhere else.
   --maintenance           Start with firewall off and sudo enabled
   --dind                  Start with rootless docker available inside
   --monitor               Tail the firewall proxy log of the running container

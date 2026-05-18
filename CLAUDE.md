@@ -150,3 +150,12 @@ When the firewall is in the way, prefer `--maintenance` (its own container,
 sudo + no firewall) over toggling on the running container — the toggle
 flags do not change the container name, so there is no visible signal that
 the firewall is off.
+
+For reaching a service on the Docker host (local LLM server, metrics
+endpoint, etc.) prefer `--host-port PORT` (repeatable) over `--maintenance`
+or `--network host`. It adds `--add-host=host.docker.internal:host-gateway`
+plus a single iptables `ACCEPT` rule for that port against the host gateway
+IP only — the rest of the firewall posture is unchanged. Inside the
+container, reach the service at `host.docker.internal:PORT`. The env
+contract is `DEVCONTAINER_HOST_PORTS=p1,p2,...`, consumed by
+`firewall-init.sh`.
