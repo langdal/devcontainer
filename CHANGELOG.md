@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.2.0](https://github.com/langdal/devcontainer/compare/v1.1.0...v1.2.0) (2026-05-18)
+
+
+### Features
+
+* **dev:** add --host-port for scoped host-service egress ([77e5fed](https://github.com/langdal/devcontainer/commit/77e5fed608f1ee0f315e0534fe478937fc5841b5))
+* **dev:** add --host-port for scoped host-service egress ([4a49174](https://github.com/langdal/devcontainer/commit/4a491749122dbc54737a61aa516324a371e2581c))
+
 ## [1.1.0](https://github.com/langdal/devcontainer/compare/v1.0.1...v1.1.0) (2026-05-18)
 
 
