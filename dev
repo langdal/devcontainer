@@ -4,7 +4,7 @@ set -euo pipefail
 # Released version of the dev script. Bumped automatically by release-please
 # (see release-please-config.json's `extra-files` entry); do not edit the
 # version literal by hand — touch the marker comment if reformatting.
-VERSION="1.1.0" # x-release-please-version
+VERSION="1.2.0" # x-release-please-version
 
 # Display version. Prefers `git describe` when SCRIPT_DIR is a git checkout
 # so a branch ahead of the latest tag reports e.g. `v1.0.0-rc.1-3-g5b7cdf5`
