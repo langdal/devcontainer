@@ -198,6 +198,7 @@ FORCE=false
 SELF_UPDATE=false
 RESET=false
 EXTRA_PORTS=()
+HOST_PORTS=()
 CMD_ARGS=()
 
 # Populated by check_image_uid_match's single `image inspect` call so that
@@ -221,6 +222,13 @@ OPTIONS:
   --port PORT     Add additional port forwarding (repeatable)
   --default-ports Forward the default development ports (5173, 5174, 8080,
                   2345, 3000). Off by default.
+  --host-port PORT
+                  Allow egress from the container to host.docker.internal:PORT
+                  (repeatable). Maps the host.docker.internal hostname and
+                  punches a single-port iptables ACCEPT through the firewall
+                  for the host gateway only. Use to reach host-side services
+                  (e.g. a local llama server at localhost:8080) without
+                  disabling the firewall.
   --maintenance   Start with firewall disabled and sudo enabled.
                   Container name is suffixed with -maint to avoid
                   clashing with the normal container.
@@ -298,6 +306,7 @@ EXAMPLES:
   dev --dry-run                 # Show docker command without running
   dev --port 9000 --port 9001   # Add custom port forwarding
   dev --default-ports           # Forward the default dev ports
+  dev --host-port 8080          # Reach host service at host.docker.internal:8080
   dev --maintenance             # Start in maintenance mode (no firewall, sudo enabled)
   dev --dind                    # Start with rootless docker available inside
   dev --monitor                 # Tail firewall proxy log of running container
@@ -412,8 +421,9 @@ forbid_companions() {
   _maybe_bad --force                "$FORCE"
   _maybe_bad --self-update          "$SELF_UPDATE"
   _maybe_bad --reset                "$RESET"
-  [[ ${#EXTRA_PORTS[@]} -gt 0 ]] && _maybe_bad --port true
-  [[ ${#CMD_ARGS[@]}    -gt 0 ]] && _maybe_bad --     true
+  [[ ${#EXTRA_PORTS[@]} -gt 0 ]] && _maybe_bad --port      true
+  [[ ${#HOST_PORTS[@]}  -gt 0 ]] && _maybe_bad --host-port true
+  [[ ${#CMD_ARGS[@]}    -gt 0 ]] && _maybe_bad --          true
   if [[ ${#bad[@]} -gt 0 ]]; then
     local allowed_pretty="${allowed_csv//,/, }"
     echo "Error: $subcmd does not compose with: ${bad[*]}" >&2
@@ -518,6 +528,18 @@ while [[ $# -gt 0 ]]; do
         exit 1
       fi
       EXTRA_PORTS+=("$2")
+      shift 2
+      ;;
+    --host-port)
+      if [[ -z ${2:-} ]]; then
+        echo "Error: --host-port requires a port number" >&2
+        exit 1
+      fi
+      if ! [[ "$2" =~ ^[0-9]+$ ]]; then
+        echo "Error: --host-port expects a numeric port, got '$2'" >&2
+        exit 1
+      fi
+      HOST_PORTS+=("$2")
       shift 2
       ;;
     --default-ports)
@@ -1239,6 +1261,17 @@ if [[ ${#EXTRA_PORTS[@]} -gt 0 ]]; then
   for port in "${EXTRA_PORTS[@]}"; do
     DOCKER_CMD+=(-p "$port:$port")
   done
+fi
+
+# --host-port: map host.docker.internal and pass the port list to the
+# entrypoint so firewall-init.sh can add a per-port iptables ACCEPT for
+# the host gateway. The mapping uses Docker's host-gateway sentinel,
+# resolved by the runtime to the bridge IP (Linux) or the Docker Desktop
+# host (macOS).
+if [[ ${#HOST_PORTS[@]} -gt 0 ]]; then
+  DOCKER_CMD+=(--add-host=host.docker.internal:host-gateway)
+  _hp_csv="$(IFS=,; echo "${HOST_PORTS[*]}")"
+  DOCKER_CMD+=(-e "DEVCONTAINER_HOST_PORTS=$_hp_csv")
 fi
 
 if [[ -n ${GITHUB_TOKEN:-} ]]; then
