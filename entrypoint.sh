@@ -24,11 +24,11 @@ if [ -z "${DEVCONTAINER_MAINTENANCE:-}" ]; then
     fi
     export HTTPS_PROXY=http://127.0.0.1:8888
     export HTTP_PROXY=http://127.0.0.1:8888
-    export NO_PROXY=localhost,127.0.0.1
+    export NO_PROXY=localhost,127.0.0.1,host.docker.internal
     cat > /etc/profile.d/proxy.sh <<'EOF'
 export HTTPS_PROXY=http://127.0.0.1:8888
 export HTTP_PROXY=http://127.0.0.1:8888
-export NO_PROXY=localhost,127.0.0.1
+export NO_PROXY=localhost,127.0.0.1,host.docker.internal
 EOF
     chmod 644 /etc/profile.d/proxy.sh
 fi
