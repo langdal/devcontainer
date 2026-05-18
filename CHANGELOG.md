@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/langdal/devcontainer/compare/v1.0.1...v1.1.0) (2026-05-18)
+
+
+### Features
+
+* **dev:** container/volume removal with --reset ([d1f9107](https://github.com/langdal/devcontainer/commit/d1f91072461b8abe85a5043a9a91ad4836a6bf25))
+
 ## [1.0.1](https://github.com/langdal/devcontainer/compare/v1.0.0...v1.0.1) (2026-05-17)
 
 
