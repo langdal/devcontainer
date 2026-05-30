@@ -5,6 +5,10 @@
 registry-1.docker.io
 auth.docker.io
 production.cloudflare.docker.com
+# Docker Hub also serves image config/blob downloads from AWS CloudFront under
+# production.cloudfront.docker.com (note: cloudFRONT, distinct from the
+# cloudFLARE host above — Docker uses both depending on routing).
+production.cloudfront.docker.com
 *.cloudfront.net
 # Docker Hub now serves image blob downloads from Cloudflare R2 buckets
 # under randomly-named subdomains of cloudflarestorage.com, e.g.

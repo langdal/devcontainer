@@ -63,6 +63,13 @@ jobs:
           key: vm-image-${{ matrix.distro }}-${{ hashFiles(format('scripts/test/vms/{0}.conf', matrix.distro)) }}
 
       - name: Run suite in ${{ matrix.distro }} VM
+        env:
+          # Forwarded into the VM so the in-VM image build can make
+          # authenticated GitHub API calls. mise install fetches release
+          # metadata for the base tools; the unauthenticated 60/hr limit is
+          # shared across the runner IP and is routinely exhausted by the two
+          # parallel matrix jobs, yielding HTTP 403 and a failed build.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bash scripts/test/run-in-vm.sh ${{ matrix.distro }}
 
       - name: Upload run logs

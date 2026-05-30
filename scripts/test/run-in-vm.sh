@@ -422,8 +422,28 @@ main() {
         ssh_in "$SSH_PORT"
         exit 0
     fi
+    # Forward a GitHub token into the VM so the in-VM image build (./dev
+    # --build -> mise install) can make authenticated GitHub API calls. The
+    # unauthenticated 60/hr limit is shared across the CI runner IP and is
+    # routinely exhausted by the parallel matrix jobs -> HTTP 403 -> failed
+    # build. Written to a 0600 file and read via command substitution on the
+    # remote side so the value never appears in argv / ps / the serial log.
+    local token_prefix=""
+    if [ -n "${GITHUB_TOKEN:-}" ]; then
+        printf '%s' "$GITHUB_TOKEN" > "$RUN_DIR/gh_token"
+        chmod 600 "$RUN_DIR/gh_token"
+        scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -o LogLevel=ERROR -i "$RUN_DIR/id_ed25519" -P "$SSH_PORT" \
+            "$RUN_DIR/gh_token" "$CLOUD_USER@127.0.0.1:.gh_token"
+        ssh_in "$SSH_PORT" 'chmod 600 ~/.gh_token'
+        # Single quotes are intentional: the $(cat ...) must reach the remote
+        # shell unexpanded so the token is read in-VM, never on the host.
+        # shellcheck disable=SC2016
+        token_prefix='export GITHUB_TOKEN="$(cat ~/.gh_token)"; '
+    fi
+
     set +e
-    ssh_in_tty "$SSH_PORT" "cd /workspace && $in_vm_cmd"
+    ssh_in_tty "$SSH_PORT" "cd /workspace && ${token_prefix}$in_vm_cmd"
     local in_vm_rc=$?
     set -e
 
