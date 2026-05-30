@@ -46,12 +46,48 @@ chmod 0700 "$RUN_DIR"
 # wipe everything under it on every container boot.
 find "$RUN_DIR" -mindepth 1 -delete 2>/dev/null || true
 
+# 4b. Teach the docker *client* to route nested workloads through tinyproxy.
+#     The daemon's own HTTPS_PROXY (step 5) only covers image pulls. Build
+#     RUN steps and `docker run` containers are started by the CLI, which
+#     injects these proxy settings as build-args / container env from
+#     ~/.docker/config.json "proxies". Without this, apt/pip/git inside a
+#     `docker build` attempt direct connections and the firewall drops them.
+#     Merge (not clobber) so any `docker login` creds on the home volume
+#     survive. 10.0.2.2:8888 is the slirp gateway -> container loopback ->
+#     tinyproxy, reachable from nested containers once NAT is on (step 5).
+DOCKER_CFG_DIR=/home/vscode/.docker
+DOCKER_CFG="${DOCKER_CFG_DIR}/config.json"
+mkdir -p "$DOCKER_CFG_DIR"
+[ -s "$DOCKER_CFG" ] || echo '{}' > "$DOCKER_CFG"
+tmp_cfg="$(mktemp)"
+if jq '.proxies.default = {
+        "httpProxy":  "http://10.0.2.2:8888",
+        "httpsProxy": "http://10.0.2.2:8888",
+        "noProxy":    "localhost,127.0.0.1,::1"
+    }' "$DOCKER_CFG" > "$tmp_cfg" 2>/dev/null; then
+    cat "$tmp_cfg" > "$DOCKER_CFG"
+else
+    echo "dind-init: WARNING: could not merge proxy into $DOCKER_CFG (jq failed); nested builds may not reach the network" >&2
+fi
+rm -f "$tmp_cfg"
+chown -R vscode:vscode "$DOCKER_CFG_DIR"
+
 touch "$LOG"
 chown vscode:vscode "$LOG"
 
 # 5. Start dockerd-rootless as vscode in the background.
-#    --iptables=false: the container's iptables OUTPUT chain is owned by
-#                       firewall-init.sh; don't fight it.
+#    (no --iptables=false): rootless dockerd manages iptables inside its own
+#                       RootlessKit network namespace, which is wholly
+#                       separate from the container's main-ns OUTPUT chain
+#                       that firewall-init.sh owns — they cannot conflict.
+#                       The NAT/masquerade docker sets up there is what lets
+#                       nested containers and `docker build` RUN steps route
+#                       out to the proxy at 10.0.2.2; with it disabled they
+#                       can reach nothing (only the daemon's own pulls work),
+#                       which silently breaks `docker build`. Managing iptables
+#                       requires the iptables binary on PATH — it lives in
+#                       /usr/sbin, hence /usr/sbin:/sbin below (their absence is
+#                       why the daemon previously had to run --iptables=false).
 #    DOCKERD_ROOTLESS_ROOTLESSKIT_DISABLE_HOST_LOOPBACK=false: dockerd-rootless
 #                       runs in its own slirp4netns, where 127.0.0.1 points
 #                       at the rootless ns's loopback, NOT the container's.
@@ -68,9 +104,8 @@ gosu vscode env \
     HTTPS_PROXY=http://10.0.2.2:8888 \
     HTTP_PROXY=http://10.0.2.2:8888 \
     NO_PROXY=localhost,127.0.0.1 \
-    PATH=/usr/local/bin:/usr/bin:/bin \
+    PATH=/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     nohup /usr/local/bin/dockerd-rootless.sh \
-        --iptables=false \
         > "$LOG" 2>&1 &
 
 # 6. Wait up to 15s for the socket to appear.

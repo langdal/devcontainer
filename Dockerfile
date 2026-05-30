@@ -165,6 +165,7 @@ USER root
 # uidmap           - newuidmap / newgidmap for user-namespace allocation
 # slirp4netns      - per-container network stack for rootless docker
 # dbus-user-session- enables systemd-style user session paths if present
+# jq               - dind-init.sh merges the proxy config into ~/.docker/config.json
 # iproute2         - already in base, listed for clarity
 # hadolint ignore=DL3008
 RUN apt-get update && \
@@ -172,7 +173,8 @@ RUN apt-get update && \
         fuse-overlayfs \
         uidmap \
         slirp4netns \
-        dbus-user-session && \
+        dbus-user-session \
+        jq && \
     rm -rf /var/lib/apt/lists/*
 
 # Pinned rootless docker bundle. We fetch the published .sha256 sidecar
@@ -219,6 +221,28 @@ RUN set -eux; \
     echo "${expected}  /tmp/docker-compose" | sha256sum -c -; \
     install -D -m 0755 /tmp/docker-compose /usr/local/lib/docker/cli-plugins/docker-compose; \
     rm -f /tmp/docker-compose
+
+# docker buildx CLI plugin. Without it `docker build` falls back to the
+# legacy builder, which cannot handle BuildKit Dockerfiles (`# syntax`,
+# RUN --mount=type=cache/secret) — exactly what this repo's own Dockerfile
+# and most modern projects use. buildx publishes a single checksums.txt per
+# release rather than per-asset .sha256, so verify against that.
+ARG BUILDX_VERSION=0.34.1
+RUN set -eux; \
+    arch="$(uname -m)"; \
+    case "$arch" in \
+        x86_64)  bx_arch=amd64 ;; \
+        aarch64) bx_arch=arm64 ;; \
+        *) echo "unsupported arch: $arch" >&2; exit 1 ;; \
+    esac; \
+    base="https://github.com/docker/buildx/releases/download/v${BUILDX_VERSION}"; \
+    asset="buildx-v${BUILDX_VERSION}.linux-${bx_arch}"; \
+    curl -fsSLo /tmp/docker-buildx "${base}/${asset}"; \
+    expected="$(curl -fsSL "${base}/checksums.txt" \
+        | awk -v a="${asset}" '{ f=$2; sub(/^\*/,"",f); if (f==a) print $1 }')"; \
+    echo "${expected}  /tmp/docker-buildx" | sha256sum -c -; \
+    install -D -m 0755 /tmp/docker-buildx /usr/local/lib/docker/cli-plugins/docker-buildx; \
+    rm -f /tmp/docker-buildx
 
 COPY allowlist.dind /etc/devcontainer/allowlist.dind
 COPY --chmod=755 dind-init.sh /usr/local/sbin/dind-init.sh
