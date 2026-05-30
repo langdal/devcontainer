@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.2.1](https://github.com/langdal/devcontainer/compare/v1.2.0...v1.2.1) (2026-05-30)
+
+
+### Bug Fixes
+
+* add buildx in dind mode ([6fc568b](https://github.com/langdal/devcontainer/commit/6fc568b6a73dc56e887cd700d5b8fedcd268baa7))
+* add buildx in dind mode ([4f9ef35](https://github.com/langdal/devcontainer/commit/4f9ef352077fdc65baa52d14e0004ea2ad8ff69f))
+* **dind:** allowlist production.cloudfront.docker.com for Docker Hub pulls ([1607c31](https://github.com/langdal/devcontainer/commit/1607c31cc06e68186238dc635c0c50885957f390))
+
 ## [1.2.0](https://github.com/langdal/devcontainer/compare/v1.1.0...v1.2.0) (2026-05-18)
 
 
