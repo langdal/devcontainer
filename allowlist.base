@@ -19,6 +19,7 @@ static.crates.io
 
 # mise / language runtimes
 mise.jdx.dev
+mise.run
 nodejs.org
 *.nodejs.org
 mise-versions.jdx.dev
