@@ -122,9 +122,10 @@ RUN id proxy >/dev/null 2>&1 || \
         useradd --system --no-create-home --shell /usr/sbin/nologin proxy
 RUN mkdir -p /etc/devcontainer
 
-# Bake the base allowlist and the firewall init script into the image.
+# Bake the base allowlist and the firewall init/disable scripts into the image.
 COPY allowlist.base /etc/devcontainer/allowlist.base
 COPY --chmod=755 firewall-init.sh /usr/local/sbin/firewall-init.sh
+COPY --chmod=755 firewall-disable.sh /usr/local/sbin/firewall-disable.sh
 
 # Set working directory
 WORKDIR /workspace

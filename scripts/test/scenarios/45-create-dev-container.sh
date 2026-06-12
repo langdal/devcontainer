@@ -39,7 +39,7 @@ if ! "$DEV" --create-dev-container >/dev/null 2>&1; then
 fi
 
 for f in devcontainer.json Dockerfile entrypoint.sh firewall-init.sh \
-         mise.base.toml allowlist.base; do
+         firewall-disable.sh mise.base.toml allowlist.base; do
     if [ ! -f ".devcontainer/$f" ]; then
         log_fail "normal-mode: expected .devcontainer/$f"
         exit 1
@@ -103,7 +103,7 @@ if ! "$DEV" --create-dev-container --dind >/dev/null 2>&1; then
     exit 1
 fi
 for f in devcontainer.json Dockerfile entrypoint.sh firewall-init.sh \
-         mise.base.toml allowlist.base dind-init.sh allowlist.dind; do
+         firewall-disable.sh mise.base.toml allowlist.base dind-init.sh allowlist.dind; do
     if [ ! -f ".devcontainer/$f" ]; then
         log_fail "dind-mode: expected .devcontainer/$f"
         exit 1

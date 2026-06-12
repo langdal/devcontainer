@@ -31,6 +31,19 @@ export HTTP_PROXY=http://127.0.0.1:8888
 export NO_PROXY=localhost,127.0.0.1,host.docker.internal
 EOF
     chmod 644 /etc/profile.d/proxy.sh
+
+    # Opt-in: bring the container up with the firewall already open. Identical
+    # effect to starting normally and then running `dev --disable-firewall`:
+    # firewall-init.sh above set up tinyproxy + iptables; this tears the egress
+    # block down and flips tinyproxy to allow-all. The proxy env vars stay
+    # exported (tinyproxy keeps running, just permissive), so HTTP_PROXY-
+    # honouring clients work exactly as in the toggle-off case.
+    if [ -n "${DEVCONTAINER_FW_DISABLED:-}" ]; then
+        if ! /usr/local/sbin/firewall-disable.sh; then
+            echo "FATAL: firewall-disable.sh failed; refusing to start container" >&2
+            exit 1
+        fi
+    fi
 fi
 
 # --- Maintenance mode: re-grant sudo for vscode and warn loudly ---
