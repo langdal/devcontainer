@@ -20,10 +20,11 @@ iptables -F OUTPUT
 iptables -P OUTPUT ACCEPT
 
 # Switch tinyproxy to an allow-all filter and reload it in place.
+# The HUP must not abort the script (set -e): a stale pidfile or an
+# already-exited process would otherwise make entrypoint.sh refuse to
+# start the container. Fall back to pkill, and tolerate "not running".
 printf '%s\n' '^.*$' > /etc/tinyproxy/filter
-if [ -f /run/tinyproxy.pid ]; then
-    kill -HUP "$(cat /run/tinyproxy.pid)"
-else
+if ! { [ -f /run/tinyproxy.pid ] && kill -HUP "$(cat /run/tinyproxy.pid)" 2>/dev/null; }; then
     pkill -HUP -x tinyproxy 2>/dev/null || true
 fi
 
