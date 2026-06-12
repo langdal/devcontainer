@@ -685,7 +685,7 @@ JSON
 create_dev_container() {
   local target_dir=".devcontainer"
   local sources=(Dockerfile entrypoint.sh firewall-init.sh \
-                 mise.base.toml allowlist.base)
+                 firewall-disable.sh mise.base.toml allowlist.base)
   if [[ "$DIND" == true ]]; then
     sources+=(dind-init.sh allowlist.dind)
   fi
