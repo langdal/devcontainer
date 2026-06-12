@@ -2,6 +2,8 @@
 *.anthropic.com
 *.claude.ai
 *.claude.com
+inference.alexandra.dk
+inference.projects.alexandrainst.dk
 
 # GitHub (HTTPS clone, API, raw, releases)
 github.com
