@@ -117,6 +117,22 @@ runtime_build() {
     extra+=(--secret "id=github_token,env=GITHUB_TOKEN")
   fi
   if [[ "$RUNTIME" == "docker" ]]; then
+    # buildx is mandatory for docker: this image's Dockerfile uses BuildKit
+    # features (RUN --mount=type=secret, --secret) that the legacy builder
+    # cannot parse, and modern docker (>=23.0) has no built-in BuildKit
+    # without the plugin. Without buildx, `docker buildx build` is parsed as
+    # a top-level `docker` invocation and fails with an opaque
+    # "unknown flag: --network"; check up front and explain the real fix.
+    if ! docker buildx version >/dev/null 2>&1; then
+      echo "Error: 'docker buildx' is required to build the dev image, but it is not installed." >&2
+      echo "       The Dockerfile uses BuildKit features (RUN --mount=type=secret) that the" >&2
+      echo "       legacy builder cannot handle, so buildx is mandatory." >&2
+      echo "       Install it:" >&2
+      echo "         - Debian/Ubuntu:  sudo apt-get install docker-buildx-plugin" >&2
+      echo "         - other:          https://docs.docker.com/go/buildx/" >&2
+      echo "       Or, if podman is available, force it with:  DEV_RUNTIME=podman ./dev" >&2
+      exit 1
+    fi
     docker buildx build --network=host "${extra[@]}" -t "$tag" "$context"
   else
     podman $RUNTIME_ARGS build --network=host "${extra[@]}" -t "$tag" "$context"
