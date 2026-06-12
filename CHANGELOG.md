@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.3.0](https://github.com/langdal/devcontainer/compare/v1.2.1...v1.3.0) (2026-06-12)
+
+
+### Features
+
+* add inference server to allow list ([935139d](https://github.com/langdal/devcontainer/commit/935139d6299c57388129c289151e518be98b0651))
+* add inference server to allow list ([8d61644](https://github.com/langdal/devcontainer/commit/8d616448159cf21083c507bb7bbb1ed18ef6f520))
+* start container with firewall disabled via --disable-firewall ([ea20a37](https://github.com/langdal/devcontainer/commit/ea20a3797fe06be1d8956d2d7b45891e0742e10e))
+* start container with firewall disabled via --disable-firewall ([b01204e](https://github.com/langdal/devcontainer/commit/b01204e324b8fb3eb07537198a974a633f328ad8))
+
+
+### Bug Fixes
+
+* **dev:** include firewall-disable.sh in create-dev-container scaffold ([4cabc08](https://github.com/langdal/devcontainer/commit/4cabc08067f43cef6d62f7a305b0a0c2ac58d3d9))
+* **firewall:** make tinyproxy HUP idempotent to avoid aborting disable script ([f6a6793](https://github.com/langdal/devcontainer/commit/f6a67939dc0d0ad68037211976a88d62b60803f2))
+* warn if buildx is not installed ([0391dbc](https://github.com/langdal/devcontainer/commit/0391dbc0308cc7c7185bcc27f62caf8929da7ab3))
+* warn if buildx is not installed ([81b6415](https://github.com/langdal/devcontainer/commit/81b641586ac4619e2c9808e334eb9d57823c47e3))
+
 ## [1.2.1](https://github.com/langdal/devcontainer/compare/v1.2.0...v1.2.1) (2026-05-30)
 
 
