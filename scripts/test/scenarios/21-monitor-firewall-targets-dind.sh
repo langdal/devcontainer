@@ -103,9 +103,10 @@ for flag in --monitor --monitor-fw --disable-firewall --enable-firewall; do
 done
 docker stop "$M" 2>/dev/null; docker rm -f "$M" 2>/dev/null
 
-# 3. With no workspace container running, all four management commands
-#    must error with a clear "not running" / "no container" message.
-for flag in --monitor --monitor-fw --disable-firewall --enable-firewall; do
+# 3. With no workspace container running, the read-only/restore management
+#    commands must error with a clear "not running" / "no container" message.
+#    --disable-firewall is excluded here: it doubles as a start flag (step 4).
+for flag in --monitor --monitor-fw --enable-firewall; do
     if out=$(./dev "$flag" </dev/null 2>&1); then
         log_fail "$flag should have refused with no container running"
         exit 1
@@ -113,6 +114,28 @@ for flag in --monitor --monitor-fw --disable-firewall --enable-firewall; do
     expect_grep "$out" "not running|no .* container" \
         || { log_fail "$flag should report no running container; got: $out"; exit 1; }
 done
+
+# 4. --disable-firewall with no container running must START a fresh normal
+#    container with the firewall already open (same end state as
+#    start-then-toggle), not error. Confirm via the OUTPUT chain policy:
+#    ACCEPT when disabled vs the default-deny DROP.
+run_bg ./dev --disable-firewall -- sleep 60
+if ! docker ps -q -f name="^${N}$" | grep -q .; then
+    log_fail "--disable-firewall with no container running did not start ${N}"
+    exit 1
+fi
+sleep 2   # firewall-init.sh + firewall-disable.sh run before the CMD
+out=$(docker exec --user root "$N" iptables -S OUTPUT 2>&1 | head -1)
+expect_grep "$out" "OUTPUT ACCEPT" \
+    || { log_fail "fresh --disable-firewall container should have OUTPUT policy ACCEPT; got: $out"; exit 1; }
+# And it must be re-securable in place with --enable-firewall.
+if ! out=$(./dev --enable-firewall 2>&1); then
+    log_fail "--enable-firewall failed against fresh fw-disabled container: $out"
+    exit 1
+fi
+expect_grep "$out" "firewall-init: ready" \
+    || { log_fail "--enable-firewall did not invoke firewall-init.sh: $out"; exit 1; }
+docker stop "$N" 2>/dev/null; docker rm -f "$N" 2>/dev/null
 
 log_pass "monitor + firewall management commands target running normal-or-dind container"
 exit 0

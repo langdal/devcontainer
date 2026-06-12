@@ -245,11 +245,14 @@ OPTIONS:
                   container (tcpdump on NFLOG group 1). Targets normal or
                   dind. Does not start a container.
   --disable-firewall
-                  Open the firewall on the running workspace container
-                  (normal or dind): flush OUTPUT rules + ACCEPT policy, and
-                  switch tinyproxy to an allow-all filter (SIGHUP reload).
-                  Existing shells keep working whether or not HTTPS_PROXY
-                  is set.
+                  Bring the workspace up with the firewall open. If a
+                  container (normal or dind) is already running, toggle it
+                  in place: flush OUTPUT rules + ACCEPT policy, and switch
+                  tinyproxy to an allow-all filter (SIGHUP reload); existing
+                  shells keep working whether or not HTTPS_PROXY is set. If
+                  none is running, start a *fresh* container with the
+                  firewall already disabled (same end state). Re-enable
+                  later with --enable-firewall.
   --enable-firewall
                   Re-run firewall-init.sh on the running workspace container
                   (normal or dind) to rebuild the allowlist filter and
@@ -311,7 +314,7 @@ EXAMPLES:
   dev --dind                    # Start with rootless docker available inside
   dev --monitor                 # Tail firewall proxy log of running container
   dev --monitor-fw              # Stream iptables-dropped packets of running container
-  dev --disable-firewall        # Drop the firewall on the running container
+  dev --disable-firewall        # Toggle off a running container, or start fresh with fw off
   dev --enable-firewall         # Restore the firewall on the running container
   dev -- npm run dev            # Run custom command in container
   dev install                   # Install 'dev' onto your PATH
@@ -962,6 +965,13 @@ fi
 # --disable-firewall / --enable-firewall: toggle iptables on the running
 # workspace container without restarting it. Works for both normal and dind
 # (both have CAP_NET_ADMIN and the same firewall stack).
+#
+# --disable-firewall doubles as a start flag: if no firewall-capable container
+# is running for this workspace, it falls through to the normal startup path
+# with DEVCONTAINER_FW_DISABLED=1 so a *fresh* container comes up with the
+# firewall already open (same end state as start-then-toggle). FW_DISABLED_START
+# carries that intent to the docker-run env block below.
+FW_DISABLED_START=false
 if [[ "$DISABLE_FW" == true || "$ENABLE_FW" == true ]]; then
   if [[ "$DISABLE_FW" == true && "$ENABLE_FW" == true ]]; then
     echo "Error: --disable-firewall and --enable-firewall are mutually exclusive." >&2
@@ -971,25 +981,21 @@ if [[ "$DISABLE_FW" == true || "$ENABLE_FW" == true ]]; then
     echo "Error: --disable-firewall/--enable-firewall and --maintenance are mutually exclusive (no firewall in maintenance mode)." >&2
     exit 1
   fi
-  require_workspace_firewall_container "--disable-firewall/--enable-firewall"
-  if [[ "$DISABLE_FW" == true ]]; then
-    # Open the kernel egress AND switch tinyproxy to allow-all (permissive
-    # filter + SIGHUP) so HTTP_PROXY-honoring clients in existing shells
-    # also get through, not just direct/--noproxy traffic.
-    exec $RUNTIME $MANAGED_RUNTIME_ARGS exec --user root "$MANAGED_NAME" sh -c "
-      set -e
-      iptables -F OUTPUT
-      iptables -P OUTPUT ACCEPT
-      printf '%s\n' '^.*\$' > /etc/tinyproxy/filter
-      if [ -f /run/tinyproxy.pid ]; then
-          kill -HUP \"\$(cat /run/tinyproxy.pid)\"
-      else
-          pkill -HUP -x tinyproxy 2>/dev/null || true
-      fi
-      echo 'firewall disabled'
-    "
-  else
+  if [[ "$ENABLE_FW" == true ]]; then
+    # Re-enabling only makes sense on an already-running container.
+    require_workspace_firewall_container "--enable-firewall"
     exec $RUNTIME $MANAGED_RUNTIME_ARGS exec --user root "$MANAGED_NAME" /usr/local/sbin/firewall-init.sh
+  fi
+  # --disable-firewall: toggle a running firewall container in place, otherwise
+  # start a fresh one with the firewall disabled from the start.
+  resolve_managed_container
+  if [[ "$MANAGED_TARGET" == "maint" ]]; then
+    echo "Error: maintenance container ${MAINT_NAME} has no firewall — --disable-firewall is meaningless in maintenance mode." >&2
+    exit 1
+  elif [[ -n "$MANAGED_TARGET" ]]; then
+    exec $RUNTIME $MANAGED_RUNTIME_ARGS exec --user root "$MANAGED_NAME" /usr/local/sbin/firewall-disable.sh
+  else
+    FW_DISABLED_START=true
   fi
 fi
 
@@ -1301,6 +1307,13 @@ fi
 # DinD mode: tell entrypoint.sh to start dockerd-rootless.
 if [[ "$DIND" == true ]]; then
   DOCKER_CMD+=(-e DEVCONTAINER_DIND=1)
+fi
+
+# --disable-firewall with no running container: bring the fresh container up
+# with the firewall already torn down (entrypoint still runs firewall-init.sh,
+# then firewall-disable.sh).
+if [[ "$FW_DISABLED_START" == true ]]; then
+  DOCKER_CMD+=(-e DEVCONTAINER_FW_DISABLED=1)
 fi
 
 DOCKER_CMD+=("$IMAGE_TAG")

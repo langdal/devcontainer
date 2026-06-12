@@ -38,7 +38,9 @@ docker build -t generic-devcontainer .
 # Rootless Docker-in-Docker (separate :dind image, dev-<dir>-dind container).
 ./dev --dind
 
-# Toggle the firewall on a running container without restarting:
+# Toggle the firewall on a running container without restarting. If no
+# container is running, --disable-firewall starts a fresh one with the
+# firewall already off (same end state as start-then-disable).
 ./dev --disable-firewall
 ./dev --enable-firewall
 

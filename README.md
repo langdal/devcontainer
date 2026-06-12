@@ -105,13 +105,15 @@ One entry per line, `#` for comments. Bare hostnames match exactly; `*.example.c
 ### Firewall controls
 
 ```bash
-dev --disable-firewall    # open the firewall on the running container
-dev --enable-firewall     # restore default-deny + allowlist
+dev --disable-firewall    # open the firewall (running container, or fresh start)
+dev --enable-firewall     # restore default-deny + allowlist on the running container
 dev --monitor             # tail the tinyproxy log
 dev --monitor-fw          # tcpdump on iptables-dropped packets (NFLOG group 1)
 ```
 
-These act on whichever workspace container is running (normal or dind). The container name does **not** change when the firewall is toggled, so for longer-lived unrestricted work prefer `--maintenance` — its name (`-maint`) is a visible signal.
+`--disable-firewall` is dual-purpose: if a workspace container (normal or dind) is already running it toggles that one in place; if none is running it starts a **fresh** container with the firewall already open — the same end state as starting normally and toggling off. `--enable-firewall` only acts on a running container.
+
+The container name does **not** change when the firewall is toggled, so for longer-lived unrestricted work prefer `--maintenance` — its name (`-maint`) is a visible signal.
 
 ### Reaching a host service (e.g. local LLM)
 
@@ -204,7 +206,8 @@ OPTIONS:
   --dind                  Start with rootless docker available inside
   --monitor               Tail the firewall proxy log of the running container
   --monitor-fw            Stream iptables-dropped packets of the running container
-  --disable-firewall      Open the firewall on the running container
+  --disable-firewall      Open the firewall on the running container, or
+                          start a fresh container with the firewall off
   --enable-firewall       Restore the firewall on the running container
   --create-dev-container  Scaffold a self-contained .devcontainer/ for VS Code
                           in the current directory (compose with --dind for
