@@ -11,13 +11,13 @@ run_box() {  # run box in a throwaway project dir, dry-run, provisioned, hermeti
 
 # default: boots a detached named sandbox then attaches a shell
 def="$(run_box)"
-assert_contains "$def" "msb run -d --name box-" "default boots detached sandbox"
+assert_contains "$def" "msb run -d --replace --name box-" "default boots detached sandbox"
 assert_contains "$def" "--net-default-egress deny" "default run is locked down"
-assert_contains "$def" "msb exec box-" "default attaches a shell"
+assert_contains "$def" "msb exec" "default attaches a shell"
 
 # one-off command
 oneoff="$(run_box -- echo hello)"
-assert_contains "$oneoff" "msb exec box-" "one-off uses exec"
+assert_contains "$oneoff" "msb exec" "one-off uses exec"
 assert_contains "$oneoff" "-- echo hello" "one-off passes command"
 
 # provision: open egress

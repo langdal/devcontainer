@@ -79,7 +79,12 @@ msb_is_running() {
 msb_up() {
   local name="$1" image="$2" workspace="$3" mode="$4"; shift 4
   local hosts=("$@")
-  local args=(run -d --name "$name")
+  # --replace: callers only reach here when the sandbox is NOT running, but a
+  # *stopped* sandbox of the same name still exists (e.g. after `box down`).
+  # Without --replace, `msb run -d --name X` restarts that stale sandbox with
+  # its ORIGINAL flags and silently ignores the new mounts/net rules/secrets.
+  # --replace forces a fresh boot so allowlist/secret changes take effect.
+  local args=(run -d --replace --name "$name")
   mapfile -t mounts < <(msb_mount_args "$workspace" box-mise:/mise box-home:/home/vscode)
   mapfile -t net < <(msb_net_args "$mode" "${hosts[@]}")
   local secrets=()
@@ -91,11 +96,33 @@ msb_up() {
   _msb "${args[@]}"
 }
 
+# mise environment injected into every exec'd command (and the provision step).
+# Why --env rather than relying on shell rc files:
+#   * `msb exec` runs as ROOT, whose HOME is /root in the EPHEMERAL guest rootfs
+#     (not the persistent box-home volume), so rc seeding there would not stick.
+#   * Running as the `vscode` user instead would source a seeded rc, but the
+#     /workspace bind mount is owned by guest-root (host-user maps to guest-root),
+#     so a uid-1000 process cannot WRITE the workspace. Root can, and its writes
+#     map back to the host user — the correct two-way mount behaviour.
+# Therefore: exec as root (writable workspace) and inject the mise env directly.
+# /mise (box-mise volume) holds the real mise binary + shims, so PATH alone makes
+# `mise` and every mise-managed tool resolve in a non-interactive `bash -lc`.
+_MSB_GUEST_PATH=/mise/shims:/mise/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+msb_mise_env_args() {
+  printf '%s\n' \
+    --env "PATH=$_MSB_GUEST_PATH" \
+    --env "MISE_DATA_DIR=/mise" \
+    --env "MISE_CONFIG_DIR=/mise" \
+    --env "MISE_CACHE_DIR=/mise/cache"
+}
+
 # msb_attach NAME -- CMD...  -> run CMD in an already-running named sandbox.
+# Injects the mise env (above) so mise + project tools are on PATH.
 msb_attach() {
   local name="$1"; shift
   if [[ "${1:-}" == "--" ]]; then shift; fi
-  _msb exec "$name" -- "$@"
+  mapfile -t env < <(msb_mise_env_args)
+  _msb exec "${env[@]}" "$name" -- "$@"
 }
 
 # msb_provision IMAGE WORKSPACE
@@ -106,7 +133,12 @@ msb_provision() {
   local image="$1" workspace="$2"
   mapfile -t mounts < <(msb_mount_args "$workspace" box-mise:/mise box-home:/home/vscode)
   mapfile -t net < <(msb_net_args full)
-  # Guest-side provisioning script. mise data/config/cache all live on /mise.
+  # Guest-side provisioning script (runs as root, open egress). mise
+  # data/config/cache all live on the persistent /mise (box-mise) volume.
+  # Install mise into /mise/bin if absent, then install the project tools.
+  # Run-time PATH/activation is handled by msb_attach injecting --env (the
+  # /mise volume persists, so the installed binaries are all that is needed);
+  # no shell-rc seeding is required here.
   local script='set -e
 export MISE_DATA_DIR=/mise MISE_CONFIG_DIR=/mise MISE_CACHE_DIR=/mise/cache
 export PATH=/mise/bin:$PATH
