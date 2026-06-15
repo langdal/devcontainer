@@ -1,0 +1,35 @@
+# Default egress allowlist for box (sanctioned mode). One host per line.
+# Bare host = exact match; *.host = subdomains. Edit per-project via .box-allowlist.
+
+# Anthropic / Claude
+*.anthropic.com
+*.claude.ai
+*.claude.com
+
+# GitHub
+github.com
+api.github.com
+codeload.github.com
+*.githubusercontent.com
+ghcr.io
+
+# Package registries
+*.npmjs.org
+pypi.org
+files.pythonhosted.org
+crates.io
+static.crates.io
+
+# mise / language runtimes
+mise.jdx.dev
+mise.run
+mise-versions.jdx.dev
+*.jdx.dev
+nodejs.org
+*.nodejs.org
+
+# OS packages
+deb.debian.org
+security.debian.org
+archive.ubuntu.com
+security.ubuntu.com
