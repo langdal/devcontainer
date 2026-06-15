@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+source "$SCRIPT_DIR/lib/allowlist.sh"
+source "$SCRIPT_DIR/lib/secrets.sh"
+source "$SCRIPT_DIR/lib/msb.sh"
+
+IMAGE="${BOX_IMAGE:-mcr.microsoft.com/devcontainers/base:ubuntu}"
+DEFAULT_ALLOWLIST="$SCRIPT_DIR/allowlist.default"
+
+usage() {
+  cat <<'EOF'
+Usage: box [--net none|sanctioned|full] [COMMAND]
+
+  box                     Boot/attach the sandbox for this directory; open a shell.
+  box -- CMD...           Run a one-off command in the sandbox.
+  box shell               Attach an extra terminal to the running sandbox.
+  box provision           Build step (open egress): install mise + tools into the volume.
+  box down                Stop the sandbox.
+  box reset               Stop and remove the sandbox + named volumes.
+  box --help              Show this help.
+
+Egress modes: none (airgapped), sanctioned (default; deny + allowlist), full (provision).
+Per-project egress extras: .box-allowlist   Secrets: .box-secrets
+EOF
+}
+
+sandbox_name() { echo "box-$(basename "$PWD")"; }
+state_dir() { echo "${XDG_STATE_HOME:-$HOME/.local/state}/box"; }
+marker_file() { echo "$(state_dir)/$(sandbox_name).provisioned"; }
+merged_hosts() { allowlist_merge "$DEFAULT_ALLOWLIST" "$PWD/.box-allowlist"; }
+declared_secrets() { secrets_parse "$PWD/.box-secrets"; }
+
+do_provision() { msb_provision "$IMAGE" "$PWD"; }
+mark_provisioned() { mkdir -p "$(state_dir)"; : > "$(marker_file)"; }
+
+ensure_provisioned() {
+  [[ -n "${BOX_ASSUME_PROVISIONED:-}" ]] && return 0
+  [[ -f "$(marker_file)" ]] && return 0
+  echo "box: first run for $(sandbox_name); provisioning (open egress)..." >&2
+  do_provision
+  mark_provisioned
+}
+
+boot_or_attach() {  # MODE -- CMD...
+  local mode="$1"; shift
+  if [[ "${1:-}" == "--" ]]; then shift; fi
+  local cmd=("$@")
+  local name; name="$(sandbox_name)"
+  ensure_provisioned
+  mapfile -t hosts < <(merged_hosts)
+  if ! msb_is_running "$name"; then
+    msb_up "$name" "$IMAGE" "$PWD" "$mode" "${hosts[@]}"
+  fi
+  msb_attach "$name" -- "${cmd[@]}"
+}
+
+MODE="sanctioned"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --help|-h) usage; exit 0 ;;
+    --net) MODE="$2"; shift 2 ;;
+    provision) do_provision; mark_provisioned; exit 0 ;;
+    down) _msb stop "$(sandbox_name)" || true; exit 0 ;;
+    reset)
+      _msb stop "$(sandbox_name)" 2>/dev/null || true
+      _msb rm "$(sandbox_name)" 2>/dev/null || true
+      rm -f "$(marker_file)"
+      echo "box: removed sandbox + marker (volumes: msb volume rm box-mise box-home)"
+      exit 0 ;;
+    shell) boot_or_attach "$MODE" -- /usr/bin/zsh; exit 0 ;;
+    --) shift; boot_or_attach "$MODE" -- "$@"; exit 0 ;;
+    *) echo "box: unknown argument '$1' (try --help)" >&2; exit 2 ;;
+  esac
+done
+
+boot_or_attach "$MODE" -- /usr/bin/zsh
