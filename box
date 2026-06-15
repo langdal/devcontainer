@@ -32,6 +32,8 @@ Usage: box [--net none|sanctioned|full] [--docker] [COMMAND]
   box build [TAG]         Build Dockerfile.box, load it into microsandbox, pin it in .box-image.
   box down                Stop the sandbox.
   box reset               Stop and remove the sandbox + named volumes.
+  box install             Symlink box into a writable bin dir on your PATH.
+  box self-update         Update box's git checkout to the latest release tag.
   box --help              Show this help.
 
 Egress modes: none (airgapped), sanctioned (default; deny + allowlist), full (provision).
@@ -168,6 +170,58 @@ do_build() {
   fi
 }
 
+# box install — symlink box into a writable bin dir on PATH. box resolves its own
+# dir with `readlink -f`, so the symlink still finds lib/, allowlist.*, Dockerfile.*.
+install_self() {
+  local script_path; script_path="$(readlink -f "${BASH_SOURCE[0]}")"
+  local target_dir="" dir
+  for dir in "$HOME/.local/bin" "$HOME/bin" /usr/local/bin; do
+    case ":$PATH:" in
+      *":$dir:"*) if [[ -d "$dir" && -w "$dir" ]]; then target_dir="$dir"; break; fi ;;
+    esac
+  done
+  if [[ -z "$target_dir" ]]; then
+    echo "box: no writable bin dir on PATH (tried ~/.local/bin, ~/bin, /usr/local/bin)." >&2
+    echo "     create one and add it to PATH, then retry." >&2
+    exit 1
+  fi
+  local link="$target_dir/box"
+  if [[ -L "$link" ]]; then
+    local cur; cur="$(readlink "$link")"
+    if [[ "$cur" == "$script_path" ]]; then echo "box: already installed: $link -> $script_path"; return 0; fi
+    echo "box: $link already points to $cur — remove it first (rm $link)." >&2; exit 1
+  elif [[ -e "$link" ]]; then
+    echo "box: $link exists and is not a symlink; refusing to overwrite." >&2; exit 1
+  fi
+  ln -s "$script_path" "$link"
+  echo "box: installed $link -> $script_path"
+}
+
+# box self-update [--dry-run] — fast-forward box's git checkout to the latest
+# release tag. Refuses on a dirty tree; mirrors `dev --self-update`.
+self_update() {
+  local dry=0; [[ "${1:-}" == "--dry-run" ]] && dry=1
+  command -v git >/dev/null 2>&1 || { echo "box: git is required for self-update." >&2; exit 1; }
+  [[ -d "$SCRIPT_DIR/.git" ]] || { echo "box: $SCRIPT_DIR is not a git checkout; self-update only works on a git clone." >&2; exit 1; }
+  [[ -z "$(git -C "$SCRIPT_DIR" status --porcelain 2>/dev/null)" ]] || { echo "box: uncommitted changes in $SCRIPT_DIR — commit/stash/reset first." >&2; exit 1; }
+  local origin; origin="$(git -C "$SCRIPT_DIR" remote get-url origin 2>/dev/null || true)"
+  [[ -n "$origin" ]] || { echo "box: no 'origin' remote in $SCRIPT_DIR." >&2; exit 1; }
+  if [[ $dry -eq 1 ]]; then
+    echo "box: would fetch tags from $origin and check out the latest release tag."
+    return 0
+  fi
+  echo "box: fetching tags from $origin"
+  git -C "$SCRIPT_DIR" fetch --tags --prune origin
+  local latest cur_tag
+  latest="$(git -C "$SCRIPT_DIR" ls-remote --tags --refs --sort=version:refname origin 2>/dev/null | awk -F/ '{print $NF}' | tail -1)"
+  [[ -n "$latest" ]] || { echo "box: no tags advertised by origin." >&2; exit 1; }
+  cur_tag="$(git -C "$SCRIPT_DIR" describe --tags --exact-match HEAD 2>/dev/null || true)"
+  if [[ -n "$cur_tag" && "$cur_tag" == "$latest" ]]; then echo "box: already up to date ($cur_tag)"; return 0; fi
+  echo "box: updating $(git -C "$SCRIPT_DIR" describe --tags --always 2>/dev/null || echo unknown) -> $latest"
+  git -C "$SCRIPT_DIR" checkout --quiet --force "$latest"
+  echo "box: updated to $latest"
+}
+
 # Preflight: microsandbox must be installed before any real msb call.
 # Skipped under BOX_DRY_RUN (the unit-test seam never touches a real binary).
 require_msb() {
@@ -259,6 +313,8 @@ while [[ $# -gt 0 ]]; do
       [[ "$2" =~ ^[0-9]+$ ]] || { echo "box: --host-port must be a port number, got '$2'" >&2; exit 2; }
       HOST_PORTS+=("$2"); shift 2 ;;
     build) shift; do_build "${1:-}"; exit 0 ;;
+    install) install_self; exit 0 ;;
+    self-update) self_update "${2:-}"; exit 0 ;;
     --net)
       [[ $# -ge 2 ]] || { echo "box: --net requires an argument (none|sanctioned|full)" >&2; exit 2; }
       case "$2" in

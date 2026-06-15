@@ -80,6 +80,14 @@ assert_contains "$out_nomsb" "install.microsandbox.dev" "missing msb shows insta
 # default run uses the default base image
 assert_contains "$def" "box-base:local" "default uses the auto-built base image (socat baked in)"
 
+# --- install: symlink box into a bin dir on PATH (hermetic temp HOME) ---
+tmph="$(mktemp -d)"; mkdir -p "$tmph/.local/bin"
+HOME="$tmph" PATH="$tmph/.local/bin:$PATH" "$ROOT/box" install >/dev/null 2>&1
+assert_eq "$ROOT/box" "$(readlink "$tmph/.local/bin/box" 2>/dev/null)" "install symlinks box onto PATH"
+# idempotent: second install succeeds (already installed)
+rc_i=0; HOME="$tmph" PATH="$tmph/.local/bin:$PATH" "$ROOT/box" install >/dev/null 2>&1 || rc_i=$?
+assert_eq "0" "$rc_i" "re-install is idempotent"
+
 # BOX_IMAGE env overrides the run image
 proji="$(mktemp -d)"
 out_env="$( cd "$proji" && XDG_STATE_HOME="$proji/.state" BOX_DRY_RUN=1 BOX_ASSUME_PROVISIONED=1 BOX_IMAGE=my/img:1 "$ROOT/box" -- true )"

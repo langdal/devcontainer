@@ -45,6 +45,24 @@ After the first provision, `box` auto-provisions on first use so the explicit
 `box provision` call is only needed when you want to run the build step
 explicitly (e.g. after `box reset`).
 
+## Install on PATH
+
+```sh
+/path/to/box install     # symlinks box into ~/.local/bin (or ~/bin, /usr/local/bin)
+box                      # now available everywhere
+```
+
+`box install` symlinks the script; because `box` resolves its own directory it
+still finds `lib/`, `allowlist.*`, and the bundled Dockerfiles through the link.
+Keep it current with:
+
+```sh
+box self-update          # fast-forwards the git checkout to the latest release tag
+box self-update --dry-run
+```
+
+`self-update` requires a clean git checkout (it refuses to clobber local edits).
+
 ## Command reference
 
 | Command | Behaviour |
