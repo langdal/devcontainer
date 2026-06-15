@@ -46,6 +46,21 @@ EOF
 sandbox_name() { echo "box-$(basename "$PWD")"; }
 state_dir() { echo "${XDG_STATE_HOME:-$HOME/.local/state}/box"; }
 marker_file() { echo "$(state_dir)/$(sandbox_name).provisioned"; }
+config_file() { echo "$(state_dir)/$(sandbox_name).config"; }
+
+# A fingerprint of everything that affects the boot. If a re-run's fingerprint
+# differs from the running sandbox's, box restarts it so the new config applies.
+# (Reads the globals set in boot_or_attach.)
+config_signature() {
+  printf '%s\n' \
+    "image=${IMAGE:-}" \
+    "mode=${MODE:-}" \
+    "docker=${BOX_DOCKER:-}" \
+    "ports=${BOX_PORTS:-}" \
+    "hostports=${BOX_HOST_PORTS:-}" \
+    "secrets=${BOX_SECRETS:-}"
+  printf 'host=%s\n' "${hosts[@]+"${hosts[@]}"}"
+}
 merged_hosts() {
   if [[ -n "${BOX_DOCKER_MODE:-}" ]]; then
     allowlist_merge "$DEFAULT_ALLOWLIST" "$DIND_ALLOWLIST" "$PWD/.box-allowlist"
@@ -196,18 +211,33 @@ boot_or_attach() {  # MODE -- CMD...
   if [[ ${#HOST_PORTS[@]} -gt 0 ]]; then BOX_HOST_PORTS="$(IFS=,; echo "${HOST_PORTS[*]}")"; else BOX_HOST_PORTS=""; fi
   export BOX_HOST_PORTS
   mapfile -t hosts < <(merged_hosts)
-  if ! msb_is_running "$name"; then
-    msb_up "$name" "$IMAGE" "$PWD" "$mode" "${hosts[@]}"
-    if [[ -n "${BOX_DOCKER:-}" ]]; then
-      echo "box: waiting for dockerd to start inside the sandbox..." >&2
-      msb_docker_wait "$name"
+  local sig; sig="$(config_signature)"
+  if msb_is_running "$name"; then
+    if [[ "$(cat "$(config_file)" 2>/dev/null || true)" != "$sig" ]]; then
+      echo "box: run configuration changed since last start; restarting the sandbox to apply it..." >&2
+      msb_stop "$name" || true
+      boot_fresh "$name" "$mode" "$sig"
     fi
-    if [[ -n "${BOX_HOST_PORTS:-}" ]]; then
-      msb_host_alias "$name"
-      echo "box: host reachable at host.docker.internal:<port> (allowed ports: $BOX_HOST_PORTS)" >&2
-    fi
+  else
+    boot_fresh "$name" "$mode" "$sig"
   fi
   msb_attach "$name" -- "${cmd[@]}"
+}
+
+# boot_fresh NAME MODE SIG -> boot a new sandbox with the current config and
+# record its fingerprint. (Reads globals IMAGE, hosts, BOX_DOCKER, BOX_HOST_PORTS.)
+boot_fresh() {
+  local name="$1" mode="$2" sig="$3"
+  msb_up "$name" "$IMAGE" "$PWD" "$mode" "${hosts[@]}"
+  if [[ -n "${BOX_DOCKER:-}" ]]; then
+    echo "box: waiting for dockerd to start inside the sandbox..." >&2
+    msb_docker_wait "$name"
+  fi
+  if [[ -n "${BOX_HOST_PORTS:-}" ]]; then
+    msb_host_alias "$name"
+    echo "box: host reachable at host.docker.internal:<port> (allowed ports: $BOX_HOST_PORTS)" >&2
+  fi
+  mkdir -p "$(state_dir)"; printf '%s' "$sig" > "$(config_file)"
 }
 
 # Docker-in-sandbox mode: enabled by the --docker flag or a .box-docker marker.
@@ -246,7 +276,7 @@ while [[ $# -gt 0 ]]; do
     reset)
       msb_stop "$(sandbox_name)" 2>/dev/null || true
       msb_remove "$(sandbox_name)" 2>/dev/null || true
-      rm -f "$(marker_file)"
+      rm -f "$(marker_file)" "$(config_file)"
       echo "box: removed sandbox + marker (volumes: msb volume rm box-mise box-home)"
       exit 0 ;;
     shell) boot_or_attach "$MODE" -- /usr/bin/zsh; exit 0 ;;

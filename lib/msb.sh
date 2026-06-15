@@ -86,9 +86,9 @@ _msb() {
 }
 
 # msb_is_running NAME -> 0 if a named sandbox is currently running.
-# Dry-run short-circuits to "not running".
+# Under dry-run it reports BOX_FAKE_RUNNING (test seam), else not-running.
 msb_is_running() {
-  [[ -n "${BOX_DRY_RUN:-}" ]] && return 1
+  if [[ -n "${BOX_DRY_RUN:-}" ]]; then [[ -n "${BOX_FAKE_RUNNING:-}" ]]; return; fi
   "$MSB_BIN" ps -q 2>/dev/null | grep -Fxq "$1"
 }
 

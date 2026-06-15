@@ -145,6 +145,20 @@ assert_contains "$hostp" "host.docker.internal" "--host-port sets up the host.do
 # default run does not allow host access
 assert_eq "" "$(echo "$def" | grep -o 'allow@host' || true)" "default run does not allow host access"
 
+# --- auto-restart when the run config changes (e.g. --net full then --net none) ---
+projx="$(mktemp -d)"
+# first start: --net full, records the config (not running yet)
+( cd "$projx" && XDG_STATE_HOME="$projx/.state" BOX_DRY_RUN=1 BOX_ASSUME_PROVISIONED=1 "$ROOT/box" --net full -- true >/dev/null 2>&1 )
+# re-run with --net none while "running" -> must restart and apply deny
+chg="$( cd "$projx" && XDG_STATE_HOME="$projx/.state" BOX_DRY_RUN=1 BOX_ASSUME_PROVISIONED=1 BOX_FAKE_RUNNING=1 "$ROOT/box" --net none -- true 2>&1 )"
+assert_contains "$chg" "msb stop box-" "config change (full->none) restarts the sandbox"
+assert_contains "$chg" "--net-default-egress deny" "restart applies the new egress mode"
+# re-run with the SAME config while running -> attach only, no restart
+same="$( cd "$projx" && XDG_STATE_HOME="$projx/.state" BOX_DRY_RUN=1 BOX_ASSUME_PROVISIONED=1 BOX_FAKE_RUNNING=1 "$ROOT/box" --net none -- true 2>&1 )"
+assert_eq "" "$(echo "$same" | grep -o 'msb stop' || true)" "unchanged config does not restart"
+assert_eq "" "$(echo "$same" | grep -o 'msb run -d' || true)" "unchanged config does not re-run"
+assert_contains "$same" "msb exec" "unchanged config just attaches"
+
 # a .box-docker marker enables docker mode without the flag
 projm="$(mktemp -d)"; : > "$projm/.box-docker"
 out_marker="$( cd "$projm" && XDG_STATE_HOME="$projm/.state" BOX_DRY_RUN=1 BOX_ASSUME_PROVISIONED=1 "$ROOT/box" -- true 2>/dev/null )"
