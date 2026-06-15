@@ -78,7 +78,7 @@ assert_contains "$out_nomsb" "install.microsandbox.dev" "missing msb shows insta
 # --- custom base image (BOX_IMAGE / .box-image / box build) ---
 
 # default run uses the default base image
-assert_contains "$def" "mcr.microsoft.com/devcontainers/base:ubuntu" "default uses the default image"
+assert_contains "$def" "box-base:local" "default uses the auto-built base image (socat baked in)"
 
 # BOX_IMAGE env overrides the run image
 proji="$(mktemp -d)"
@@ -136,6 +136,14 @@ assert_contains "$ports" "--port 8080:8080" "bare --port becomes PORT:PORT"
 assert_contains "$ports" "--port 127.0.0.1:5173:5173" "--port HOST:GUEST passes through"
 # no --port -> no port flags
 assert_eq "" "$(echo "$def" | grep -o -- '--port' || true)" "default run publishes no ports"
+
+# --host-port allows reaching a host service via the `host` rule target + sets up
+# the host.docker.internal IPv4 alias inside the guest.
+hostp="$(run_box --host-port 11434 2>/dev/null)"
+assert_contains "$hostp" "allow@host:tcp:11434" "--host-port allows the host on that port"
+assert_contains "$hostp" "host.docker.internal" "--host-port sets up the host.docker.internal alias"
+# default run does not allow host access
+assert_eq "" "$(echo "$def" | grep -o 'allow@host' || true)" "default run does not allow host access"
 
 # a .box-docker marker enables docker mode without the flag
 projm="$(mktemp -d)"; : > "$projm/.box-docker"

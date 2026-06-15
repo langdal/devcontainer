@@ -9,8 +9,10 @@ source "$SCRIPT_DIR/lib/msb.sh"
 DEFAULT_IMAGE="mcr.microsoft.com/devcontainers/base:ubuntu"
 DEFAULT_ALLOWLIST="$SCRIPT_DIR/allowlist.default"
 DIND_ALLOWLIST="$SCRIPT_DIR/allowlist.dind"
-# Docker mode boots a systemd+docker image, auto-built from the bundled
-# Dockerfile.box.docker (no per-project Dockerfile or copy step needed).
+# Default image is auto-built from the bundled Dockerfile.box.base (devcontainers
+# base + socat); docker mode uses the systemd+docker image. Both build on demand.
+BASE_IMAGE="box-base:local"
+BASE_DOCKERFILE="$SCRIPT_DIR/Dockerfile.box.base"
 DOCKER_BASE_IMAGE="box-docker-base:local"
 DOCKER_DOCKERFILE="$SCRIPT_DIR/Dockerfile.box.docker"
 
@@ -21,6 +23,7 @@ Usage: box [--net none|sanctioned|full] [--docker] [COMMAND]
   box                     Boot/attach the sandbox for this directory; open a shell.
   box --docker            Run with a Docker daemon inside the sandbox (auto-builds its image).
   box --port HOST:GUEST   Publish a guest port to the host (repeatable; PORT means PORT:PORT).
+  box --host-port PORT    Allow the guest to reach a host service at host.docker.internal:PORT (repeatable).
   box -- CMD...           Run a one-off command in the sandbox.
   box shell               Attach an extra terminal to the running sandbox.
   box provision           Build step (open egress): install mise + tools into the volume.
@@ -52,18 +55,19 @@ merged_hosts() {
 }
 declared_secrets() { secrets_parse "$PWD/.box-secrets"; }
 
-# Base image precedence: BOX_IMAGE env > .box-image file (first non-comment line) > default.
+# Image precedence: BOX_IMAGE env > .box-image file (first non-comment line) >
+# the built default base (box-base:local, devcontainers base + socat).
 resolve_image() {
   if [[ -n "${BOX_IMAGE:-}" ]]; then echo "$BOX_IMAGE"; return; fi
   if [[ -f "$PWD/.box-image" ]]; then
     local ref; ref="$(sed 's/#.*//' "$PWD/.box-image" | awk 'NF{print $1; exit}')"
     if [[ -n "$ref" ]]; then echo "$ref"; return; fi
   fi
-  echo "$DEFAULT_IMAGE"
+  echo "$BASE_IMAGE"
 }
 
-# The image to actually boot: in docker mode (without an explicit BOX_IMAGE) it's
-# the auto-built systemd+docker base; otherwise normal resolution.
+# The image we intend to boot: docker mode (without an explicit BOX_IMAGE) uses
+# the systemd+docker base; otherwise normal precedence.
 effective_image() {
   if [[ -n "${BOX_DOCKER_MODE:-}" && -z "${BOX_IMAGE:-}" ]]; then
     echo "$DOCKER_BASE_IMAGE"
@@ -72,15 +76,41 @@ effective_image() {
   fi
 }
 
-# Build the bundled docker base image into microsandbox once, on first --docker use.
-ensure_docker_image() {
-  msb_image_exists "$DOCKER_BASE_IMAGE" && return 0
-  local builder
-  builder="$(box_builder)" || { echo "box: --docker needs docker or podman to build the docker base image (set BOX_BUILDER)" >&2; exit 1; }
-  echo "box: building the docker base image ($DOCKER_BASE_IMAGE) with $builder — first --docker run only..." >&2
-  _host "$builder" build -f "$DOCKER_DOCKERFILE" -t "$DOCKER_BASE_IMAGE" "$SCRIPT_DIR"
-  msb_load_built "$builder" "$DOCKER_BASE_IMAGE"
+# build_base TAG DOCKERFILE -> host-build the bundled image, load it into msb.
+build_base() {
+  local tag="$1" dockerfile="$2" builder
+  builder="$(box_builder)" || return 1
+  echo "box: building $tag from $(basename "$dockerfile") with $builder (first use only)..." >&2
+  _host "$builder" build -f "$dockerfile" -t "$tag" "$SCRIPT_DIR"
+  msb_load_built "$builder" "$tag"
 }
+
+# ensure_image IMG -> make sure IMG is usable; echo the image to actually boot.
+# Builds the bundled base/docker images on demand; user-provided images are left
+# to msb to pull. The default base falls back to the plain pulled image (no socat)
+# if no host builder is available. No builds under dry-run.
+ensure_image() {
+  local img="$1"
+  [[ -n "${BOX_DRY_RUN:-}" ]] && { echo "$img"; return; }
+  case "$img" in
+    "$BASE_IMAGE")
+      msb_image_exists "$BASE_IMAGE" && { echo "$BASE_IMAGE"; return; }
+      if build_base "$BASE_IMAGE" "$BASE_DOCKERFILE"; then echo "$BASE_IMAGE"
+      else
+        echo "box: no docker/podman to build the base image; using $DEFAULT_IMAGE (no baked socat)." >&2
+        echo "$DEFAULT_IMAGE"
+      fi ;;
+    "$DOCKER_BASE_IMAGE")
+      msb_image_exists "$DOCKER_BASE_IMAGE" && { echo "$DOCKER_BASE_IMAGE"; return; }
+      if build_base "$DOCKER_BASE_IMAGE" "$DOCKER_DOCKERFILE"; then echo "$DOCKER_BASE_IMAGE"
+      else echo "box: --docker needs docker or podman to build $DOCKER_BASE_IMAGE (set BOX_BUILDER)." >&2; exit 1
+      fi ;;
+    *) echo "$img" ;;
+  esac
+}
+
+# The image for this run, ensured present.
+current_image() { ensure_image "$(effective_image)"; }
 
 # Pick a host image builder: BOX_BUILDER env, else docker, else podman.
 box_builder() {
@@ -139,7 +169,7 @@ EOF
 }
 
 # Always provisions with OPEN egress (msb_provision forces full); mode flags do not apply here.
-do_provision() { require_msb; msb_provision "$IMAGE" "$PWD"; }
+do_provision() { require_msb; msb_provision "$(current_image)" "$PWD"; }
 mark_provisioned() { mkdir -p "$(state_dir)"; : > "$(marker_file)"; }
 
 ensure_provisioned() {
@@ -157,15 +187,14 @@ boot_or_attach() {  # MODE -- CMD...
   local cmd=("$@")
   local name; name="$(sandbox_name)"
   require_msb
-  if [[ -n "${BOX_DOCKER_MODE:-}" ]]; then
-    BOX_DOCKER=1; export BOX_DOCKER
-    [[ -z "${BOX_IMAGE:-}" ]] && ensure_docker_image
-  fi
-  IMAGE="$(effective_image)"
+  [[ -n "${BOX_DOCKER_MODE:-}" ]] && { BOX_DOCKER=1; export BOX_DOCKER; }
+  IMAGE="$(current_image)"
   ensure_provisioned
   BOX_SECRETS="$(declared_secrets)"; export BOX_SECRETS
   if [[ ${#PORTS[@]} -gt 0 ]]; then BOX_PORTS="$(printf '%s\n' "${PORTS[@]}")"; else BOX_PORTS=""; fi
   export BOX_PORTS
+  if [[ ${#HOST_PORTS[@]} -gt 0 ]]; then BOX_HOST_PORTS="$(IFS=,; echo "${HOST_PORTS[*]}")"; else BOX_HOST_PORTS=""; fi
+  export BOX_HOST_PORTS
   mapfile -t hosts < <(merged_hosts)
   if ! msb_is_running "$name"; then
     msb_up "$name" "$IMAGE" "$PWD" "$mode" "${hosts[@]}"
@@ -173,17 +202,20 @@ boot_or_attach() {  # MODE -- CMD...
       echo "box: waiting for dockerd to start inside the sandbox..." >&2
       msb_docker_wait "$name"
     fi
+    if [[ -n "${BOX_HOST_PORTS:-}" ]]; then
+      msb_host_alias "$name"
+      echo "box: host reachable at host.docker.internal:<port> (allowed ports: $BOX_HOST_PORTS)" >&2
+    fi
   fi
   msb_attach "$name" -- "${cmd[@]}"
 }
-
-IMAGE="$(resolve_image)"
 
 # Docker-in-sandbox mode: enabled by the --docker flag or a .box-docker marker.
 BOX_DOCKER_MODE=""
 [[ -f "$PWD/.box-docker" ]] && BOX_DOCKER_MODE=1
 
 PORTS=()
+HOST_PORTS=()
 MODE="sanctioned"
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -192,6 +224,10 @@ while [[ $# -gt 0 ]]; do
     --port)
       [[ $# -ge 2 ]] || { echo "box: --port requires an argument (PORT or HOST:GUEST)" >&2; exit 2; }
       PORTS+=("$(normalize_port "$2")"); shift 2 ;;
+    --host-port)
+      [[ $# -ge 2 ]] || { echo "box: --host-port requires a port number" >&2; exit 2; }
+      [[ "$2" =~ ^[0-9]+$ ]] || { echo "box: --host-port must be a port number, got '$2'" >&2; exit 2; }
+      HOST_PORTS+=("$2"); shift 2 ;;
     build) shift; do_build "${1:-}"; exit 0 ;;
     --net)
       [[ $# -ge 2 ]] || { echo "box: --net requires an argument (none|sanctioned|full)" >&2; exit 2; }
@@ -202,8 +238,8 @@ while [[ $# -gt 0 ]]; do
       MODE="$2"; shift 2 ;;
     provision)
       case "${2:-}" in
-        --shell|-i) require_msb; msb_provision_shell "$IMAGE" "$PWD"; exit 0 ;;
-        --) shift 2; require_msb; msb_provision_shell "$IMAGE" "$PWD" "$@"; exit 0 ;;
+        --shell|-i) require_msb; msb_provision_shell "$(current_image)" "$PWD"; exit 0 ;;
+        --) shift 2; require_msb; msb_provision_shell "$(current_image)" "$PWD" "$@"; exit 0 ;;
         *) do_provision; mark_provisioned; exit 0 ;;
       esac ;;
     down) msb_stop "$(sandbox_name)" || true; exit 0 ;;

@@ -19,6 +19,10 @@ agent writes into the VM, both see the same files.
 
 - **Linux with KVM** (`/dev/kvm` accessible, user in `kvm` group) — validated.
 - **macOS Apple Silicon** — architecturally supported, not yet validated.
+- **docker or podman on the host** (optional) — used to auto-build the default
+  base image (`box-base:local` = devcontainers base + socat) and the docker-mode
+  image. Without a builder, box falls back to the plain pulled base (no baked
+  socat). Override the builder with `BOX_BUILDER`.
 - `msb` installed:
   ```sh
   curl -fsSL https://install.microsandbox.dev | sh
@@ -173,6 +177,26 @@ guest; ingress defaults to allow, so no extra rule is needed. Validated live
 
 Ports are set when the sandbox **boots**. If it's already running, `box down`
 then `box --port …` to apply them.
+
+## Reaching host services (`--host-port`)
+
+For the reverse direction — an agent inside the sandbox calling a service on the
+**host** (e.g. a local LLM like ollama) — host access is denied by default.
+`box --host-port PORT` allows it and wires up name-based access:
+
+```bash
+box --host-port 11434                       # allow the host's :11434
+# inside the sandbox:
+curl http://host.docker.internal:11434/...   # reaches the host service
+```
+
+box adds an `allow@host:tcp:PORT` egress rule and points `host.docker.internal`
+(IPv4) at the host gateway inside the guest. Repeatable for multiple ports.
+For **ollama**, run it on the host and set the agent framework's base URL to
+`http://host.docker.internal:11434`. (microsandbox's own
+`host.microsandbox.internal` also exists but resolves IPv6-first, which breaks
+IPv4-only host services — prefer `host.docker.internal`.) Applied at boot; if the
+sandbox is already running, `box down` first.
 
 ## Egress modes
 

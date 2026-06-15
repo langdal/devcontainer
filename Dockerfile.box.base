@@ -1,0 +1,14 @@
+# Default base image for `box`, built AUTOMATICALLY on first run as
+# `box-base:local` (devcontainers base + a few baked-in tools). If no host
+# docker/podman is available, box falls back to the plain pulled devcontainers
+# image (without these tools).
+#
+# Add system tools that should always be present in the sandbox here. Per-project
+# language tools still belong in mise.toml.
+
+FROM mcr.microsoft.com/devcontainers/base:ubuntu
+
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      socat \
+ && rm -rf /var/lib/apt/lists/*

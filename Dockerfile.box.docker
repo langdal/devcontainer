@@ -24,6 +24,7 @@ RUN apt-get update \
       docker.io \
       docker-buildx \
       docker-compose-v2 \
+      socat \
  && rm -rf /var/lib/apt/lists/* \
  && systemctl enable docker
 

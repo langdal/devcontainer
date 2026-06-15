@@ -19,14 +19,22 @@ msb_net_args() {
       ;;
     sanctioned)
       printf '%s\n' --net-default-egress deny
-      if [[ $# -gt 0 ]]; then
-        local rules="" h
-        for h in "$@"; do
+      local rules="" h
+      for h in "$@"; do
+        [[ -n "$rules" ]] && rules="${rules},"
+        rules="${rules}allow@${h}:tcp:443"
+      done
+      # Host-service access (BOX_HOST_PORTS, CSV): reach the host (denied by
+      # default) at host.microsandbox.internal:<port> via the `host` rule target.
+      if [[ -n "${BOX_HOST_PORTS:-}" ]]; then
+        local _hp p; IFS=',' read -ra _hp <<< "$BOX_HOST_PORTS"
+        for p in "${_hp[@]}"; do
+          [[ -z "$p" ]] && continue
           [[ -n "$rules" ]] && rules="${rules},"
-          rules="${rules}allow@${h}:tcp:443"
+          rules="${rules}allow@host:tcp:${p}"
         done
-        printf '%s\n' --net-rule "$rules"
       fi
+      [[ -n "$rules" ]] && printf '%s\n' --net-rule "$rules"
       ;;
     *)
       echo "msb_net_args: unknown mode '$mode'" >&2
@@ -135,6 +143,16 @@ msb_docker_args() {
     --cpus "$cpus" \
     --memory "$mem" \
     --mount-named "box-docker:/var/lib/docker:kind=disk,size=$size"
+}
+
+# msb_host_alias NAME -> inside the guest, point host.docker.internal at the IPv4
+# default gateway (the host). microsandbox's own host.microsandbox.internal also
+# has an IPv6 (ULA) record that breaks IPv4-only host services (e.g. ollama on
+# 127.0.0.1); host.docker.internal is an /etc/hosts-only IPv4 name with no
+# competing AAAA, so name-based host access "just works". Idempotent.
+msb_host_alias() {
+  local name="$1"
+  _msb exec "$name" -- sh -c 'grep -q " host.docker.internal$" /etc/hosts 2>/dev/null && exit 0; gw=$(ip route 2>/dev/null | awk "/default/{print \$3; exit}"); [ -n "$gw" ] && printf "%s host.docker.internal\n" "$gw" >> /etc/hosts'
 }
 
 # msb_docker_wait NAME -> block until dockerd is ready (cold boot starts systemd
