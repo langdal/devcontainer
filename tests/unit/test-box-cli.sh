@@ -52,4 +52,11 @@ reset="$(run_box reset)"
 assert_contains "$reset" "msb stop box-" "reset stops the sandbox"
 assert_contains "$reset" "msb rm box-" "reset removes the sandbox"
 
+# Missing msb binary -> clear install guidance, exit 1 (real path, not dry-run).
+proj_nomsb="$(mktemp -d)"
+rc3=0
+out_nomsb="$( cd "$proj_nomsb" && MSB_BIN=/nonexistent/msb BOX_ASSUME_PROVISIONED=1 "$ROOT/box" -- true 2>&1 )" || rc3=$?
+assert_eq "1" "$rc3" "missing msb exits 1"
+assert_contains "$out_nomsb" "install.microsandbox.dev" "missing msb shows install hint"
+
 finish

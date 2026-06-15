@@ -32,8 +32,23 @@ marker_file() { echo "$(state_dir)/$(sandbox_name).provisioned"; }
 merged_hosts() { allowlist_merge "$DEFAULT_ALLOWLIST" "$PWD/.box-allowlist"; }
 declared_secrets() { secrets_parse "$PWD/.box-secrets"; }
 
+# Preflight: microsandbox must be installed before any real msb call.
+# Skipped under BOX_DRY_RUN (the unit-test seam never touches a real binary).
+require_msb() {
+  [[ -n "${BOX_DRY_RUN:-}" ]] && return 0
+  msb_available && return 0
+  cat >&2 <<EOF
+box: microsandbox ('msb') not found at '$MSB_BIN'.
+Install it, then re-run:
+  curl -fsSL https://install.microsandbox.dev | sh
+msb installs to ~/.local/bin — make sure that directory is on your PATH.
+If msb lives elsewhere, run box with MSB_BIN=/path/to/msb.
+EOF
+  exit 1
+}
+
 # Always provisions with OPEN egress (msb_provision forces full); mode flags do not apply here.
-do_provision() { msb_provision "$IMAGE" "$PWD"; }
+do_provision() { require_msb; msb_provision "$IMAGE" "$PWD"; }
 mark_provisioned() { mkdir -p "$(state_dir)"; : > "$(marker_file)"; }
 
 ensure_provisioned() {
@@ -50,6 +65,7 @@ boot_or_attach() {  # MODE -- CMD...
   if [[ "${1:-}" == "--" ]]; then shift; fi
   local cmd=("$@")
   local name; name="$(sandbox_name)"
+  require_msb
   ensure_provisioned
   BOX_SECRETS="$(declared_secrets)"; export BOX_SECRETS
   mapfile -t hosts < <(merged_hosts)

@@ -56,6 +56,9 @@ msb_secret_args() {
 # Resolve the msb binary once (it is often not on the default non-login PATH).
 MSB_BIN="${MSB_BIN:-$(command -v msb 2>/dev/null || echo "$HOME/.local/bin/msb")}"
 
+# msb_available -> 0 if the resolved msb binary is runnable.
+msb_available() { [[ -x "$MSB_BIN" ]]; }
+
 # _msb ARGS...  -> run `msb` unless BOX_DRY_RUN is set, then just print.
 # This is the test seam: all execution goes through here.
 _msb() {
