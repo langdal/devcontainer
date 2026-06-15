@@ -49,6 +49,8 @@ explicitly (e.g. after `box reset`).
 | `box -- CMD...` | Run a one-off command in the sandbox. |
 | `box shell` | Attach an extra terminal to the already-running sandbox. |
 | `box provision` | Build step (open egress): install mise + project tools into the volume. |
+| `box provision --shell` | Interactive open-egress root shell to add things manually (see below). |
+| `box provision -- CMD...` | One-off open-egress command (e.g. fetch from a non-allowlisted host). |
 | `box down` | Stop the sandbox. |
 | `box reset` | Stop and remove the sandbox + marker. Named volumes must be removed manually: `msb volume rm box-mise box-home`. |
 | `box --net MODE` | Override egress mode: `none`, `sanctioned` (default), or `full`. |
@@ -68,6 +70,20 @@ Populates two named volumes that persist independently of any sandbox:
 | `box-home` | `/home/vscode` | shell history, git config, SSH keys |
 
 The current directory is bind-mounted two-way at `/workspace` during provision.
+
+### Manual provisioning (`box provision --shell`)
+
+`box provision --shell` opens an **interactive root shell with open egress**,
+landing in `/workspace`, for adding things beyond `mise.toml` — extra language
+tools, fetching repos/data from non-allowlisted hosts, etc. `box provision -- CMD`
+runs a single such command non-interactively.
+
+**Only `/mise`, `/home/vscode`, and `/workspace` persist** into locked-down runs
+(they are volumes / the host bind mount). The system root is ephemeral — each run
+boots a fresh VM from the base image. So install tools you want to keep into
+`/mise` (e.g. `mise use -g <tool>`, or drop a binary in `/mise/bin`) or `/home`;
+a system-wide `apt-get install` will NOT survive the next `box` run. (Persisting
+arbitrary system packages would need filesystem snapshots — see `TODO.box.md`.)
 
 ### Run phase (default `box`)
 

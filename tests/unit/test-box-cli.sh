@@ -52,6 +52,22 @@ reset="$(run_box reset)"
 assert_contains "$reset" "msb stop box-" "reset stops the sandbox"
 assert_contains "$reset" "msb rm box-" "reset removes the sandbox"
 
+# provision --shell: interactive open-egress root shell in /workspace
+pshell="$(run_box provision --shell)"
+assert_contains "$pshell" "msb run" "provision --shell runs a sandbox"
+assert_contains "$pshell" "--net-default-egress allow" "provision --shell has open egress"
+assert_contains "$pshell" "--workdir /workspace" "provision --shell lands in workspace"
+assert_contains "$pshell" "/usr/bin/bash" "provision --shell opens a shell"
+
+# provision -- CMD: one-off open-egress command
+pcmd="$(run_box provision -- apt-get update)"
+assert_contains "$pcmd" "--net-default-egress allow" "provision one-off open egress"
+assert_contains "$pcmd" "-- apt-get update" "provision one-off passes command"
+
+# plain provision still installs mise (non-interactive), not a shell
+pplain="$(run_box provision)"
+assert_contains "$pplain" "mise install" "plain provision installs mise"
+
 # Missing msb binary -> clear install guidance, exit 1 (real path, not dry-run).
 proj_nomsb="$(mktemp -d)"
 rc3=0

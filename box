@@ -17,12 +17,16 @@ Usage: box [--net none|sanctioned|full] [COMMAND]
   box -- CMD...           Run a one-off command in the sandbox.
   box shell               Attach an extra terminal to the running sandbox.
   box provision           Build step (open egress): install mise + tools into the volume.
+  box provision --shell   Interactive open-egress root shell to add stuff manually.
+  box provision -- CMD... One-off open-egress command (e.g. fetch from a non-allowlisted host).
   box down                Stop the sandbox.
   box reset               Stop and remove the sandbox + named volumes.
   box --help              Show this help.
 
 Egress modes: none (airgapped), sanctioned (default; deny + allowlist), full (provision).
 Per-project egress extras: .box-allowlist   Secrets: .box-secrets
+In provision --shell, only /mise, /home, and /workspace persist; install tools you
+want to keep into /mise (e.g. mise use -g <tool>) or /home, not system-wide.
 EOF
 }
 
@@ -86,7 +90,12 @@ while [[ $# -gt 0 ]]; do
         *) echo "box: unknown --net value '$2' (none|sanctioned|full)" >&2; exit 2 ;;
       esac
       MODE="$2"; shift 2 ;;
-    provision) do_provision; mark_provisioned; exit 0 ;;
+    provision)
+      case "${2:-}" in
+        --shell|-i) require_msb; msb_provision_shell "$IMAGE" "$PWD"; exit 0 ;;
+        --) shift 2; require_msb; msb_provision_shell "$IMAGE" "$PWD" "$@"; exit 0 ;;
+        *) do_provision; mark_provisioned; exit 0 ;;
+      esac ;;
     down) msb_stop "$(sandbox_name)" || true; exit 0 ;;
     reset)
       msb_stop "$(sandbox_name)" 2>/dev/null || true

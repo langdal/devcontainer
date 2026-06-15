@@ -159,3 +159,18 @@ mise install -C /workspace || mise install
 '
   _msb run "${mounts[@]}" "${net[@]}" "$image" -- bash -lc "$script"
 }
+
+# msb_provision_shell IMAGE WORKSPACE [CMD...]
+# Ephemeral, OPEN-egress, foreground sandbox for manual provisioning. With no
+# CMD it opens an interactive root shell in /workspace; with CMD it runs a
+# one-off. The /mise and /home volumes and the /workspace bind mount persist;
+# system-root (/usr, /etc, ...) changes are discarded when the VM exits.
+msb_provision_shell() {
+  local image="$1" workspace="$2"; shift 2
+  local cmd=("$@")
+  if [[ ${#cmd[@]} -eq 0 ]]; then cmd=(/usr/bin/bash); fi
+  mapfile -t mounts < <(msb_mount_args "$workspace" box-mise:/mise box-home:/home/vscode)
+  mapfile -t net < <(msb_net_args full)
+  mapfile -t env < <(msb_mise_env_args)
+  _msb run "${mounts[@]}" "${net[@]}" "${env[@]}" --workdir /workspace "$image" -- "${cmd[@]}"
+}
