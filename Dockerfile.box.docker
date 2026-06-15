@@ -1,13 +1,12 @@
-# Docker-in-sandbox variant of Dockerfile.box.
+# Docker-in-sandbox image, built AUTOMATICALLY by `box --docker` (no copy step).
+#
+# `box --docker` builds this into microsandbox as `box-docker-base:local` on its
+# first run, then reuses it. You normally never touch this file; edit it only to
+# change what the docker base image contains.
 #
 # Gives the sandbox its own Docker daemon so an agent can build/run containers.
 # Because the microVM has a real kernel, dockerd runs as plain root — no
 # --privileged, /dev/fuse, rootless, or nested-KVM needed.
-#
-# Use it:
-#   cp Dockerfile.box.docker Dockerfile.box
-#   box build          # builds + loads + pins .box-image
-#   box --docker       # boots with dockerd inside (or add a .box-docker marker)
 #
 # How it works (validated on msb 0.5.7): box --docker boots with `--init auto`,
 # so systemd is PID 1 and autostarts the packaged docker.service; box also mounts

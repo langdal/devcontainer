@@ -111,9 +111,10 @@ assert_eq "$tagc" "$(cat "$projc/.box-image")" "build pins the tag in .box-image
 
 # --- docker-in-sandbox mode (--docker / .box-docker) ---
 
-# --docker boots with systemd init, a disk-backed docker volume, more cpus/memory,
-# a dockerd readiness wait, and the registry allowlist.
+# --docker boots the auto-built docker base image, with systemd init, a disk-backed
+# docker volume, more cpus/memory, a dockerd readiness wait, and the registry allowlist.
 dock="$(run_box --docker 2>/dev/null)"
+assert_contains "$dock" "box-docker-base:local" "docker mode uses the auto-built docker base image"
 assert_contains "$dock" "--init auto" "docker mode boots systemd (PID 1) via --init auto"
 assert_contains "$dock" "--cpus 2" "docker mode bumps cpus"
 assert_contains "$dock" "--memory 2G" "docker mode bumps memory"

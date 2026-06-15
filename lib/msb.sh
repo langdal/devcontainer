@@ -208,6 +208,13 @@ msb_provision_shell() {
   _msb run "${mounts[@]}" "${net[@]}" "${env[@]}" --workdir /workspace "$image" -- "${cmd[@]}"
 }
 
+# msb_image_exists TAG -> 0 if the image is in microsandbox's local store.
+# Assumes present under BOX_DRY_RUN (so dry-run never triggers a real build).
+msb_image_exists() {
+  [[ -n "${BOX_DRY_RUN:-}" ]] && return 0
+  "$MSB_BIN" image inspect "$1" >/dev/null 2>&1
+}
+
 # msb_load_built BUILDER TAG -> import a locally-built image into microsandbox.
 # microsandbox can't read the host Docker store directly, so we stream
 # `<builder> save TAG` into `msb image load` (which reads a tar from stdin).

@@ -9,13 +9,17 @@ source "$SCRIPT_DIR/lib/msb.sh"
 DEFAULT_IMAGE="mcr.microsoft.com/devcontainers/base:ubuntu"
 DEFAULT_ALLOWLIST="$SCRIPT_DIR/allowlist.default"
 DIND_ALLOWLIST="$SCRIPT_DIR/allowlist.dind"
+# Docker mode boots a systemd+docker image, auto-built from the bundled
+# Dockerfile.box.docker (no per-project Dockerfile or copy step needed).
+DOCKER_BASE_IMAGE="box-docker-base:local"
+DOCKER_DOCKERFILE="$SCRIPT_DIR/Dockerfile.box.docker"
 
 usage() {
   cat <<'EOF'
 Usage: box [--net none|sanctioned|full] [--docker] [COMMAND]
 
   box                     Boot/attach the sandbox for this directory; open a shell.
-  box --docker            Run with a Docker daemon inside the sandbox (needs a docker image).
+  box --docker            Run with a Docker daemon inside the sandbox (auto-builds its image).
   box -- CMD...           Run a one-off command in the sandbox.
   box shell               Attach an extra terminal to the running sandbox.
   box provision           Build step (open egress): install mise + tools into the volume.
@@ -55,6 +59,26 @@ resolve_image() {
     if [[ -n "$ref" ]]; then echo "$ref"; return; fi
   fi
   echo "$DEFAULT_IMAGE"
+}
+
+# The image to actually boot: in docker mode (without an explicit BOX_IMAGE) it's
+# the auto-built systemd+docker base; otherwise normal resolution.
+effective_image() {
+  if [[ -n "${BOX_DOCKER_MODE:-}" && -z "${BOX_IMAGE:-}" ]]; then
+    echo "$DOCKER_BASE_IMAGE"
+  else
+    resolve_image
+  fi
+}
+
+# Build the bundled docker base image into microsandbox once, on first --docker use.
+ensure_docker_image() {
+  msb_image_exists "$DOCKER_BASE_IMAGE" && return 0
+  local builder
+  builder="$(box_builder)" || { echo "box: --docker needs docker or podman to build the docker base image (set BOX_BUILDER)" >&2; exit 1; }
+  echo "box: building the docker base image ($DOCKER_BASE_IMAGE) with $builder — first --docker run only..." >&2
+  _host "$builder" build -f "$DOCKER_DOCKERFILE" -t "$DOCKER_BASE_IMAGE" "$SCRIPT_DIR"
+  msb_load_built "$builder" "$DOCKER_BASE_IMAGE"
 }
 
 # Pick a host image builder: BOX_BUILDER env, else docker, else podman.
@@ -128,11 +152,9 @@ boot_or_attach() {  # MODE -- CMD...
   require_msb
   if [[ -n "${BOX_DOCKER_MODE:-}" ]]; then
     BOX_DOCKER=1; export BOX_DOCKER
-    if [[ "$IMAGE" == "$DEFAULT_IMAGE" ]]; then
-      echo "box: --docker needs an image with dockerd; the default image has none." >&2
-      echo "box: build one (cp Dockerfile.box.docker Dockerfile.box && box build), then retry." >&2
-    fi
+    [[ -z "${BOX_IMAGE:-}" ]] && ensure_docker_image
   fi
+  IMAGE="$(effective_image)"
   ensure_provisioned
   BOX_SECRETS="$(declared_secrets)"; export BOX_SECRETS
   mapfile -t hosts < <(merged_hosts)

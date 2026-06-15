@@ -129,16 +129,18 @@ data in the workspace — keep `Dockerfile.box` for genuine system dependencies.
 
 The microVM has its own kernel, so a Docker daemon runs inside it as plain root —
 **no `--privileged`, `/dev/fuse`, rootless, slirp4netns, or nested-KVM** (unlike
-the old shared-kernel DinD). Setup:
+the old shared-kernel DinD). Just run:
 
 ```bash
-cp /path/to/box-repo/Dockerfile.box.docker Dockerfile.box   # installs docker.io
-box build                                                   # build + load + pin
-box --docker                                                # boot with dockerd inside
+box --docker                 # or drop an empty .box-docker marker for per-project default
+box --docker -- docker run --rm hello-world
 ```
 
-Enable it per-invocation with `--docker`, or per-project by creating an empty
-`.box-docker` marker at the workspace root. In docker mode `box`:
+No copy step and no per-project Dockerfile: `box --docker` **auto-builds** its
+image (`box-docker-base:local`) from the bundled `Dockerfile.box.docker` on first
+use, then reuses it. (Edit that bundled file to change what the docker base
+contains; set `BOX_IMAGE` to use your own docker-capable image instead.) In
+docker mode `box`:
 
 - mounts a **disk-backed** `/var/lib/docker` named volume (`box-docker`, default
   20G — overlay2 needs a real fs, and the image cache persists across runs),
