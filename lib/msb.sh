@@ -52,3 +52,43 @@ msb_secret_args() {
     printf '%s\n' --secret "$s"
   done
 }
+
+# Resolve the msb binary once (it is often not on the default non-login PATH).
+MSB_BIN="${MSB_BIN:-$(command -v msb 2>/dev/null || echo "$HOME/.local/bin/msb")}"
+
+# _msb ARGS...  -> run `msb` unless BOX_DRY_RUN is set, then just print.
+# This is the test seam: all execution goes through here.
+_msb() {
+  if [[ -n "${BOX_DRY_RUN:-}" ]]; then
+    printf 'msb %s\n' "$*"
+  else
+    "$MSB_BIN" "$@"
+  fi
+}
+
+# msb_is_running NAME -> 0 if a named sandbox is currently running.
+# Dry-run short-circuits to "not running".
+msb_is_running() {
+  [[ -n "${BOX_DRY_RUN:-}" ]] && return 1
+  "$MSB_BIN" ps -q 2>/dev/null | grep -Fxq "$1"
+}
+
+# msb_up NAME IMAGE WORKSPACE MODE [HOST...]
+# Boots a detached, persistent named sandbox with volumes, workspace, egress.
+# Detached run ignores a trailing command, so callers exec separately (msb_attach).
+msb_up() {
+  local name="$1" image="$2" workspace="$3" mode="$4"; shift 4
+  local hosts=("$@")
+  local args=(run -d --name "$name")
+  mapfile -t mounts < <(msb_mount_args "$workspace" box-mise:/mise box-home:/home/vscode)
+  mapfile -t net < <(msb_net_args "$mode" "${hosts[@]}")
+  args+=("${mounts[@]}" "${net[@]}" "$image")
+  _msb "${args[@]}"
+}
+
+# msb_attach NAME -- CMD...  -> run CMD in an already-running named sandbox.
+msb_attach() {
+  local name="$1"; shift
+  if [[ "${1:-}" == "--" ]]; then shift; fi
+  _msb exec "$name" -- "$@"
+}
