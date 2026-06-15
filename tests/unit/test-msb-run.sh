@@ -36,6 +36,7 @@ assert_contains "$out_nohost" "msb run -d --replace --name box-proj" "detached r
 attach_out="$(msb_attach box-proj -- echo hi)"
 assert_contains "$attach_out" "msb exec" "attach via exec"
 assert_contains "$attach_out" "--env PATH=/mise/shims:/mise/bin:" "attach injects mise PATH"
+assert_contains "$attach_out" "--workdir /workspace" "attach lands in the workspace"
 assert_contains "$attach_out" "box-proj -- echo hi" "attach passes command to sandbox"
 
 # start_run forwards secrets when provided via BOX_SECRETS env (newline list).

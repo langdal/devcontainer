@@ -129,7 +129,9 @@ msb_attach() {
   local name="$1"; shift
   if [[ "${1:-}" == "--" ]]; then shift; fi
   mapfile -t env < <(msb_mise_env_args)
-  _msb exec "${env[@]}" "$name" -- "$@"
+  # --workdir /workspace: land the shell/command in the mounted workspace,
+  # not the image default (/ or /root).
+  _msb exec --workdir /workspace "${env[@]}" "$name" -- "$@"
 }
 
 # msb_provision IMAGE WORKSPACE
