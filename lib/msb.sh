@@ -53,6 +53,14 @@ msb_secret_args() {
   done
 }
 
+# msb_port_args [HOST:GUEST...] -> port-forward flags (empty if none).
+msb_port_args() {
+  local p
+  for p in "$@"; do
+    [[ -n "$p" ]] && printf '%s\n' --port "$p"
+  done
+}
+
 # Resolve the msb binary once (it is often not on the default non-login PATH).
 MSB_BIN="${MSB_BIN:-$(command -v msb 2>/dev/null || echo "$HOME/.local/bin/msb")}"
 
@@ -99,7 +107,12 @@ msb_up() {
   if [[ -n "${BOX_DOCKER:-}" ]]; then
     mapfile -t docker < <(msb_docker_args)
   fi
-  args+=("${mounts[@]}" "${net[@]}" "${secrets[@]}" "${docker[@]}" "$image")
+  local ports=()
+  if [[ -n "${BOX_PORTS:-}" ]]; then
+    mapfile -t _port_tokens <<< "$BOX_PORTS"
+    mapfile -t ports < <(msb_port_args "${_port_tokens[@]}")
+  fi
+  args+=("${mounts[@]}" "${net[@]}" "${secrets[@]}" "${docker[@]}" "${ports[@]}" "$image")
   _msb "${args[@]}"
 }
 

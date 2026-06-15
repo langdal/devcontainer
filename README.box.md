@@ -157,6 +157,23 @@ to it — registries must be allowlisted (that is what `allowlist.dind` covers; 
 project-specific hosts to `.box-allowlist`). This is a feature: a containerized
 workload can't bypass the sandbox's egress policy.
 
+## Port forwarding (`--port`)
+
+Publish a guest port to the host to reach a service running in the sandbox:
+
+```bash
+box --port 5173                  # 5173:5173 (a bare PORT means PORT:PORT)
+box --port 127.0.0.1:8080:80     # HOST_ADDR:HOST:GUEST also works; /udp variants too
+box --port 5173 --port 8080      # repeatable
+```
+
+microsandbox binds the host side (e.g. `127.0.0.1:5173`) and forwards to the
+guest; ingress defaults to allow, so no extra rule is needed. Validated live
+(host `curl` reaching a guest listener).
+
+Ports are set when the sandbox **boots**. If it's already running, `box down`
+then `box --port …` to apply them.
+
 ## Egress modes
 
 | Mode | Behaviour |

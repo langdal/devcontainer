@@ -20,6 +20,7 @@ Usage: box [--net none|sanctioned|full] [--docker] [COMMAND]
 
   box                     Boot/attach the sandbox for this directory; open a shell.
   box --docker            Run with a Docker daemon inside the sandbox (auto-builds its image).
+  box --port HOST:GUEST   Publish a guest port to the host (repeatable; PORT means PORT:PORT).
   box -- CMD...           Run a one-off command in the sandbox.
   box shell               Attach an extra terminal to the running sandbox.
   box provision           Build step (open egress): install mise + tools into the volume.
@@ -91,6 +92,12 @@ box_builder() {
   return 1
 }
 
+# normalize_port SPEC -> a HOST:GUEST spec. A bare number becomes PORT:PORT;
+# anything with a colon (HOST:GUEST, BIND:HOST:GUEST, /udp variants) passes through.
+normalize_port() {
+  if [[ "$1" =~ ^[0-9]+$ ]]; then echo "$1:$1"; else echo "$1"; fi
+}
+
 # _host CMD...  -> run a host command unless BOX_DRY_RUN is set, then just print.
 _host() {
   if [[ -n "${BOX_DRY_RUN:-}" ]]; then printf 'host %s\n' "$*"; else "$@"; fi
@@ -157,6 +164,8 @@ boot_or_attach() {  # MODE -- CMD...
   IMAGE="$(effective_image)"
   ensure_provisioned
   BOX_SECRETS="$(declared_secrets)"; export BOX_SECRETS
+  if [[ ${#PORTS[@]} -gt 0 ]]; then BOX_PORTS="$(printf '%s\n' "${PORTS[@]}")"; else BOX_PORTS=""; fi
+  export BOX_PORTS
   mapfile -t hosts < <(merged_hosts)
   if ! msb_is_running "$name"; then
     msb_up "$name" "$IMAGE" "$PWD" "$mode" "${hosts[@]}"
@@ -174,11 +183,15 @@ IMAGE="$(resolve_image)"
 BOX_DOCKER_MODE=""
 [[ -f "$PWD/.box-docker" ]] && BOX_DOCKER_MODE=1
 
+PORTS=()
 MODE="sanctioned"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --help|-h) usage; exit 0 ;;
     --docker) BOX_DOCKER_MODE=1; shift ;;
+    --port)
+      [[ $# -ge 2 ]] || { echo "box: --port requires an argument (PORT or HOST:GUEST)" >&2; exit 2; }
+      PORTS+=("$(normalize_port "$2")"); shift 2 ;;
     build) shift; do_build "${1:-}"; exit 0 ;;
     --net)
       [[ $# -ge 2 ]] || { echo "box: --net requires an argument (none|sanctioned|full)" >&2; exit 2; }

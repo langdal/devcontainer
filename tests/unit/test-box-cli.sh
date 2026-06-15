@@ -130,6 +130,13 @@ assert_eq "" "$(echo "$def" | grep -o 'box-docker:/var/lib/docker' || true)" "de
 assert_eq "" "$(echo "$def" | grep -o 'registry-1.docker.io' || true)" "default run does not allowlist registries"
 assert_eq "" "$(echo "$def" | grep -o 'init auto' || true)" "default run does not use systemd init"
 
+# --port publishes guest ports to the host; bare PORT -> PORT:PORT, specs pass through
+ports="$(run_box --port 8080 --port 127.0.0.1:5173:5173 2>/dev/null)"
+assert_contains "$ports" "--port 8080:8080" "bare --port becomes PORT:PORT"
+assert_contains "$ports" "--port 127.0.0.1:5173:5173" "--port HOST:GUEST passes through"
+# no --port -> no port flags
+assert_eq "" "$(echo "$def" | grep -o -- '--port' || true)" "default run publishes no ports"
+
 # a .box-docker marker enables docker mode without the flag
 projm="$(mktemp -d)"; : > "$projm/.box-docker"
 out_marker="$( cd "$projm" && XDG_STATE_HOME="$projm/.state" BOX_DRY_RUN=1 BOX_ASSUME_PROVISIONED=1 "$ROOT/box" -- true 2>/dev/null )"
