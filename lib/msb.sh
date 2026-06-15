@@ -174,3 +174,15 @@ msb_provision_shell() {
   mapfile -t env < <(msb_mise_env_args)
   _msb run "${mounts[@]}" "${net[@]}" "${env[@]}" --workdir /workspace "$image" -- "${cmd[@]}"
 }
+
+# msb_load_built BUILDER TAG -> import a locally-built image into microsandbox.
+# microsandbox can't read the host Docker store directly, so we stream
+# `<builder> save TAG` into `msb image load` (which reads a tar from stdin).
+msb_load_built() {
+  local builder="$1" tag="$2"
+  if [[ -n "${BOX_DRY_RUN:-}" ]]; then
+    printf 'host %s save %s | msb image load --tag %s\n' "$builder" "$tag" "$tag"
+    return 0
+  fi
+  "$builder" save "$tag" | "$MSB_BIN" image load --tag "$tag"
+}

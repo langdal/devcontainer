@@ -1,0 +1,21 @@
+# Sample custom base image for `box`.
+#
+# Use this for SYSTEM-LEVEL dependencies that must persist into locked-down runs
+# (apt packages, things under /usr, /etc, ...). Per-project language tools belong
+# in mise.toml, not here; secrets and fetched data belong in .box-secrets / the
+# workspace, not baked into the image.
+#
+# Build + load + pin it with:   box build
+# (which runs: <docker|podman> build -f Dockerfile.box -t box-<dir>:local . ,
+#  then `docker save ... | msb image load`, then writes .box-image)
+#
+# Copy this file to your project root and edit the RUN block.
+
+FROM mcr.microsoft.com/devcontainers/base:ubuntu
+
+# Example system packages the agent needs at runtime. Replace with your own.
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      postgresql-client \
+      graphviz \
+ && rm -rf /var/lib/apt/lists/*

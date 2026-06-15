@@ -75,4 +75,38 @@ out_nomsb="$( cd "$proj_nomsb" && MSB_BIN=/nonexistent/msb BOX_ASSUME_PROVISIONE
 assert_eq "1" "$rc3" "missing msb exits 1"
 assert_contains "$out_nomsb" "install.microsandbox.dev" "missing msb shows install hint"
 
+# --- custom base image (BOX_IMAGE / .box-image / box build) ---
+
+# default run uses the default base image
+assert_contains "$def" "mcr.microsoft.com/devcontainers/base:ubuntu" "default uses the default image"
+
+# BOX_IMAGE env overrides the run image
+proji="$(mktemp -d)"
+out_env="$( cd "$proji" && XDG_STATE_HOME="$proji/.state" BOX_DRY_RUN=1 BOX_ASSUME_PROVISIONED=1 BOX_IMAGE=my/img:1 "$ROOT/box" -- true )"
+assert_contains "$out_env" "my/img:1" "BOX_IMAGE pins the run image"
+
+# .box-image file pins the run image when BOX_IMAGE is unset
+projf="$(mktemp -d)"; printf '# project image\nmy/custom:tag\n' > "$projf/.box-image"
+out_file="$( cd "$projf" && XDG_STATE_HOME="$projf/.state" BOX_DRY_RUN=1 BOX_ASSUME_PROVISIONED=1 "$ROOT/box" -- true )"
+assert_contains "$out_file" "my/custom:tag" ".box-image pins the run image"
+
+# BOX_IMAGE wins over .box-image
+out_both="$( cd "$projf" && XDG_STATE_HOME="$projf/.state" BOX_DRY_RUN=1 BOX_ASSUME_PROVISIONED=1 BOX_IMAGE=env/wins:1 "$ROOT/box" -- true )"
+assert_contains "$out_both" "env/wins:1" "BOX_IMAGE overrides .box-image"
+
+# box build without Dockerfile.box -> error, exit 1
+projb="$(mktemp -d)"
+rcb=0
+out_nobf="$( cd "$projb" && BOX_DRY_RUN=1 "$ROOT/box" build 2>&1 )" || rcb=$?
+assert_eq "1" "$rcb" "build without Dockerfile.box exits 1"
+assert_contains "$out_nobf" "Dockerfile.box" "build explains the missing Dockerfile.box"
+
+# box build with Dockerfile.box -> builds, loads, pins .box-image
+projc="$(mktemp -d)"; printf 'FROM scratch\n' > "$projc/Dockerfile.box"
+tagc="box-$(basename "$projc"):local"
+out_build="$( cd "$projc" && BOX_DRY_RUN=1 BOX_BUILDER=docker "$ROOT/box" build 2>&1 )"
+assert_contains "$out_build" "docker build -f $projc/Dockerfile.box -t $tagc" "build invokes the builder"
+assert_contains "$out_build" "msb image load --tag $tagc" "build loads the image into msb"
+assert_eq "$tagc" "$(cat "$projc/.box-image")" "build pins the tag in .box-image"
+
 finish

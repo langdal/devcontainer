@@ -94,6 +94,37 @@ stops the sandbox; the volumes persist.
 
 The sandbox name is `box-<dirname>` (basename of `$PWD`).
 
+## Custom base image (`box build`)
+
+The run filesystem is a fresh boot from the base OCI image every time, so
+**system-level** changes (apt packages, `/usr`, `/etc`) only persist if they are
+baked into the image. To do that, use a custom base image.
+
+The image `box` runs is chosen by precedence:
+
+1. `BOX_IMAGE` environment variable (highest)
+2. `.box-image` file at the workspace root (first non-comment line)
+3. the default `mcr.microsoft.com/devcontainers/base:ubuntu`
+
+Workflow:
+
+```bash
+cp /path/to/box-repo/Dockerfile.box .   # sample template; edit the RUN block
+box build                               # builds, loads into msb, pins .box-image
+box                                     # now boots from your custom image
+```
+
+`box build [TAG]`:
+- builds `Dockerfile.box` (default tag `box-<dirname>:local`) with `docker` or
+  `podman` (override with `BOX_BUILDER`),
+- streams it into microsandbox (`<builder> save TAG | msb image load`, since msb
+  can't read the host Docker store directly),
+- writes the tag to `.box-image` so plain `box` uses it (skipped if `BOX_IMAGE`
+  is set).
+
+mise tools still belong in `mise.toml`, secrets in `.box-secrets`, and fetched
+data in the workspace — keep `Dockerfile.box` for genuine system dependencies.
+
 ## Egress modes
 
 | Mode | Behaviour |

@@ -6,7 +6,7 @@ source "$SCRIPT_DIR/lib/allowlist.sh"
 source "$SCRIPT_DIR/lib/secrets.sh"
 source "$SCRIPT_DIR/lib/msb.sh"
 
-IMAGE="${BOX_IMAGE:-mcr.microsoft.com/devcontainers/base:ubuntu}"
+DEFAULT_IMAGE="mcr.microsoft.com/devcontainers/base:ubuntu"
 DEFAULT_ALLOWLIST="$SCRIPT_DIR/allowlist.default"
 
 usage() {
@@ -19,12 +19,15 @@ Usage: box [--net none|sanctioned|full] [COMMAND]
   box provision           Build step (open egress): install mise + tools into the volume.
   box provision --shell   Interactive open-egress root shell to add stuff manually.
   box provision -- CMD... One-off open-egress command (e.g. fetch from a non-allowlisted host).
+  box build [TAG]         Build Dockerfile.box, load it into microsandbox, pin it in .box-image.
   box down                Stop the sandbox.
   box reset               Stop and remove the sandbox + named volumes.
   box --help              Show this help.
 
 Egress modes: none (airgapped), sanctioned (default; deny + allowlist), full (provision).
 Per-project egress extras: .box-allowlist   Secrets: .box-secrets
+Base image: BOX_IMAGE env > .box-image file (project) > default. Use 'box build' for
+system-level deps that must persist into runs (mise tools belong in mise.toml).
 In provision --shell, only /mise, /home, and /workspace persist; install tools you
 want to keep into /mise (e.g. mise use -g <tool>) or /home, not system-wide.
 EOF
@@ -35,6 +38,51 @@ state_dir() { echo "${XDG_STATE_HOME:-$HOME/.local/state}/box"; }
 marker_file() { echo "$(state_dir)/$(sandbox_name).provisioned"; }
 merged_hosts() { allowlist_merge "$DEFAULT_ALLOWLIST" "$PWD/.box-allowlist"; }
 declared_secrets() { secrets_parse "$PWD/.box-secrets"; }
+
+# Base image precedence: BOX_IMAGE env > .box-image file (first non-comment line) > default.
+resolve_image() {
+  if [[ -n "${BOX_IMAGE:-}" ]]; then echo "$BOX_IMAGE"; return; fi
+  if [[ -f "$PWD/.box-image" ]]; then
+    local ref; ref="$(sed 's/#.*//' "$PWD/.box-image" | awk 'NF{print $1; exit}')"
+    if [[ -n "$ref" ]]; then echo "$ref"; return; fi
+  fi
+  echo "$DEFAULT_IMAGE"
+}
+
+# Pick a host image builder: BOX_BUILDER env, else docker, else podman.
+box_builder() {
+  if [[ -n "${BOX_BUILDER:-}" ]]; then echo "$BOX_BUILDER"; return 0; fi
+  local b
+  for b in docker podman; do
+    if command -v "$b" >/dev/null 2>&1; then echo "$b"; return 0; fi
+  done
+  return 1
+}
+
+# _host CMD...  -> run a host command unless BOX_DRY_RUN is set, then just print.
+_host() {
+  if [[ -n "${BOX_DRY_RUN:-}" ]]; then printf 'host %s\n' "$*"; else "$@"; fi
+}
+
+# box build [TAG] — build Dockerfile.box, load it into microsandbox, pin .box-image.
+do_build() {
+  local tag="${1:-box-$(basename "$PWD"):local}"
+  local df="$PWD/Dockerfile.box"
+  [[ -f "$df" ]] || { echo "box: no Dockerfile.box in $PWD (copy the sample from the box repo; see README.box.md)" >&2; exit 1; }
+  local builder
+  builder="$(box_builder)" || { echo "box: need docker or podman to build an image (set BOX_BUILDER)" >&2; exit 1; }
+  require_msb
+  echo "box: building '$tag' from Dockerfile.box with $builder..." >&2
+  _host "$builder" build -f "$df" -t "$tag" "$PWD"
+  echo "box: loading '$tag' into microsandbox..." >&2
+  msb_load_built "$builder" "$tag"
+  if [[ -z "${BOX_IMAGE:-}" ]]; then
+    echo "$tag" > "$PWD/.box-image"
+    echo "box: pinned '$tag' in .box-image — run 'box' to use it." >&2
+  else
+    echo "box: BOX_IMAGE is set, so .box-image was not written." >&2
+  fi
+}
 
 # Preflight: microsandbox must be installed before any real msb call.
 # Skipped under BOX_DRY_RUN (the unit-test seam never touches a real binary).
@@ -79,10 +127,13 @@ boot_or_attach() {  # MODE -- CMD...
   msb_attach "$name" -- "${cmd[@]}"
 }
 
+IMAGE="$(resolve_image)"
+
 MODE="sanctioned"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --help|-h) usage; exit 0 ;;
+    build) shift; do_build "${1:-}"; exit 0 ;;
     --net)
       [[ $# -ge 2 ]] || { echo "box: --net requires an argument (none|sanctioned|full)" >&2; exit 2; }
       case "$2" in
