@@ -111,6 +111,107 @@ git -c commit.gpgsign=false commit -m "chore(spike): confirm microsandbox v0.5 s
 
 ---
 
+## Spike reconciliation (AUTHORITATIVE — overrides task code below)
+
+Task 0 ran on this host (`msb 0.5.7`) and found the following. Where this section
+conflicts with a task's code/tests below, **this section wins.** Implementers and
+reviewers must follow it.
+
+1. **`msb` is not on the default non-login PATH.** It lives at `~/.local/bin/msb`
+   (symlink to `~/.microsandbox/bin/msb`). `lib/msb.sh` must resolve the binary
+   itself, near the top of the file:
+   ```bash
+   MSB_BIN="${MSB_BIN:-$(command -v msb 2>/dev/null || echo "$HOME/.local/bin/msb")}"
+   ```
+   `_msb` runs `"$MSB_BIN"` (not `command msb`), and `msb_is_running` calls
+   `"$MSB_BIN" ps -q`.
+
+2. **No DNS net-rule.** In `msb_net_args`, the `sanctioned` mode must NOT emit
+   `allow@host:udp:53`/`tcp:53` (microsandbox resolves domain rules itself; `host`
+   is not a valid target). Emit `--net-rule` only when there is at least one host:
+   ```bash
+   sanctioned)
+     printf '%s\n' --net-default-egress deny
+     if [[ $# -gt 0 ]]; then
+       local rules="" h
+       for h in "$@"; do
+         [[ -n "$rules" ]] && rules="${rules},"
+         rules="${rules}allow@${h}:tcp:443"
+       done
+       printf '%s\n' --net-rule "$rules"
+     fi
+     ;;
+   ```
+   Wildcards work as `allow@*.example.com:tcp:443` (matches apex + subdomains,
+   needs ≥2 labels). The Task 4 test must DROP the DNS assertion (and expect
+   `ran 8, failed 0`); keep the host + wildcard assertions.
+
+3. **Detached boot + exec, not `run … -- cmd`.** A persistent named sandbox is
+   `msb run -d --name <name> <mounts> <net> [secrets] <image>` — the trailing
+   `-- cmd` is ignored under `-d`. You then `msb exec <name> -- <cmd>` for a shell
+   or one-off. So **replace `msb_start_run` with `msb_up`** (Task 5):
+   ```bash
+   # msb_up NAME IMAGE WORKSPACE MODE [HOST...]
+   # Boots a detached, persistent named sandbox (mounts/net/secrets live here).
+   msb_up() {
+     local name="$1" image="$2" workspace="$3" mode="$4"; shift 4
+     local hosts=("$@")
+     local args=(run -d --name "$name")
+     mapfile -t mounts < <(msb_mount_args "$workspace" box-mise:/mise box-home:/home/vscode)
+     mapfile -t net < <(msb_net_args "$mode" "${hosts[@]}")
+     args+=("${mounts[@]}" "${net[@]}" "$image")
+     _msb "${args[@]}"
+   }
+   ```
+   `msb_attach` is unchanged (`_msb exec "$name" -- "$@"`). The Task 5 test asserts
+   `msb_up` emits `msb run -d --name box-proj`, the mounts, the net flags, and the
+   image as the LAST token (no trailing command); plus `msb_is_running` is false
+   under dry-run and `msb_attach` emits `msb exec box-proj -- echo hi`.
+
+4. **`box` boot logic** (Task 7) uses up-then-attach:
+   ```bash
+   boot_or_attach() {  # MODE -- CMD...
+     local mode="$1"; shift
+     [[ "${1:-}" == "--" ]] && shift
+     local cmd=("$@")
+     local name; name="$(sandbox_name)"
+     ensure_provisioned
+     mapfile -t hosts < <(merged_hosts)
+     if ! msb_is_running "$name"; then
+       msb_up "$name" "$IMAGE" "$PWD" "$mode" "${hosts[@]}"
+     fi
+     msb_attach "$name" -- "${cmd[@]}"
+   }
+   ```
+   The Task 7 test asserts the default path emits both `msb run -d --name box-`
+   and `msb exec box-`. `down` is `_msb stop "$(sandbox_name)" || true` (delete the
+   stray `msb_down_stub` line). `reset` is
+   `_msb stop "$(sandbox_name)" 2>/dev/null || true; _msb rm "$(sandbox_name)" 2>/dev/null || true; rm -f "$(marker_file)"`.
+
+5. **Secrets live on `msb_up`** (Task 8), not on `exec`. Task 8 adds, inside
+   `msb_up` after building `net` and before assembling `args`:
+   ```bash
+     local secrets=()
+     if [[ -n "${BOX_SECRETS:-}" ]]; then
+       mapfile -t _secret_tokens <<< "$BOX_SECRETS"
+       mapfile -t secrets < <(msb_secret_args "${_secret_tokens[@]}")
+     fi
+   ```
+   and changes the assembly to
+   `args+=("${mounts[@]}" "${net[@]}" "${secrets[@]}" "$image")`. The Task 8 test
+   asserts `msb_up` (with `BOX_SECRETS` set) emits `--secret GITHUB_TOKEN@api.github.com`.
+
+6. **Secret value in guest** (Task 9 step 5): the guest prints the literal string
+   `$MSB_DEMO_TOKEN`, NOT the real secret — that is the pass condition (real value
+   absent). Optionally also verify on-wire substitution with a curl to the allowed
+   host.
+
+7. **Detached VM stays alive** without an explicit command (the spike confirmed
+   `msb exec` worked against a `-d` sandbox). If Task 9 finds the VM exits
+   immediately, debug via systematic-debugging and record the fix in `lib/msb.sh`.
+
+---
+
 ### Task 1: Test harness
 
 **Files:**
