@@ -71,10 +71,10 @@ while [[ $# -gt 0 ]]; do
       esac
       MODE="$2"; shift 2 ;;
     provision) do_provision; mark_provisioned; exit 0 ;;
-    down) _msb stop "$(sandbox_name)" || true; exit 0 ;;
+    down) msb_stop "$(sandbox_name)" || true; exit 0 ;;
     reset)
-      _msb stop "$(sandbox_name)" 2>/dev/null || true
-      _msb rm "$(sandbox_name)" 2>/dev/null || true
+      msb_stop "$(sandbox_name)" 2>/dev/null || true
+      msb_remove "$(sandbox_name)" 2>/dev/null || true
       rm -f "$(marker_file)"
       echo "box: removed sandbox + marker (volumes: msb volume rm box-mise box-home)"
       exit 0 ;;

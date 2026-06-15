@@ -116,6 +116,10 @@ msb_mise_env_args() {
     --env "MISE_CACHE_DIR=/mise/cache"
 }
 
+# msb_stop NAME / msb_remove NAME -> sandbox lifecycle teardown.
+msb_stop()   { _msb stop "$1"; }
+msb_remove() { _msb rm "$1"; }
+
 # msb_attach NAME -- CMD...  -> run CMD in an already-running named sandbox.
 # Injects the mise env (above) so mise + project tools are on PATH.
 msb_attach() {

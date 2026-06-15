@@ -54,3 +54,4 @@
 - **Validated on Linux nested-KVM with msb 0.5.7 only.** microsandbox is beta;
   CLI syntax or behaviour may change in future releases. All `msb` invocations
   are in `lib/msb.sh` to contain the blast radius.
+- `--net` is only honored before a subcommand; `box shell --net full` silently falls back to the default `sanctioned` mode (flags-first contract; a guard should reject misplaced flags).

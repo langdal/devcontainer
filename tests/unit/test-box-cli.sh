@@ -43,4 +43,13 @@ assert_contains "$out_badnet" "none|sanctioned|full" "invalid --net explains val
 rc2=0; out_missing="$(run_box --net 2>&1)" || rc2=$?
 assert_eq "2" "$rc2" "missing --net argument exits 2"
 
+# down stops the sandbox
+down="$(run_box down)"
+assert_contains "$down" "msb stop box-" "down stops the sandbox"
+
+# reset stops, removes, and clears the marker
+reset="$(run_box reset)"
+assert_contains "$reset" "msb stop box-" "reset stops the sandbox"
+assert_contains "$reset" "msb rm box-" "reset removes the sandbox"
+
 finish
