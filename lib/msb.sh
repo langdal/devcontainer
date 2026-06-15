@@ -92,3 +92,24 @@ msb_attach() {
   if [[ "${1:-}" == "--" ]]; then shift; fi
   _msb exec "$name" -- "$@"
 }
+
+# msb_provision IMAGE WORKSPACE
+# Ephemeral, open-egress sandbox that populates the box-mise/box-home volumes:
+# installs mise into /mise, then `mise install` (base + project mise.toml).
+# Foreground run (no -d) so the trailing provisioning command is honored.
+msb_provision() {
+  local image="$1" workspace="$2"
+  mapfile -t mounts < <(msb_mount_args "$workspace" box-mise:/mise box-home:/home/vscode)
+  mapfile -t net < <(msb_net_args full)
+  # Guest-side provisioning script. mise data/config/cache all live on /mise.
+  local script='set -e
+export MISE_DATA_DIR=/mise MISE_CONFIG_DIR=/mise MISE_CACHE_DIR=/mise/cache
+export PATH=/mise/bin:$PATH
+if ! command -v mise >/dev/null 2>&1; then
+  curl -fsSL https://mise.run | MISE_INSTALL_PATH=/mise/bin/mise sh
+fi
+mise trust --yes /workspace 2>/dev/null || true
+mise install -C /workspace || mise install
+'
+  _msb run "${mounts[@]}" "${net[@]}" "$image" -- bash -lc "$script"
+}
