@@ -9,17 +9,30 @@
 #   box build          # builds + loads + pins .box-image
 #   box --docker       # boots with dockerd inside (or add a .box-docker marker)
 #
-# box --docker also: mounts a disk-backed /var/lib/docker volume, bumps memory,
-# starts dockerd at boot, and allowlists container registries (allowlist.dind).
+# How it works (validated on msb 0.5.7): box --docker boots with `--init auto`,
+# so systemd is PID 1 and autostarts the packaged docker.service; box also mounts
+# a disk-backed /var/lib/docker volume, bumps cpus/memory, waits for dockerd, and
+# merges allowlist.dind so registry pulls pass the egress allowlist.
 
 FROM mcr.microsoft.com/devcontainers/base:ubuntu
 
-# docker.io pulls in dockerd, the docker CLI, containerd and runc from the
-# Ubuntu archive (already allowlisted for provisioning). buildx + compose are
-# optional conveniences.
+# systemd (PID 1 under `--init auto`) + Docker Engine from the Ubuntu archive.
+# docker.io brings dockerd, the docker CLI, containerd and runc; buildx + compose
+# are conveniences. systemctl enable wires docker.service to start at boot.
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      systemd systemd-sysv \
       docker.io \
       docker-buildx \
       docker-compose-v2 \
- && rm -rf /var/lib/apt/lists/*
+ && rm -rf /var/lib/apt/lists/* \
+ && systemctl enable docker
+
+# Force the classic overlay2 graph driver. Docker 29 defaults to the containerd
+# image store, whose snapshots live at /var/lib/containerd on the VM's
+# erofs/overlay rootfs, where `mount -t overlay` fails (invalid argument).
+# overlay2 keeps the store under /var/lib/docker — the disk-backed ext4 volume
+# box --docker mounts — where overlay mounts work.
+RUN mkdir -p /etc/docker \
+ && printf '{\n  "features": { "containerd-snapshotter": false },\n  "storage-driver": "overlay2"\n}\n' \
+      > /etc/docker/daemon.json

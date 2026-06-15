@@ -13,12 +13,13 @@
   volumes already carry the state; snapshots would reduce cold-start time.
 - **macOS (Apple Silicon) validation** — `box` is written to be portable, but
   has only been exercised on Linux/KVM. Needs a real Apple Silicon host run.
-- **Docker-in-microVM** — IMPLEMENTED as `box --docker` (disk-backed
-  `/var/lib/docker`, memory bump, dockerd boot entrypoint, `allowlist.dind`
-  merge; sample `Dockerfile.box.docker`). Still needs **live validation** on a
-  real VM (build a docker image, `box --docker`, confirm `docker run hello-world`
-  and that pulls honor the allowlist). The dockerd boot script (`exec sleep
-  infinity` keepalive, 60s readiness wait) is unverified end-to-end.
+- **Docker-in-microVM** — DONE and live-validated (`box --docker`): systemd via
+  `--init auto` autostarts `docker.service`, overlay2 on a disk-backed
+  `/var/lib/docker`, cpu/memory bump, dockerd readiness wait, `allowlist.dind`
+  merge; sample `Dockerfile.box.docker`. `docker run hello-world` and `docker
+  build` confirmed, and nested pulls are bound by the egress allowlist. See
+  docs/superpowers/E2E-docker.md. Remaining: macOS validation; the docker image
+  is large so first build/boot is slow.
 - **Remove the legacy stack** — once this prototype is accepted, remove
   `Dockerfile`, `entrypoint.sh`, `dev`, `firewall-init.sh`, `firewall-disable.sh`,
   `tinyproxy.conf`, `allowlist.base`, and the `--maintenance` / `--dind` /

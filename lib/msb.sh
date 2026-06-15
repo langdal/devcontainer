@@ -104,24 +104,32 @@ msb_up() {
 }
 
 # msb_docker_args -> flags that turn the sandbox into a Docker host:
-#   * a disk-backed /var/lib/docker volume (overlay2 needs a real fs, and the
-#     image cache then persists across runs),
-#   * extra memory for dockerd + builds,
-#   * a boot entrypoint that launches dockerd, waits for it, then idles (PID 1
-#     stays alive so the detached VM keeps running and `box exec` works).
-# The image MUST have dockerd installed (build via the docker Dockerfile.box).
-# Because the microVM has its own kernel, dockerd runs as plain root — no
-# --privileged, /dev/fuse, rootless, or nested-KVM needed.
+#   * --init auto: hand PID 1 to systemd, which autostarts the packaged
+#     docker.service (msb's exec relay still works under systemd; overriding the
+#     entrypoint instead would replace the relay and wedge `msb exec`),
+#   * a disk-backed /var/lib/docker volume (overlay2 needs a real fs; the image
+#     cache then persists across runs),
+#   * extra cpus + memory for dockerd, containerd and builds.
+# The image MUST ship systemd + dockerd with overlay2 forced (build via the
+# docker Dockerfile.box — docker 29's default containerd snapshotter stores
+# snapshots on the erofs/overlay rootfs, where overlay mounts fail). Because the
+# microVM has its own kernel, dockerd runs as plain root — no --privileged,
+# /dev/fuse, rootless, or nested-KVM needed.
 msb_docker_args() {
-  local size="${BOX_DOCKER_SIZE:-20G}" mem="${BOX_DOCKER_MEMORY:-2G}"
-  # Single-quoted so $n/$((...)) reach the guest shell unexpanded; \n is decoded
-  # by --script into newlines (the snippet gets a /bin/sh shebang).
-  local body='dockerd >/var/log/dockerd.log 2>&1 &\nn=0; while [ $n -lt 60 ]; do if docker info >/dev/null 2>&1; then break; fi; n=$((n+1)); sleep 1; done\nexec sleep infinity'
+  local size="${BOX_DOCKER_SIZE:-20G}" mem="${BOX_DOCKER_MEMORY:-2G}" cpus="${BOX_DOCKER_CPUS:-2}"
   printf '%s\n' \
+    --init auto \
+    --cpus "$cpus" \
     --memory "$mem" \
-    --mount-named "box-docker:/var/lib/docker:kind=disk,size=$size" \
-    --script "boxdockerd=$body" \
-    --entrypoint boxdockerd
+    --mount-named "box-docker:/var/lib/docker:kind=disk,size=$size"
+}
+
+# msb_docker_wait NAME -> block until dockerd is ready (cold boot starts systemd
+# + docker.service, which takes longer than the agent relay coming up). Run once
+# after a fresh msb_up in docker mode, before the user's command.
+msb_docker_wait() {
+  local name="$1"
+  _msb exec "$name" -- sh -c 'i=0; while [ $i -lt 120 ]; do docker info >/dev/null 2>&1 && exit 0; i=$((i+1)); sleep 1; done; echo "box: dockerd did not become ready in 120s" >&2; exit 1'
 }
 
 # mise environment injected into every exec'd command (and the provision step).

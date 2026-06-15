@@ -138,6 +138,10 @@ boot_or_attach() {  # MODE -- CMD...
   mapfile -t hosts < <(merged_hosts)
   if ! msb_is_running "$name"; then
     msb_up "$name" "$IMAGE" "$PWD" "$mode" "${hosts[@]}"
+    if [[ -n "${BOX_DOCKER:-}" ]]; then
+      echo "box: waiting for dockerd to start inside the sandbox..." >&2
+      msb_docker_wait "$name"
+    fi
   fi
   msb_attach "$name" -- "${cmd[@]}"
 }
