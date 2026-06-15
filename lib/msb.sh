@@ -82,7 +82,12 @@ msb_up() {
   local args=(run -d --name "$name")
   mapfile -t mounts < <(msb_mount_args "$workspace" box-mise:/mise box-home:/home/vscode)
   mapfile -t net < <(msb_net_args "$mode" "${hosts[@]}")
-  args+=("${mounts[@]}" "${net[@]}" "$image")
+  local secrets=()
+  if [[ -n "${BOX_SECRETS:-}" ]]; then
+    mapfile -t _secret_tokens <<< "$BOX_SECRETS"
+    mapfile -t secrets < <(msb_secret_args "${_secret_tokens[@]}")
+  fi
+  args+=("${mounts[@]}" "${net[@]}" "${secrets[@]}" "$image")
   _msb "${args[@]}"
 }
 

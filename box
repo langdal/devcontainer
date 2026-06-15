@@ -51,6 +51,7 @@ boot_or_attach() {  # MODE -- CMD...
   local cmd=("$@")
   local name; name="$(sandbox_name)"
   ensure_provisioned
+  BOX_SECRETS="$(declared_secrets)"; export BOX_SECRETS
   mapfile -t hosts < <(merged_hosts)
   if ! msb_is_running "$name"; then
     msb_up "$name" "$IMAGE" "$PWD" "$mode" "${hosts[@]}"

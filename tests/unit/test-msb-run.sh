@@ -33,4 +33,13 @@ assert_contains "$out_nohost" "msb run -d --name box-proj" "detached run with no
 # attach uses exec against the named sandbox.
 assert_contains "$(msb_attach box-proj -- echo hi)" "msb exec box-proj -- echo hi" "attach via exec"
 
+# start_run forwards secrets when provided via BOX_SECRETS env (newline list).
+out2="$(BOX_SECRETS=$'GITHUB_TOKEN@api.github.com' \
+        msb_up box-proj img /tmp/p sanctioned github.com)"
+assert_contains "$out2" "--secret GITHUB_TOKEN@api.github.com" "msb_up forwards secrets"
+
+# No BOX_SECRETS -> no --secret flag.
+out3="$(msb_up box-proj img /tmp/p sanctioned github.com)"
+assert_eq "" "$(echo "$out3" | grep -o -- '--secret' || true)" "no secrets -> no --secret flag"
+
 finish
