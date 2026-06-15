@@ -32,11 +32,13 @@ marker_file() { echo "$(state_dir)/$(sandbox_name).provisioned"; }
 merged_hosts() { allowlist_merge "$DEFAULT_ALLOWLIST" "$PWD/.box-allowlist"; }
 declared_secrets() { secrets_parse "$PWD/.box-secrets"; }
 
+# Always provisions with OPEN egress (msb_provision forces full); mode flags do not apply here.
 do_provision() { msb_provision "$IMAGE" "$PWD"; }
 mark_provisioned() { mkdir -p "$(state_dir)"; : > "$(marker_file)"; }
 
 ensure_provisioned() {
   [[ -n "${BOX_ASSUME_PROVISIONED:-}" ]] && return 0
+  # TODO(prototype): marker can go stale if named volumes are removed outside 'box reset'.
   [[ -f "$(marker_file)" ]] && return 0
   echo "box: first run for $(sandbox_name); provisioning (open egress)..." >&2
   do_provision
@@ -60,7 +62,13 @@ MODE="sanctioned"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --help|-h) usage; exit 0 ;;
-    --net) MODE="$2"; shift 2 ;;
+    --net)
+      [[ $# -ge 2 ]] || { echo "box: --net requires an argument (none|sanctioned|full)" >&2; exit 2; }
+      case "$2" in
+        none|sanctioned|full) ;;
+        *) echo "box: unknown --net value '$2' (none|sanctioned|full)" >&2; exit 2 ;;
+      esac
+      MODE="$2"; shift 2 ;;
     provision) do_provision; mark_provisioned; exit 0 ;;
     down) _msb stop "$(sandbox_name)" || true; exit 0 ;;
     reset)

@@ -34,4 +34,13 @@ assert_eq "" "$(echo "$none" | grep -o 'allow@' || true)" "net none has no allow
 help="$(run_box --help)"
 assert_contains "$help" "Usage" "help shows usage"
 
+# --net validation: invalid value exits 2
+rc=0; out_badnet="$(run_box --net bogus 2>&1)" || rc=$?
+assert_eq "2" "$rc" "invalid --net value exits 2"
+assert_contains "$out_badnet" "none|sanctioned|full" "invalid --net explains valid values"
+
+# --net validation: missing value exits 2 (not an unbound-variable crash)
+rc2=0; out_missing="$(run_box --net 2>&1)" || rc2=$?
+assert_eq "2" "$rc2" "missing --net argument exits 2"
+
 finish
