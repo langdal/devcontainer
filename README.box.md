@@ -125,6 +125,36 @@ box                                     # now boots from your custom image
 mise tools still belong in `mise.toml`, secrets in `.box-secrets`, and fetched
 data in the workspace — keep `Dockerfile.box` for genuine system dependencies.
 
+## Docker inside the sandbox (`box --docker`)
+
+The microVM has its own kernel, so a Docker daemon runs inside it as plain root —
+**no `--privileged`, `/dev/fuse`, rootless, slirp4netns, or nested-KVM** (unlike
+the old shared-kernel DinD). Setup:
+
+```bash
+cp /path/to/box-repo/Dockerfile.box.docker Dockerfile.box   # installs docker.io
+box build                                                   # build + load + pin
+box --docker                                                # boot with dockerd inside
+```
+
+Enable it per-invocation with `--docker`, or per-project by creating an empty
+`.box-docker` marker at the workspace root. In docker mode `box`:
+
+- mounts a **disk-backed** `/var/lib/docker` named volume (`box-docker`, default
+  20G — overlay2 needs a real fs, and the image cache persists across runs),
+- bumps memory (`--memory`, default `2G`),
+- starts `dockerd` at boot and waits for it to be ready,
+- merges `allowlist.dind` (Docker Hub, GHCR, MCR, Quay, GCR) into the egress
+  allowlist.
+
+Tunables: `BOX_DOCKER_SIZE` (volume size), `BOX_DOCKER_MEMORY` (RAM).
+
+**Egress still applies to nested containers.** The allowlist is enforced at the
+VM boundary, so `docker pull` and everything your nested containers do is subject
+to it — registries must be allowlisted (that is what `allowlist.dind` covers; add
+project-specific hosts to `.box-allowlist`). This is a feature: a containerized
+workload can't bypass the sandbox's egress policy.
+
 ## Egress modes
 
 | Mode | Behaviour |

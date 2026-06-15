@@ -109,4 +109,23 @@ assert_contains "$out_build" "docker build -f $projc/Dockerfile.box -t $tagc" "b
 assert_contains "$out_build" "msb image load --tag $tagc" "build loads the image into msb"
 assert_eq "$tagc" "$(cat "$projc/.box-image")" "build pins the tag in .box-image"
 
+# --- docker-in-sandbox mode (--docker / .box-docker) ---
+
+# --docker adds a disk-backed docker volume, memory, a dockerd boot entrypoint,
+# and the registry allowlist.
+dock="$(run_box --docker 2>/dev/null)"
+assert_contains "$dock" "--mount-named box-docker:/var/lib/docker:kind=disk" "docker mode mounts a disk-backed docker volume"
+assert_contains "$dock" "--memory 2G" "docker mode bumps memory"
+assert_contains "$dock" "--entrypoint boxdockerd" "docker mode starts dockerd at boot"
+assert_contains "$dock" "allow@registry-1.docker.io:tcp:443" "docker mode allowlists Docker Hub"
+
+# default run has none of the docker wiring
+assert_eq "" "$(echo "$def" | grep -o 'box-docker:/var/lib/docker' || true)" "default run has no docker volume"
+assert_eq "" "$(echo "$def" | grep -o 'registry-1.docker.io' || true)" "default run does not allowlist registries"
+
+# a .box-docker marker enables docker mode without the flag
+projm="$(mktemp -d)"; : > "$projm/.box-docker"
+out_marker="$( cd "$projm" && XDG_STATE_HOME="$projm/.state" BOX_DRY_RUN=1 BOX_ASSUME_PROVISIONED=1 "$ROOT/box" -- true 2>/dev/null )"
+assert_contains "$out_marker" "--entrypoint boxdockerd" ".box-docker enables docker mode"
+
 finish

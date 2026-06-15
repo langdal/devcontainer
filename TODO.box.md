@@ -13,8 +13,12 @@
   volumes already carry the state; snapshots would reduce cold-start time.
 - **macOS (Apple Silicon) validation** — `box` is written to be portable, but
   has only been exercised on Linux/KVM. Needs a real Apple Silicon host run.
-- **Docker-in-microVM** — DinD inside a microsandbox VM (equivalent to the
-  legacy `./dev --dind`). Deferred until the core loop is accepted.
+- **Docker-in-microVM** — IMPLEMENTED as `box --docker` (disk-backed
+  `/var/lib/docker`, memory bump, dockerd boot entrypoint, `allowlist.dind`
+  merge; sample `Dockerfile.box.docker`). Still needs **live validation** on a
+  real VM (build a docker image, `box --docker`, confirm `docker run hello-world`
+  and that pulls honor the allowlist). The dockerd boot script (`exec sleep
+  infinity` keepalive, 60s readiness wait) is unverified end-to-end.
 - **Remove the legacy stack** — once this prototype is accepted, remove
   `Dockerfile`, `entrypoint.sh`, `dev`, `firewall-init.sh`, `firewall-disable.sh`,
   `tinyproxy.conf`, `allowlist.base`, and the `--maintenance` / `--dind` /

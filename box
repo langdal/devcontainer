@@ -8,12 +8,14 @@ source "$SCRIPT_DIR/lib/msb.sh"
 
 DEFAULT_IMAGE="mcr.microsoft.com/devcontainers/base:ubuntu"
 DEFAULT_ALLOWLIST="$SCRIPT_DIR/allowlist.default"
+DIND_ALLOWLIST="$SCRIPT_DIR/allowlist.dind"
 
 usage() {
   cat <<'EOF'
-Usage: box [--net none|sanctioned|full] [COMMAND]
+Usage: box [--net none|sanctioned|full] [--docker] [COMMAND]
 
   box                     Boot/attach the sandbox for this directory; open a shell.
+  box --docker            Run with a Docker daemon inside the sandbox (needs a docker image).
   box -- CMD...           Run a one-off command in the sandbox.
   box shell               Attach an extra terminal to the running sandbox.
   box provision           Build step (open egress): install mise + tools into the volume.
@@ -36,7 +38,13 @@ EOF
 sandbox_name() { echo "box-$(basename "$PWD")"; }
 state_dir() { echo "${XDG_STATE_HOME:-$HOME/.local/state}/box"; }
 marker_file() { echo "$(state_dir)/$(sandbox_name).provisioned"; }
-merged_hosts() { allowlist_merge "$DEFAULT_ALLOWLIST" "$PWD/.box-allowlist"; }
+merged_hosts() {
+  if [[ -n "${BOX_DOCKER_MODE:-}" ]]; then
+    allowlist_merge "$DEFAULT_ALLOWLIST" "$DIND_ALLOWLIST" "$PWD/.box-allowlist"
+  else
+    allowlist_merge "$DEFAULT_ALLOWLIST" "$PWD/.box-allowlist"
+  fi
+}
 declared_secrets() { secrets_parse "$PWD/.box-secrets"; }
 
 # Base image precedence: BOX_IMAGE env > .box-image file (first non-comment line) > default.
@@ -118,6 +126,13 @@ boot_or_attach() {  # MODE -- CMD...
   local cmd=("$@")
   local name; name="$(sandbox_name)"
   require_msb
+  if [[ -n "${BOX_DOCKER_MODE:-}" ]]; then
+    BOX_DOCKER=1; export BOX_DOCKER
+    if [[ "$IMAGE" == "$DEFAULT_IMAGE" ]]; then
+      echo "box: --docker needs an image with dockerd; the default image has none." >&2
+      echo "box: build one (cp Dockerfile.box.docker Dockerfile.box && box build), then retry." >&2
+    fi
+  fi
   ensure_provisioned
   BOX_SECRETS="$(declared_secrets)"; export BOX_SECRETS
   mapfile -t hosts < <(merged_hosts)
@@ -129,10 +144,15 @@ boot_or_attach() {  # MODE -- CMD...
 
 IMAGE="$(resolve_image)"
 
+# Docker-in-sandbox mode: enabled by the --docker flag or a .box-docker marker.
+BOX_DOCKER_MODE=""
+[[ -f "$PWD/.box-docker" ]] && BOX_DOCKER_MODE=1
+
 MODE="sanctioned"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --help|-h) usage; exit 0 ;;
+    --docker) BOX_DOCKER_MODE=1; shift ;;
     build) shift; do_build "${1:-}"; exit 0 ;;
     --net)
       [[ $# -ge 2 ]] || { echo "box: --net requires an argument (none|sanctioned|full)" >&2; exit 2; }

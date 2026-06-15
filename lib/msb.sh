@@ -95,8 +95,33 @@ msb_up() {
     mapfile -t _secret_tokens <<< "$BOX_SECRETS"
     mapfile -t secrets < <(msb_secret_args "${_secret_tokens[@]}")
   fi
-  args+=("${mounts[@]}" "${net[@]}" "${secrets[@]}" "$image")
+  local docker=()
+  if [[ -n "${BOX_DOCKER:-}" ]]; then
+    mapfile -t docker < <(msb_docker_args)
+  fi
+  args+=("${mounts[@]}" "${net[@]}" "${secrets[@]}" "${docker[@]}" "$image")
   _msb "${args[@]}"
+}
+
+# msb_docker_args -> flags that turn the sandbox into a Docker host:
+#   * a disk-backed /var/lib/docker volume (overlay2 needs a real fs, and the
+#     image cache then persists across runs),
+#   * extra memory for dockerd + builds,
+#   * a boot entrypoint that launches dockerd, waits for it, then idles (PID 1
+#     stays alive so the detached VM keeps running and `box exec` works).
+# The image MUST have dockerd installed (build via the docker Dockerfile.box).
+# Because the microVM has its own kernel, dockerd runs as plain root — no
+# --privileged, /dev/fuse, rootless, or nested-KVM needed.
+msb_docker_args() {
+  local size="${BOX_DOCKER_SIZE:-20G}" mem="${BOX_DOCKER_MEMORY:-2G}"
+  # Single-quoted so $n/$((...)) reach the guest shell unexpanded; \n is decoded
+  # by --script into newlines (the snippet gets a /bin/sh shebang).
+  local body='dockerd >/var/log/dockerd.log 2>&1 &\nn=0; while [ $n -lt 60 ]; do if docker info >/dev/null 2>&1; then break; fi; n=$((n+1)); sleep 1; done\nexec sleep infinity'
+  printf '%s\n' \
+    --memory "$mem" \
+    --mount-named "box-docker:/var/lib/docker:kind=disk,size=$size" \
+    --script "boxdockerd=$body" \
+    --entrypoint boxdockerd
 }
 
 # mise environment injected into every exec'd command (and the provision step).

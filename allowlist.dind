@@ -1,5 +1,7 @@
-# Registry hostnames consumed by rootless dockerd in --dind mode.
-# Merged into the tinyproxy filter only when DEVCONTAINER_DIND=1.
+# Container-registry hostnames for Docker pulls inside the sandbox.
+# box merges these into the egress allowlist only in --docker mode (the sandbox's
+# egress is host-enforced at the VM boundary, so docker pulls go through it).
+# Same format as allowlist.default: bare host = exact, *.host = subdomains.
 
 # Docker Hub
 registry-1.docker.io

@@ -1,0 +1,25 @@
+# Docker-in-sandbox variant of Dockerfile.box.
+#
+# Gives the sandbox its own Docker daemon so an agent can build/run containers.
+# Because the microVM has a real kernel, dockerd runs as plain root — no
+# --privileged, /dev/fuse, rootless, or nested-KVM needed.
+#
+# Use it:
+#   cp Dockerfile.box.docker Dockerfile.box
+#   box build          # builds + loads + pins .box-image
+#   box --docker       # boots with dockerd inside (or add a .box-docker marker)
+#
+# box --docker also: mounts a disk-backed /var/lib/docker volume, bumps memory,
+# starts dockerd at boot, and allowlists container registries (allowlist.dind).
+
+FROM mcr.microsoft.com/devcontainers/base:ubuntu
+
+# docker.io pulls in dockerd, the docker CLI, containerd and runc from the
+# Ubuntu archive (already allowlisted for provisioning). buildx + compose are
+# optional conveniences.
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      docker.io \
+      docker-buildx \
+      docker-compose-v2 \
+ && rm -rf /var/lib/apt/lists/*
