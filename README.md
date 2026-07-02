@@ -183,6 +183,15 @@ docker volume rm devcontainer-mise devcontainer-home
 
   Set `DEV_SKIP_APPARMOR_CHECK=1` to bypass (e.g. with a custom AppArmor profile that grants `userns,`).
 
+- **`--dind` on a rootless runtime needs a subuid/subgid grant of at least 165535 ids** (rootless podman, the `podman-docker` shim, rootless docker). The dind container's user namespace only spans the ids granted in `/etc/subuid`/`/etc/subgid` — typically 65536 — but rootless dockerd inside the container must map container ids 100000–165535 (the image's baked `vscode` subuid range), so with the typical grant it dies with `newuidmap: write to uid_map failed: Operation not permitted`. `dev` preflights the grant and refuses fast with the remediation:
+
+  ```bash
+  sudo usermod --add-subuids 165536-365535 --add-subgids 165536-365535 $USER
+  podman system migrate   # podman only: restart its user namespace
+  ```
+
+  Set `DEV_SKIP_SUBID_CHECK=1` to bypass the preflight. Rootful runtimes are unaffected.
+
 The script reads `id -u` / `id -g` and bakes them into the image. If your host UID/GID later changes, the next `dev` invocation detects the mismatch and prompts to rebuild + wipe volumes.
 
 ## `dev` Flags
@@ -225,6 +234,7 @@ COMMANDS:
 - `DEV_RUNTIME=docker|podman` — force a runtime when both are installed.
 - `DEV_ASSUME_YES=1` — accept the rebuild prompts non-interactively (UID/GID mismatch also wipes named volumes; version mismatch rebuilds the image only).
 - `DEV_SKIP_APPARMOR_CHECK=1` — bypass the `--dind` AppArmor preflight.
+- `DEV_SKIP_SUBID_CHECK=1` — bypass the `--dind` preflight that requires a rootless-runtime host to grant ≥165535 subuids/subgids.
 - `DEV_EXTRA_RUN_ARGS=...` — extra args appended to `docker run`.
 - `GITHUB_TOKEN` — passed through to the container if set on the host.
 
