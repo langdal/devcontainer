@@ -49,36 +49,32 @@ fi
 # lib/dev/lifecycle.sh) or, on a fresh container, via the entrypoint's
 # `gosu vscode` block.
 #
-# Force a known host identity via the workspace's local git config so
-# this check can't silently skip on a host with no git identity
-# configured. Save whatever was there (present or absent) so it can be
-# restored in cleanup regardless of pass/fail.
-_had_local_name=1
-orig_local_name=$(git config --local --get user.name 2>/dev/null) || _had_local_name=0
-_had_local_email=1
-orig_local_email=$(git config --local --get user.email 2>/dev/null) || _had_local_email=0
-git config --local user.name "dev-scenario22-host"
-git config --local user.email "dev-scenario22-host@example.invalid"
+# Force a known host identity for the seeding check via an isolated
+# GIT_CONFIG_GLOBAL: this (a) never touches the caller's real git config
+# and (b) works even where the workspace is not a git repo — the CI VMs
+# rsync the repo with --exclude '.git', so `git config --local` would have
+# no repo to write to. Skip the whole check when git is not installed on
+# the host (dev's seeding no-ops without a readable host identity, so there
+# is nothing to assert); the cold-start PASS above still stands.
+if ! command -v git >/dev/null 2>&1; then
+    log_skip "git-identity seeding not checked (git not installed on host)"
+    exit 0
+fi
 
-# Whatever identity ends up seeded below, captured so cleanup can put it
-# back — the override plant later in this block must not leak.
-orig_in_name=""
+_s22_cfg="$(mktemp)"
+export GIT_CONFIG_GLOBAL="$_s22_cfg"
+export GIT_CONFIG_SYSTEM=/dev/null
+git config --global user.name "dev-scenario22-host"
+git config --global user.email "dev-scenario22-host@example.invalid"
 
 # shellcheck disable=SC2317,SC2329  # invoked via trap
 restore_git_identity() {
-    if [ "$_had_local_name" = "1" ]; then
-        git config --local user.name "$orig_local_name"
-    else
-        git config --local --unset user.name 2>/dev/null || true
-    fi
-    if [ "$_had_local_email" = "1" ]; then
-        git config --local user.email "$orig_local_email"
-    else
-        git config --local --unset user.email 2>/dev/null || true
-    fi
-    if [ -n "$orig_in_name" ]; then
-        ./dev --dind -- git config --global user.name "$orig_in_name" </dev/null >/dev/null 2>&1
-    fi
+    # Clear the container's test identity so a real-host suite run does not
+    # leave test values in the persisted home volume, then drop the temp
+    # host config. (No-op in CI, where the home volume is throwaway.)
+    ./dev --dind -- git config --global --unset-all user.name  </dev/null >/dev/null 2>&1 || true
+    ./dev --dind -- git config --global --unset-all user.email </dev/null >/dev/null 2>&1 || true
+    rm -f "$_s22_cfg"
 }
 trap 'restore_git_identity; restore_host' EXIT
 
@@ -92,7 +88,6 @@ trap 'restore_git_identity; restore_host' EXIT
 # the empty in-container identity and the host identity forced above.
 "$RUNTIME" rm -f "$D" >/dev/null 2>&1
 in_name=$(./dev --dind -- git config --global user.name </dev/null 2>/dev/null | tr -d '\r')
-orig_in_name="$in_name"
 # Assert the exact forced host value, not merely non-empty: a non-empty
 # check false-passes if startup diagnostics ever leak onto stdout.
 if [ "$in_name" != "dev-scenario22-host" ]; then
