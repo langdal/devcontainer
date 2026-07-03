@@ -5,6 +5,11 @@
 # DEV_ASSUME_YES bypasses the prompt; the script then removes the named
 # volumes and rebuilds the image. The marker file we plant in
 # devcontainer-home before invocation must be gone afterwards.
+#
+# The home volume is per-workspace by default (devcontainer-home-<dir>);
+# this scenario is about the generic rebuild/wipe behavior, not naming, so
+# it opts into DEV_SHARED_HOME=1 to keep exercising the literal
+# devcontainer-home volume with the least churn.
 set -u
 LIB="$(dirname "$0")/../lib"
 # shellcheck source=scripts/test/lib/assert.sh
@@ -21,6 +26,7 @@ WS=$(basename "$(pwd)")
 remember_container "dev-${WS}"
 
 HOST_UID=$(id -u)
+export DEV_SHARED_HOME=1
 
 # Build mismatched image directly.
 "$RUNTIME" rm -f "dev-${WS}" >/dev/null 2>&1

@@ -22,10 +22,13 @@ remember_container "dev-${WS}"
 HOST_UID=$(id -u)
 HOST_GID=$(id -g)
 
-# Wipe image + volumes so we exercise the cold-start build path.
+# Wipe image + volumes so we exercise the cold-start build path. This
+# scenario exercises the DEFAULT (no DEV_SHARED_HOME) code path, so the home
+# volume dev actually creates is the per-workspace devcontainer-home-<dir>,
+# not the legacy shared devcontainer-home.
 "$RUNTIME" rm -f "dev-${WS}" >/dev/null 2>&1
 "$RUNTIME" rmi -f generic-devcontainer >/dev/null 2>&1
-"$RUNTIME" volume rm devcontainer-mise devcontainer-home >/dev/null 2>&1
+"$RUNTIME" volume rm devcontainer-mise "devcontainer-home-${WS}" >/dev/null 2>&1
 
 if ! ./dev --build -- true >/dev/null 2>&1; then
     log_fail "dev --build failed"

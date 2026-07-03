@@ -39,15 +39,29 @@ docker build -t generic-devcontainer .
 ./dev --dind
 
 # Toggle the firewall on a running container without restarting. If no
-# container is running, --disable-firewall starts a fresh one with the
+# container is running, fw disable starts a fresh one with the
 # firewall already off (same end state as start-then-disable).
-./dev --disable-firewall
-./dev --enable-firewall
+./dev fw disable
+./dev fw enable
 
 # Observe firewall behaviour on a running container:
-./dev --monitor       # tail tinyproxy.log
-./dev --monitor-fw    # tcpdump on NFLOG group 1 (iptables drops)
+./dev fw log     # tail tinyproxy.log
+./dev fw drops   # tcpdump on NFLOG group 1 (iptables drops)
+
+# Remove this workspace's dev container(s) and prompt per named volume.
+./dev reset
+
+# Scaffold a self-contained .devcontainer/ for VS Code's "Reopen in Container".
+./dev scaffold
+
+# Update a git-checkout install to the latest released tag.
+./dev update
 ```
+
+Note: the old flag spellings (`--disable-firewall`, `--enable-firewall`,
+`--monitor`, `--monitor-fw`, `--reset`, `--self-update`,
+`--create-dev-container`) still work as deprecated aliases — they warn to
+stderr and route to the subcommand above.
 
 Useful environment variables for `./dev`:
 
@@ -56,6 +70,7 @@ Useful environment variables for `./dev`:
 - `DEV_SKIP_APPARMOR_CHECK=1` — bypass the `--dind` AppArmor preflight (only safe with a custom profile that grants `userns,`).
 - `DEV_SKIP_SUBID_CHECK=1` — bypass the `--dind` preflight that requires a rootless-runtime host to grant ≥165535 subuids/subgids (rootless dockerd must map the image's `vscode:100000:65536` range inside the container's user namespace; the typical 65536-id grant is too small).
 - `DEV_EXTRA_RUN_ARGS=...` — extra args passed to `docker run` (the test orchestrator uses this to inject `--dns=...` when in-container DNS is broken).
+- `DEV_SHARED_HOME=1` — use the legacy shared `devcontainer-home` volume for every workspace instead of the per-workspace default (`devcontainer-home-<dir>`).
 
 ## Tests
 
@@ -102,8 +117,8 @@ Three components, each with a distinct role:
 
 ## Key Design Decisions
 
-- **Mise data lives at `/mise/`**, not in the home directory. `MISE_DATA_DIR`, `MISE_CONFIG_DIR`, and `MISE_CACHE_DIR` all point there. This allows the mise volume (`devcontainer-mise`) and home volume (`devcontainer-home`) to be independent.
-- **Two named Docker volumes** persist state: `devcontainer-mise:/mise` (tools/caches) and `devcontainer-home:/home/vscode` (shell history, git config, SSH keys).
+- **Mise data lives at `/mise/`**, not in the home directory. `MISE_DATA_DIR`, `MISE_CONFIG_DIR`, and `MISE_CACHE_DIR` all point there. This allows the mise volume (`devcontainer-mise`) and the home volume to be independent.
+- **Named Docker volumes** persist state: `devcontainer-mise:/mise` (tools/caches, shared across every workspace) and a home volume mounted at `/home/vscode` (shell history, git config, SSH keys). The home volume is **per-workspace by default** (`devcontainer-home-<dir>`, `<dir>` = basename of the directory `dev` was launched from) so one project's agent can't read another project's SSH keys/git creds/history out of a shared home; `DEV_SHARED_HOME=1` opts back into the legacy single `devcontainer-home` volume shared by every workspace. `--dind` adds a third, also shared, volume: `devcontainer-dind:/home/vscode/.local/share/docker`. `dev` seeds the container's git identity (`user.name`/`user.email`) from the host's `git config` the first time a home volume is created — entrypoint.sh only fills in an empty in-container identity, so it never clobbers one set later inside the container. SSH keys are never copied in; see README's "Pushing from inside a container" for push-from-inside options.
 - **Container runs as user `vscode`** (UID 1000 by default, overridable via `USER_UID` build arg).
 - **On rootless podman, `dev` adds `--userns=keep-id`.** The image bakes the host UID/GID into `vscode` so it matches the bind-mounted workspace — true under Docker and rootful podman, which don't remap ids. Rootless podman remaps by default (container root → invoking host user, every other id including `vscode`'s → the subuid/subgid range), so without `keep-id` the workspace shows up root-owned to `vscode`. `keep-id` maps the invoking host user 1:1 onto `vscode`'s uid instead. Named volumes written before this fix are owned by the old mapping's subuid; `dev` detects that (raw owner ≠ `$HOST_UID`) and re-chowns each volume once via `podman unshare chown -R 0:0` (0:0 inside `podman unshare`'s own default mapping *is* the invoking host user).
 - **Containers are `--rm`** (ephemeral) but the `dev` script reuses a running/stopped container named `dev-<dirname>` before creating a new one.

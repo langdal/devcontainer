@@ -25,11 +25,11 @@ Override the install location with `INSTALL_DIR=...`. Re-running upgrades the ex
 Once installed, upgrade in place at any time:
 
 ```bash
-dev --self-update          # checkout the latest tag in the install dir
-dev --self-update --dry-run  # show what would change
+dev update              # checkout the latest tag in the install dir
+dev update --dry-run    # show what would change
 ```
 
-`--self-update` works whether you installed via the one-liner or manually with `git clone`. It only requires that the `dev` script lives in a clean git checkout; uncommitted edits abort the operation. The image rebuild prompt fires automatically on the next `dev` run if the script version changed.
+`dev update` works whether you installed via the one-liner or manually with `git clone`. It only requires that the `dev` script lives in a clean git checkout; uncommitted edits abort the operation. The image rebuild prompt fires automatically on the next `dev` run if the script version changed.
 
 ### Manual install
 
@@ -113,13 +113,13 @@ One entry per line, `#` for comments. Bare hostnames match exactly; `*.example.c
 ### Firewall controls
 
 ```bash
-dev --disable-firewall    # open the firewall (running container, or fresh start)
-dev --enable-firewall     # restore default-deny + allowlist on the running container
-dev --monitor             # tail the tinyproxy log
-dev --monitor-fw          # tcpdump on iptables-dropped packets (NFLOG group 1)
+dev fw disable    # open the firewall (running container, or fresh start)
+dev fw enable     # restore default-deny + allowlist on the running container
+dev fw log        # tail the tinyproxy log
+dev fw drops      # tcpdump on iptables-dropped packets (NFLOG group 1)
 ```
 
-`--disable-firewall` is dual-purpose: if a workspace container (normal or dind) is already running it toggles that one in place; if none is running it starts a **fresh** container with the firewall already open — the same end state as starting normally and toggling off. `--enable-firewall` only acts on a running container.
+`dev fw disable` is dual-purpose: if a workspace container (normal or dind) is already running it toggles that one in place; if none is running it starts a **fresh** container with the firewall already open — the same end state as starting normally and toggling off. `dev fw enable` only acts on a running container.
 
 The container name does **not** change when the firewall is toggled, so for longer-lived unrestricted work prefer `--maintenance` — its name (`-maint`) is a visible signal.
 
@@ -131,7 +131,7 @@ The container name does **not** change when the firewall is toggled, so for long
 - passes `DEVCONTAINER_HOST_PORTS=8080[,…]` into the container,
 - and `firewall-init.sh` adds an iptables `ACCEPT` rule for **only that port to that gateway IP**.
 
-Everything else stays default-deny. Use it instead of `--network host` or `--disable-firewall` when an agent inside the container needs to call out to a local model server, a metrics endpoint, etc. From inside the container: `curl http://host.docker.internal:8080/...`.
+Everything else stays default-deny. Use it instead of `--network host` or `dev fw disable` when an agent inside the container needs to call out to a local model server, a metrics endpoint, etc. From inside the container: `curl http://host.docker.internal:8080/...`.
 
 To verify the firewall posture from inside:
 
@@ -159,15 +159,39 @@ dev --dind -- /workspace/scripts/verify-dind.sh       # heavier smoke tests
 
 ## Persistence
 
-Two named volumes preserve state across container restarts and rebuilds:
+Named volumes preserve state across container restarts and rebuilds:
 
-- `devcontainer-mise:/mise` — installed tools and caches
-- `devcontainer-home:/home/vscode` — shell history, git config, SSH keys, dotfiles
-
-`--dind` adds `devcontainer-dind` for the nested image cache.
+- `devcontainer-mise:/mise` — installed tools and caches. Shared across every
+  workspace.
+- `devcontainer-home-<dir>:/home/vscode` — shell history, git config, SSH
+  keys, dotfiles. **Per-workspace by default** (`<dir>` is the basename of
+  the project directory `dev` was launched from), so one project's agent
+  can't read another project's SSH keys or git credentials out of a shared
+  home. Set `DEV_SHARED_HOME=1` to opt back into the legacy single
+  `devcontainer-home` volume shared by every workspace.
+- `devcontainer-dind` — nested image cache, added by `--dind`. Shared across
+  every workspace, same as mise.
 
 ```bash
-docker volume rm devcontainer-mise devcontainer-home
+docker volume rm devcontainer-mise devcontainer-home-myproject
+```
+
+### Pushing from inside a container
+
+Git identity (`user.name` / `user.email`) is seeded automatically from the
+host's `git config` at container start, while the in-container identity is
+still empty — you don't need to set it up by hand. It only fills in an *empty*
+in-container identity, so anything you set inside the container later is
+never overwritten by this seeding on subsequent starts.
+
+SSH keys are deliberately **not** shared — the per-workspace home volume
+starts empty, and even the legacy shared one is opt-in via
+`DEV_SHARED_HOME=1`, not a substitute for key isolation. To push over SSH
+from inside a container, forward your host's ssh-agent socket (or mount a
+per-project deploy key) via `DEV_EXTRA_RUN_ARGS`, e.g.:
+
+```bash
+DEV_EXTRA_RUN_ARGS="-v $SSH_AUTH_SOCK:/ssh-agent -e SSH_AUTH_SOCK=/ssh-agent" ./dev
 ```
 
 ## Host Requirements
@@ -202,7 +226,7 @@ docker volume rm devcontainer-mise devcontainer-home
 
 The script reads `id -u` / `id -g` and bakes them into the image. If your host UID/GID later changes, the next `dev` invocation detects the mismatch and prompts to rebuild + wipe volumes.
 
-- **On rootless podman, `dev` runs the container with `--userns=keep-id`.** Rootless podman's default user-namespace mapping puts container root at the invoking host user and shifts every other container id — including the baked `vscode` uid — into the subuid/subgid range, so the baked-uid-matches-host-uid assumption above doesn't hold by default: the bind-mounted workspace shows up root-owned to `vscode`, who can't write to it. `--userns=keep-id` maps the invoking host user 1:1 onto the matching container id instead, fixing that. It only applies when the runtime is actually rootless podman (including the `podman-docker` shim) — Docker and rootful podman don't remap ids and don't need it. The first run after upgrading re-chowns the named volumes (`devcontainer-mise`, `devcontainer-home`, `devcontainer-dind`), since their content was written under the old mapping; you'll see one `Migrating <volume> ownership for --userns=keep-id (one-time)...` line per volume, and nothing on subsequent runs.
+- **On rootless podman, `dev` runs the container with `--userns=keep-id`.** Rootless podman's default user-namespace mapping puts container root at the invoking host user and shifts every other container id — including the baked `vscode` uid — into the subuid/subgid range, so the baked-uid-matches-host-uid assumption above doesn't hold by default: the bind-mounted workspace shows up root-owned to `vscode`, who can't write to it. `--userns=keep-id` maps the invoking host user 1:1 onto the matching container id instead, fixing that. It only applies when the runtime is actually rootless podman (including the `podman-docker` shim) — Docker and rootful podman don't remap ids and don't need it. The first run after upgrading re-chowns the named volumes (`devcontainer-mise`, the resolved home volume — `devcontainer-home-<dir>` by default or `devcontainer-home` under `DEV_SHARED_HOME=1`, `devcontainer-dind`), since their content was written under the old mapping; you'll see one `Migrating <volume> ownership for --userns=keep-id (one-time)...` line per volume, and nothing on subsequent runs.
 
 ## `dev` Flags
 
@@ -213,15 +237,23 @@ from the implementation:
 dev --help
 ```
 
-Highlights not covered above: `--reset` removes this workspace's containers
-and prompts per named volume; `--self-update` updates a git-checkout install
-to the latest tag; `--create-dev-container` scaffolds a `.devcontainer/` for
+Highlights not covered above: `dev reset` removes this workspace's containers
+and prompts per named volume; `dev update` updates a git-checkout install
+to the latest tag; `dev scaffold` generates a `.devcontainer/` for
 VS Code.
+
+Note: the old flag spellings (`--disable-firewall`, `--enable-firewall`,
+`--monitor`, `--monitor-fw`, `--reset`, `--self-update`,
+`--create-dev-container`) still work as deprecated aliases — they print a
+warning to stderr and route to the subcommand above.
 
 ### Environment variables
 
 - `DEV_RUNTIME=docker|podman` — force a runtime when both are installed.
 - `DEV_ASSUME_YES=1` — accept the rebuild prompts non-interactively (UID/GID mismatch also wipes named volumes; version mismatch rebuilds the image only). Also auto-approves `.devcontainer-allowlist` changes without the interactive diff/prompt, so setting it globally waives that review.
+- `DEV_SHARED_HOME=1` — use the legacy shared `devcontainer-home` volume for
+  every workspace instead of the per-workspace default
+  (`devcontainer-home-<dir>`). See [Persistence](#persistence).
 - `DEV_SKIP_APPARMOR_CHECK=1` — bypass the `--dind` AppArmor preflight.
 - `DEV_SKIP_SUBID_CHECK=1` — bypass the `--dind` preflight that requires a rootless-runtime host to grant ≥165535 subuids/subgids.
 - `DEV_EXTRA_RUN_ARGS=...` — extra args appended to `docker run`.
