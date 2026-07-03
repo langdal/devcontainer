@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.4.0](https://github.com/langdal/devcontainer/compare/v1.3.0...v1.4.0) (2026-07-03)
+
+
+### Features
+
+* **dev:** sandbox hardening — allowlist approval gate, GitHub-token guidance, firewall & dind hardening ([b6019b0](https://github.com/langdal/devcontainer/commit/b6019b0a1bf394fb1f4994eff7f89f698abca0b3))
+* **dev:** subcommand CLI + module split and per-workspace home volume ([54be645](https://github.com/langdal/devcontainer/commit/54be645c698b4359e84e4efbf84526cc022cd9fe))
+
+
+### Bug Fixes
+
+* **build:** update ci image ([9d5ee41](https://github.com/langdal/devcontainer/commit/9d5ee4143fee68b0f1d87fabe78ec0bc342e4024))
+* **dind:** add --userns=keep-id on rootless podman so vscode can write /workspace ([fc6a8fb](https://github.com/langdal/devcontainer/commit/fc6a8fb2ffadc4cdd37a05cefa4464ca061d9c2c))
+* **dind:** preflight subuid grant instead of misdiagnosed kernel limit ([07a1f70](https://github.com/langdal/devcontainer/commit/07a1f70cb21e69b64f422c2e42c1038fb5f61e1c))
+* **dind:** preflight subuid grant instead of misdiagnosed kernel limit ([af0864d](https://github.com/langdal/devcontainer/commit/af0864d6b95a00415a1f7382ffee74d73e793bca))
+* **test:** forward GITHUB_TOKEN in scenario-local image builds to avoid anonymous GitHub rate limits ([9abdf72](https://github.com/langdal/devcontainer/commit/9abdf7275eaaff06bd911179bc6c2251678b2a0d))
+* **test:** make scenario 22 git-identity seeding work in the CI VMs ([dc58a49](https://github.com/langdal/devcontainer/commit/dc58a49b609915358694e9b8d76c23a5f20b5b9d))
+
 ## [1.3.0](https://github.com/langdal/devcontainer/compare/v1.2.1...v1.3.0) (2026-06-12)
 
 
