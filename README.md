@@ -99,7 +99,15 @@ The container restricts outbound HTTP(S) to a curated allowlist. Threat model: a
 One entry per line, `#` for comments. Bare hostnames match exactly; `*.example.com` matches any subdomain (list both if you need both).
 
 - `allowlist.base` — baked into the image. Anthropic, GitHub, common registries, mise, OS mirrors. Edit and rebuild to change.
-- `.devcontainer-allowlist` at the workspace root — optional, read at every container start. Restart the container to pick up changes (no rebuild).
+- `.devcontainer-allowlist` at the workspace root — optional, project-specific.
+  Because the workspace is writable by the sandboxed agent, `dev` never feeds
+  this file to the firewall directly: on start it diffs the file against the
+  last **approved** copy (kept under `~/.local/state/devcontainer/`) and asks
+  you to approve changes. Declined or non-interactive runs start *without*
+  the project allowlist. Restart to pick up an approved change (no rebuild
+  needed). Note: the approval gate itself is enforced by the baked
+  `firewall-init.sh`, so it only applies on an image built with this version
+  of the tooling — on an older image, run `dev --build` once.
 - `allowlist.dind` — additionally merged in `--dind` mode (Docker Hub, MCR, Quay, GCR, …).
 
 ### Firewall controls
@@ -198,47 +206,35 @@ The script reads `id -u` / `id -g` and bakes them into the image. If your host U
 
 ## `dev` Flags
 
-```
-dev [OPTIONS] [-- COMMAND...]
-dev install
+The authoritative flag reference is built into the script — it cannot drift
+from the implementation:
 
-OPTIONS:
-  --help                  Show help
-  --version               Print the dev script version and exit
-  --dry-run               Print the docker command without running it
-  --build                 Force rebuild of the image
-  --port PORT             Forward an additional port (repeatable)
-  --default-ports         Forward 5173, 5174, 8080, 2345, 3000
-  --host-port PORT        Allow egress to host.docker.internal:PORT
-                          (repeatable). Adds an iptables ACCEPT for the host
-                          gateway only — the firewall stays default-deny
-                          everywhere else.
-  --maintenance           Start with firewall off and sudo enabled
-  --dind                  Start with rootless docker available inside
-  --monitor               Tail the firewall proxy log of the running container
-  --monitor-fw            Stream iptables-dropped packets of the running container
-  --disable-firewall      Open the firewall on the running container, or
-                          start a fresh container with the firewall off
-  --enable-firewall       Restore the firewall on the running container
-  --create-dev-container  Scaffold a self-contained .devcontainer/ for VS Code
-                          in the current directory (compose with --dind for
-                          the DinD variant)
-  --force                 Overwrite existing files when used with
-                          --create-dev-container
-  --                      Pass the rest as a command into the container
-
-COMMANDS:
-  install                 Symlink this script into a writable directory on PATH
+```bash
+dev --help
 ```
+
+Highlights not covered above: `--reset` removes this workspace's containers
+and prompts per named volume; `--self-update` updates a git-checkout install
+to the latest tag; `--create-dev-container` scaffolds a `.devcontainer/` for
+VS Code.
 
 ### Environment variables
 
 - `DEV_RUNTIME=docker|podman` — force a runtime when both are installed.
-- `DEV_ASSUME_YES=1` — accept the rebuild prompts non-interactively (UID/GID mismatch also wipes named volumes; version mismatch rebuilds the image only).
+- `DEV_ASSUME_YES=1` — accept the rebuild prompts non-interactively (UID/GID mismatch also wipes named volumes; version mismatch rebuilds the image only). Also auto-approves `.devcontainer-allowlist` changes without the interactive diff/prompt, so setting it globally waives that review.
 - `DEV_SKIP_APPARMOR_CHECK=1` — bypass the `--dind` AppArmor preflight.
 - `DEV_SKIP_SUBID_CHECK=1` — bypass the `--dind` preflight that requires a rootless-runtime host to grant ≥165535 subuids/subgids.
 - `DEV_EXTRA_RUN_ARGS=...` — extra args appended to `docker run`.
-- `GITHUB_TOKEN` — passed through to the container if set on the host.
+- `GITHUB_TOKEN` — passed through to the container if set on the host, and
+  forwarded to image builds as a BuildKit secret. Its purpose is **rate-limit
+  identification** (the anonymous GitHub API limit of 60 req/h is shared per
+  IP and easily exhausted by `mise install`), so use a token with no power:
+  create a **fine-grained PAT** with *no repository access* and *no
+  permissions* (GitHub → Settings → Developer settings → Fine-grained tokens
+  → "All repositories: none", zero permission grants). `dev` warns once per
+  token if a classic token with OAuth scopes is detected — an agent inside
+  the container can read the token, so scopes it carries are scopes you hand
+  to the agent.
 
 ## Architecture
 

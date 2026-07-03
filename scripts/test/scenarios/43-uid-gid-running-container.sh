@@ -40,12 +40,21 @@ remember_container "$CN"
 
 HOST_UID=$(id -u)
 
-docker rm -f "$CN" >/dev/null 2>&1
+"$RUNTIME" rm -f "$CN" >/dev/null 2>&1
 build_image_with_uid_gid 4242 4242 || exit 1
-OLD_IMAGE_ID=$(docker images -q generic-devcontainer)
+OLD_IMAGE_ID=$("$RUNTIME" images -q generic-devcontainer)
 
-# Long-running stale container.
-docker run -d --rm --name "$CN" generic-devcontainer sleep 3600 >/dev/null
+# Long-running stale container. Two things keep this deterministic:
+#  - --entrypoint sleep: the normal entrypoint runs firewall-init.sh, which
+#    needs NET_ADMIN (dev grants it at runtime; a bare `docker run` does not).
+#    Without it the entrypoint fails and the container exits within ~1s, so
+#    the rebuild would be removing an already-dead container instead of the
+#    running one this scenario asserts. Running sleep directly keeps it up.
+#  - no --rm: with --rm, a container exit triggers Docker's auto-removal,
+#    which can race dev's `rm -f` and intermittently report "failed to
+#    remove container". Without it, dev's `rm -f` is the sole remover — no
+#    race. Cleanup is still guaranteed by remember_container + restore trap.
+docker run -d --name "$CN" --entrypoint sleep generic-devcontainer 3600 >/dev/null
 
 if ! DEV_ASSUME_YES=1 ./dev -- true >/dev/null 2>&1; then
     log_fail "dev failed during rebuild path"
@@ -53,7 +62,7 @@ if ! DEV_ASSUME_YES=1 ./dev -- true >/dev/null 2>&1; then
     exit 1
 fi
 
-NEW_IMAGE_ID=$(docker images -q generic-devcontainer)
+NEW_IMAGE_ID=$("$RUNTIME" images -q generic-devcontainer)
 if [ "$OLD_IMAGE_ID" = "$NEW_IMAGE_ID" ]; then
     log_fail "image was not rebuilt (id unchanged: $OLD_IMAGE_ID)"
     ./dev --build -- true >/dev/null 2>&1 || true
@@ -69,9 +78,9 @@ if [ "$img_uid" != "$HOST_UID" ]; then
 fi
 
 # Stale container must be gone (it was removed before rebuild).
-if docker ps --format '{{.Names}}' | grep -qx "$CN"; then
+if "$RUNTIME" ps --format '{{.Names}}' | grep -qx "$CN"; then
     log_fail "stale container $CN is still running"
-    docker rm -f "$CN" >/dev/null 2>&1
+    "$RUNTIME" rm -f "$CN" >/dev/null 2>&1
     ./dev --build -- true >/dev/null 2>&1 || true
     exit 1
 fi

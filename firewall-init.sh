@@ -6,7 +6,10 @@
 set -euo pipefail
 
 BASE=/etc/devcontainer/allowlist.base
-PROJECT=/workspace/.devcontainer-allowlist
+# Approved snapshot mounted read-only by dev (see approve_project_allowlist).
+# NEVER read the workspace copy here: /workspace is agent-writable, and an
+# agent may not extend its own egress allowlist.
+PROJECT=/etc/devcontainer/project/allowlist.approved
 FILTER=/etc/tinyproxy/filter
 CONF=/etc/tinyproxy/tinyproxy.conf
 
@@ -73,7 +76,7 @@ tinyproxy_listening() {
 #     script is safe to re-run on a live container, e.g. `dev --enable-firewall`).
 #     If already running, SIGHUP it so the just-rewritten filter is picked up. ---
 if tinyproxy_listening; then
-    echo "firewall-init: tinyproxy already listening on 127.0.0.1:8888, reloading filter"
+    echo "firewall-init: tinyproxy already listening on 127.0.0.1:8888, reloading filter" >&2
     if [ -f /run/tinyproxy.pid ]; then
         kill -HUP "$(cat /run/tinyproxy.pid)"
     else
@@ -131,7 +134,7 @@ if [ -n "${DEVCONTAINER_HOST_PORTS:-}" ]; then
         fi
         iptables -A OUTPUT -p tcp -d "$HOST_GW" --dport "$port" -j ACCEPT
     done
-    echo "firewall-init: opened host gateway $HOST_GW for ports: $DEVCONTAINER_HOST_PORTS"
+    echo "firewall-init: opened host gateway $HOST_GW for ports: $DEVCONTAINER_HOST_PORTS" >&2
 fi
 
 # Log packets that fell through every ACCEPT above — i.e. exactly what the
@@ -140,4 +143,10 @@ fi
 iptables -A OUTPUT -m limit --limit 60/min --limit-burst 20 \
                   -j NFLOG --nflog-group 1 --nflog-prefix "FW-DROP"
 
-echo "firewall-init: ready ($(wc -l < "$FILTER") allowlist entries, proxy uid=$PROXY_UID)"
+# Clear the firewall-disabled banner if a previous toggle left one.
+rm -f /etc/profile.d/zz-fw-disabled-banner.sh
+
+# Diagnostics go to stderr: this script is invoked by entrypoint.sh purely
+# for its side effects, so stdout must stay clean for the payload command
+# in `dev -- <cmd>` (otherwise `x=$(dev -- some-cmd)` captures this line).
+echo "firewall-init: ready ($(wc -l < "$FILTER") allowlist entries, proxy uid=$PROXY_UID)" >&2

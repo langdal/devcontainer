@@ -23,11 +23,11 @@ remember_container "dev-${WS}"
 HOST_UID=$(id -u)
 
 # Build mismatched image directly.
-docker rm -f "dev-${WS}" >/dev/null 2>&1
+"$RUNTIME" rm -f "dev-${WS}" >/dev/null 2>&1
 build_image_with_uid_gid 4242 4242 || exit 1
 
 # Plant a marker in devcontainer-home that the rebuild path must wipe.
-docker volume create devcontainer-home >/dev/null
+"$RUNTIME" volume create devcontainer-home >/dev/null
 docker run --rm -v devcontainer-home:/h busybox \
     sh -c 'echo old > /h/marker' >/dev/null 2>&1
 

@@ -26,16 +26,22 @@ remember_container "dev-${WS}"
 HOST_UID=$(id -u)
 HOST_GID=$(id -g)
 
-# Read the version literal the dev script will use.
-SCRIPT_VERSION=$(./dev --version | awk '{print $2}')
+# Read the $VERSION literal the dev script bakes into image labels and
+# names in the version-mismatch prompt. NOT `dev --version`: that prefers
+# `git describe` (e.g. v1.3.0-41-gc88f3a7-dirty) which diverges from the
+# literal on any commit past the latest tag, whereas the mismatch prompt
+# and the dev.version label both use the stable literal (see
+# resolve_dev_version's note in dev). Asserting against the literal keeps
+# this scenario correct on a full git checkout, not just tag-less copies.
+SCRIPT_VERSION=$(sed -n 's/^VERSION="\([^"]*\)".*/\1/p' dev | head -1)
 if [ -z "$SCRIPT_VERSION" ]; then
-    log_fail "could not read dev --version"
+    log_fail "could not read \$VERSION literal from dev script"
     exit 1
 fi
 
 OLD_VERSION="0.0.0-stale"
 
-docker rm -f "dev-${WS}" >/dev/null 2>&1
+"$RUNTIME" rm -f "dev-${WS}" >/dev/null 2>&1
 
 # Bake a matching UID/GID image with an intentionally-stale dev.version
 # label. UID matches so the UID check passes and the version check is
@@ -76,7 +82,7 @@ fi
 
 # Stop the container started by path 1 so path 2 actually exercises the
 # build path, not the attach-to-running-container short-circuit.
-docker rm -f "dev-${WS}" >/dev/null 2>&1
+"$RUNTIME" rm -f "dev-${WS}" >/dev/null 2>&1
 
 # --- Path 2: DEV_ASSUME_YES rebuilds ---
 if ! DEV_ASSUME_YES=1 ./dev -- true >/dev/null 2>&1; then

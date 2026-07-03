@@ -19,7 +19,7 @@ if podman machine list --format '{{.Running}}' 2>/dev/null | grep -q '^true$'; t
     RESUME=1
 fi
 
-# shellcheck disable=SC2317  # invoked via trap
+# shellcheck disable=SC2317,SC2329  # invoked via trap
 cleanup() {
     if [ "$RESUME" -eq 1 ]; then
         podman machine start >/dev/null 2>&1

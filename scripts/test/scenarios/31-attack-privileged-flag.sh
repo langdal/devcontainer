@@ -14,7 +14,7 @@ cd "$(dirname "$0")/../../.." || exit 1
 WS=$(basename "$(pwd)")
 D="dev-${WS}-dind"
 remember_container "$D"
-docker rm -f "$D" 2>/dev/null
+"$RUNTIME" rm -f "$D" 2>/dev/null
 
 # Make sure alpine is cached so this test focuses on --privileged behaviour
 # rather than registry traffic.

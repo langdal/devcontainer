@@ -17,6 +17,13 @@
 . "$(dirname "${BASH_SOURCE[0]}")/privilege.sh"
 drop_privs_if_root "$@"
 
+# Resolve the host runtime once per scenario. restore.sh's cleanup and the
+# scenarios' own container/volume commands use $RUNTIME.
+# shellcheck source=scripts/test/lib/runtime.sh
+. "$(dirname "${BASH_SOURCE[0]}")/runtime.sh"
+RUNTIME="${RUNTIME:-$(host_runtime)}"
+export RUNTIME
+
 export SCENARIO_RESULT=""
 
 _scenario_name() {

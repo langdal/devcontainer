@@ -14,7 +14,7 @@ cd "$(dirname "$0")/../../.." || exit 1
 WS=$(basename "$(pwd)")
 D="dev-${WS}-dind"
 remember_container "$D"
-docker rm -f "$D" 2>/dev/null
+"$RUNTIME" rm -f "$D" 2>/dev/null
 
 # Inside --dind, sudo must NOT work (vscode is not in sudoers).
 out=$(./dev --dind -- bash -c 'sudo -n iptables -F 2>&1 || echo BLOCKED')

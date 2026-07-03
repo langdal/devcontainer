@@ -28,4 +28,16 @@ if ! { [ -f /run/tinyproxy.pid ] && kill -HUP "$(cat /run/tinyproxy.pid)" 2>/dev
     pkill -HUP -x tinyproxy 2>/dev/null || true
 fi
 
+# Visible signal for new shells: toggling the firewall does not change the
+# container name, so leave a banner (mirrors the maintenance-mode banner).
+cat > /etc/profile.d/zz-fw-disabled-banner.sh <<'EOF'
+echo
+echo "=========================================================="
+echo "  FIREWALL DISABLED - all outbound traffic is allowed."
+echo "  Re-enable with:  dev --enable-firewall"
+echo "=========================================================="
+echo
+EOF
+chmod 644 /etc/profile.d/zz-fw-disabled-banner.sh
+
 echo 'firewall disabled'

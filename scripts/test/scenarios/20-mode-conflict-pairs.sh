@@ -46,24 +46,24 @@ refuse_flag_due_to() {
 }
 
 # Pair 1: normal running -> --dind, --maintenance refused.
-docker rm -f "$N" "$M" "$D" 2>/dev/null
+"$RUNTIME" rm -f "$N" "$M" "$D" 2>/dev/null
 run_bg ./dev -- sleep 60
 refuse_flag_due_to --dind "$N" || exit 1
 refuse_flag_due_to --maintenance "$N" || exit 1
-docker stop "$N" 2>/dev/null; docker rm -f "$N" 2>/dev/null
+"$RUNTIME" stop "$N" 2>/dev/null; "$RUNTIME" rm -f "$N" 2>/dev/null
 
 # Pair 2: --maintenance running -> normal, --dind refused.
 run_bg ./dev --maintenance -- sleep 60
 refuse_normal_due_to "$M" || exit 1
 refuse_flag_due_to --dind "$M" || exit 1
-docker stop "$M" 2>/dev/null; docker rm -f "$M" 2>/dev/null
+"$RUNTIME" stop "$M" 2>/dev/null; "$RUNTIME" rm -f "$M" 2>/dev/null
 
 # Pair 3: --dind running -> normal, --maintenance refused.
 run_bg ./dev --dind -- sleep 60
 sleep 6   # dockerd-rootless takes longer to come up
 refuse_normal_due_to "$D" || exit 1
 refuse_flag_due_to --maintenance "$D" || exit 1
-docker stop "$D" 2>/dev/null; docker rm -f "$D" 2>/dev/null
+"$RUNTIME" stop "$D" 2>/dev/null; "$RUNTIME" rm -f "$D" 2>/dev/null
 
 log_pass "three-way conflict guard correct on all pairs"
 exit 0

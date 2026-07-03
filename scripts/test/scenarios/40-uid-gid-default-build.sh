@@ -23,9 +23,9 @@ HOST_UID=$(id -u)
 HOST_GID=$(id -g)
 
 # Wipe image + volumes so we exercise the cold-start build path.
-docker rm -f "dev-${WS}" >/dev/null 2>&1
-docker rmi -f generic-devcontainer >/dev/null 2>&1
-docker volume rm devcontainer-mise devcontainer-home >/dev/null 2>&1
+"$RUNTIME" rm -f "dev-${WS}" >/dev/null 2>&1
+"$RUNTIME" rmi -f generic-devcontainer >/dev/null 2>&1
+"$RUNTIME" volume rm devcontainer-mise devcontainer-home >/dev/null 2>&1
 
 if ! ./dev --build -- true >/dev/null 2>&1; then
     log_fail "dev --build failed"
@@ -41,8 +41,8 @@ if [ "$img_uid" != "$HOST_UID" ] || [ "$img_gid" != "$HOST_GID" ]; then
     exit 1
 fi
 
-# entrypoint.sh prints firewall-init's progress to stdout before exec'ing
-# the command; pluck out just the numeric `id` line.
+# Startup diagnostics go to stderr (kept off the payload stdout), but pluck
+# out just the numeric `id` line anyway so this stays robust regardless.
 in_uid=$(./dev -- id -u vscode 2>/dev/null | tr -d '\r' | grep -E '^[0-9]+$' | tail -1)
 in_gid=$(./dev -- id -g vscode 2>/dev/null | tr -d '\r' | grep -E '^[0-9]+$' | tail -1)
 if [ "$in_uid" != "$HOST_UID" ] || [ "$in_gid" != "$HOST_GID" ]; then

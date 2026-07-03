@@ -33,6 +33,10 @@ fi
 . "$(dirname "$0")/lib/privilege.sh"
 drop_privs_if_root "$@"
 
+# shellcheck source=scripts/test/lib/runtime.sh
+. "$(dirname "$0")/lib/runtime.sh"
+RT="$(host_runtime)"
+
 WORKSPACE="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$WORKSPACE" || exit 1
 
@@ -110,12 +114,12 @@ if ! ./dev --build -- true 2>&1 | tee -a "$LAST_LOG"; then
     echo "FATAL: failed to build base image" | tee -a "$LAST_LOG"
     exit 1
 fi
-docker rm -f "dev-$(basename "$WORKSPACE")" 2>/dev/null || true
+"$RT" rm -f "dev-$(basename "$WORKSPACE")" 2>/dev/null || true
 if ! ./dev --build --dind -- true 2>&1 | tee -a "$LAST_LOG"; then
     echo "FATAL: failed to build :dind image" | tee -a "$LAST_LOG"
     exit 1
 fi
-docker rm -f "dev-$(basename "$WORKSPACE")"-dind 2>/dev/null || true
+"$RT" rm -f "dev-$(basename "$WORKSPACE")"-dind 2>/dev/null || true
 
 # ---- Walk scenarios ----
 PASS=0; FAIL=0; SKIP=0

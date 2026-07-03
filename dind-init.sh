@@ -111,7 +111,9 @@ gosu vscode env \
 # 6. Wait up to 15s for the socket to appear.
 for _ in $(seq 1 30); do
     if [ -S "$SOCK" ]; then
-        echo "dind-init: dockerd-rootless socket ready at $SOCK"
+        # stderr, not stdout: keep `dev -- <cmd>` payload output clean
+        # (entrypoint.sh runs this for its side effects before exec'ing CMD).
+        echo "dind-init: dockerd-rootless socket ready at $SOCK" >&2
         exit 0
     fi
     sleep 0.5
