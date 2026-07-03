@@ -178,32 +178,40 @@ RUN apt-get update && \
         jq && \
     rm -rf /var/lib/apt/lists/*
 
-# Pinned rootless docker bundle. We fetch the published .sha256 sidecar
-# from download.docker.com and verify with sha256sum -c. Version pinning +
-# sha256 verification means the image is reproducible from a known good
-# tarball and survives the firewall (download.docker.com is allowlisted).
+# Pinned rootless docker bundle. download.docker.com publishes no .sha256
+# sidecars for the static bundles, so the expected digests are pinned here,
+# in-repo, next to the version they belong to. Recompute on a version bump
+# (per arch and bundle):
+#   curl -fsSL https://download.docker.com/linux/static/stable/<arch>/<bundle>-<version>.tgz | sha256sum
+# Version pinning + sha256 verification means the image is reproducible
+# from a known good tarball and survives the firewall (download.docker.com
+# is allowlisted).
 ARG DOCKER_VERSION=27.3.1
+ARG DOCKER_SHA256_X86_64=9b4f6fe406e50f9085ee474c451e2bb5adb119a03591f467922d3b4e2ddf31d3
+ARG DOCKER_SHA256_AARCH64=4da6a6c7502b7ab561675a5ff5ac192d9b49d76d0b8847cf17ade246122279f4
+ARG DOCKER_ROOTLESS_SHA256_X86_64=4e897d5838c1d9d89a7540f4558a3a0d1ef90cfc263c32b7346e8f58415ce4c3
+ARG DOCKER_ROOTLESS_SHA256_AARCH64=35a4c4d5e0bd3c3d2b4c83255cd91cc2882f35c1f5aa1dbd4d171427a3bfad66
 # 'cd /tmp' here is local to this RUN; WORKDIR would change the WORKDIR
 # globally for the image and the image's working directory is /workspace.
 # hadolint ignore=DL3003
 RUN set -eux; \
     arch="$(uname -m)"; \
     case "$arch" in \
-        x86_64|aarch64) ;; \
+        x86_64)  docker_sha="$DOCKER_SHA256_X86_64";  rootless_sha="$DOCKER_ROOTLESS_SHA256_X86_64" ;; \
+        aarch64) docker_sha="$DOCKER_SHA256_AARCH64"; rootless_sha="$DOCKER_ROOTLESS_SHA256_AARCH64" ;; \
         *) echo "unsupported arch: $arch" >&2; exit 1 ;; \
     esac; \
     cd /tmp; \
     for bundle in docker docker-rootless-extras; do \
+        case "$bundle" in \
+            docker) expected="$docker_sha" ;; \
+            *)      expected="$rootless_sha" ;; \
+        esac; \
         url="https://download.docker.com/linux/static/stable/${arch}/${bundle}-${DOCKER_VERSION}.tgz"; \
         curl -fsSLo "${bundle}.tgz" "${url}"; \
-        curl -fsSLo "${bundle}.tgz.sha256" "${url}.sha256" \
-            || (cd /tmp && sha256sum "${bundle}.tgz" > "${bundle}.tgz.sha256.computed" \
-                && echo "WARN: docker.com did not publish a .sha256 sidecar for ${bundle}; computed locally:" \
-                && cat "${bundle}.tgz.sha256.computed" \
-                && cp "${bundle}.tgz.sha256.computed" "${bundle}.tgz.sha256"); \
-        sha256sum -c "${bundle}.tgz.sha256"; \
+        echo "${expected}  ${bundle}.tgz" | sha256sum -c -; \
         tar -xzf "${bundle}.tgz" -C /usr/local/bin --strip-components=1; \
-        rm -f "${bundle}.tgz" "${bundle}.tgz.sha256"; \
+        rm -f "${bundle}.tgz"; \
     done
 
 # docker compose v2 CLI plugin. Installed under the system-wide plugin

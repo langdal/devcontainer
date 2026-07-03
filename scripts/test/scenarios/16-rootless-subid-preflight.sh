@@ -49,7 +49,7 @@ if [ "$total" -ge 165535 ]; then
     exit 0
 fi
 
-docker rm -f "dev-$(basename "$(pwd)")"-dind 2>/dev/null
+"$RUNTIME" rm -f "dev-$(basename "$(pwd)")"-dind 2>/dev/null
 
 # Insufficient grant: dev should refuse fast (well under 30s), emitting
 # the remediation message on stderr.
@@ -58,13 +58,13 @@ rc=$?
 
 if [ "$rc" = 0 ]; then
     log_fail "expected --dind to refuse with a $total-id subuid grant but it succeeded"
-    docker rm -f "dev-$(basename "$(pwd)")"-dind 2>/dev/null
+    "$RUNTIME" rm -f "dev-$(basename "$(pwd)")"-dind 2>/dev/null
     exit 1
 fi
 
 if ! expect_grep "$out" "usermod --add-subuids"; then
     log_fail "expected remediation mentioning usermod --add-subuids; got: $out"
-    docker rm -f "dev-$(basename "$(pwd)")"-dind 2>/dev/null
+    "$RUNTIME" rm -f "dev-$(basename "$(pwd)")"-dind 2>/dev/null
     exit 1
 fi
 
@@ -74,10 +74,10 @@ fi
 out=$(timeout 60 env DEV_SKIP_SUBID_CHECK=1 ./dev --dind -- docker version 2>&1)
 if expect_grep "$out" "DEV_SKIP_SUBID_CHECK=1 to bypass"; then
     log_fail "DEV_SKIP_SUBID_CHECK=1 did not bypass the preflight"
-    docker rm -f "dev-$(basename "$(pwd)")"-dind 2>/dev/null
+    "$RUNTIME" rm -f "dev-$(basename "$(pwd)")"-dind 2>/dev/null
     exit 1
 fi
 
-docker rm -f "dev-$(basename "$(pwd)")"-dind 2>/dev/null
+"$RUNTIME" rm -f "dev-$(basename "$(pwd)")"-dind 2>/dev/null
 log_pass "insufficient subuid grant ($total) produces a clean preflight refusal"
 exit 0

@@ -17,12 +17,12 @@ if [ "$(getenforce)" != "Enforcing" ]; then
 fi
 
 cd "$(dirname "$0")/../../.." || exit 1
-docker rm -f "dev-$(basename "$(pwd)")"-dind 2>/dev/null
+"$RUNTIME" rm -f "dev-$(basename "$(pwd)")"-dind 2>/dev/null
 
 if ! ./dev --dind -- docker version >/dev/null 2>&1; then
     log_fail "SELinux enforcing host: --dind failed (may need --security-opt label=disable)"
     exit 1
 fi
-docker rm -f "dev-$(basename "$(pwd)")"-dind 2>/dev/null
+"$RUNTIME" rm -f "dev-$(basename "$(pwd)")"-dind 2>/dev/null
 log_pass "SELinux enforcing host works"
 exit 0

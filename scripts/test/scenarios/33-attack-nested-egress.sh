@@ -14,7 +14,7 @@ cd "$(dirname "$0")/../../.." || exit 1
 WS=$(basename "$(pwd)")
 D="dev-${WS}-dind"
 remember_container "$D"
-docker rm -f "$D" 2>/dev/null
+"$RUNTIME" rm -f "$D" 2>/dev/null
 
 ./dev --dind -- docker pull alpine:3.20 >/dev/null 2>&1 || true
 

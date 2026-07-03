@@ -52,7 +52,7 @@ docker build -t generic-devcontainer .
 Useful environment variables for `./dev`:
 
 - `DEV_RUNTIME=docker|podman` — force a runtime when both are installed (default: docker preferred on Linux; podman only on macOS).
-- `DEV_ASSUME_YES=1` — accept the rebuild prompts non-interactively. Covers the UID/GID mismatch prompt (which also wipes named volumes) and the dev-script version mismatch prompt (image rebuild only, volumes untouched).
+- `DEV_ASSUME_YES=1` — accept the rebuild prompts non-interactively. Covers the UID/GID mismatch prompt (which also wipes named volumes) and the dev-script version mismatch prompt (image rebuild only, volumes untouched). Also auto-approves `.devcontainer-allowlist` changes without the interactive diff/prompt, so setting it globally waives that review.
 - `DEV_SKIP_APPARMOR_CHECK=1` — bypass the `--dind` AppArmor preflight (only safe with a custom profile that grants `userns,`).
 - `DEV_SKIP_SUBID_CHECK=1` — bypass the `--dind` preflight that requires a rootless-runtime host to grant ≥165535 subuids/subgids (rootless dockerd must map the image's `vscode:100000:65536` range inside the container's user namespace; the typical 65536-id grant is too small).
 - `DEV_EXTRA_RUN_ARGS=...` — extra args passed to `docker run` (the test orchestrator uses this to inject `--dns=...` when in-container DNS is broken).

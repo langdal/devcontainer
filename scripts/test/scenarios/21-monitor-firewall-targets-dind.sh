@@ -27,12 +27,12 @@ run_bg() {
     sleep 4
 }
 
-docker rm -f "$N" "$M" "$D" 2>/dev/null
+"$RUNTIME" rm -f "$N" "$M" "$D" 2>/dev/null
 
 # 0. Regression: with the normal container running, --disable-firewall
 #    and --enable-firewall must continue to work as before.
 run_bg ./dev -- sleep 60
-if ! docker ps -q -f name="^${N}$" | grep -q .; then
+if ! "$RUNTIME" ps -q -f name="^${N}$" | grep -q .; then
     log_fail "precondition: normal container ${N} did not start"
     exit 1
 fi
@@ -48,14 +48,14 @@ if ! out=$(./dev --enable-firewall 2>&1); then
 fi
 expect_grep "$out" "firewall-init: ready" \
     || { log_fail "--enable-firewall on normal did not invoke firewall-init.sh: $out"; exit 1; }
-docker stop "$N" 2>/dev/null; docker rm -f "$N" 2>/dev/null
+"$RUNTIME" stop "$N" 2>/dev/null; "$RUNTIME" rm -f "$N" 2>/dev/null
 
 # 1. With only the dind container running, --enable-firewall and
 #    --disable-firewall must operate on it instead of erroring
 #    "container <normal-name> is not running".
 run_bg ./dev --dind -- sleep 60
 sleep 6   # dockerd-rootless takes longer to come up
-if ! docker ps -q -f name="^${D}$" | grep -q .; then
+if ! "$RUNTIME" ps -q -f name="^${D}$" | grep -q .; then
     log_fail "precondition: dind container ${D} did not start"
     exit 1
 fi
@@ -84,12 +84,12 @@ if expect_grep "$out" "container ${N} is not running"; then
     exit 1
 fi
 
-docker stop "$D" 2>/dev/null; docker rm -f "$D" 2>/dev/null
+"$RUNTIME" stop "$D" 2>/dev/null; "$RUNTIME" rm -f "$D" 2>/dev/null
 
 # 2. With only the maintenance container running, all four management
 #    commands must refuse with a clear maintenance-mode message.
 run_bg ./dev --maintenance -- sleep 60
-if ! docker ps -q -f name="^${M}$" | grep -q .; then
+if ! "$RUNTIME" ps -q -f name="^${M}$" | grep -q .; then
     log_fail "precondition: maintenance container ${M} did not start"
     exit 1
 fi
@@ -101,7 +101,7 @@ for flag in --monitor --monitor-fw --disable-firewall --enable-firewall; do
     expect_grep "$out" "maintenance" \
         || { log_fail "$flag should mention maintenance mode; got: $out"; exit 1; }
 done
-docker stop "$M" 2>/dev/null; docker rm -f "$M" 2>/dev/null
+"$RUNTIME" stop "$M" 2>/dev/null; "$RUNTIME" rm -f "$M" 2>/dev/null
 
 # 3. With no workspace container running, the read-only/restore management
 #    commands must error with a clear "not running" / "no container" message.
@@ -120,7 +120,7 @@ done
 #    start-then-toggle), not error. Confirm via the OUTPUT chain policy:
 #    ACCEPT when disabled vs the default-deny DROP.
 run_bg ./dev --disable-firewall -- sleep 60
-if ! docker ps -q -f name="^${N}$" | grep -q .; then
+if ! "$RUNTIME" ps -q -f name="^${N}$" | grep -q .; then
     log_fail "--disable-firewall with no container running did not start ${N}"
     exit 1
 fi
@@ -135,7 +135,7 @@ if ! out=$(./dev --enable-firewall 2>&1); then
 fi
 expect_grep "$out" "firewall-init: ready" \
     || { log_fail "--enable-firewall did not invoke firewall-init.sh: $out"; exit 1; }
-docker stop "$N" 2>/dev/null; docker rm -f "$N" 2>/dev/null
+"$RUNTIME" stop "$N" 2>/dev/null; "$RUNTIME" rm -f "$N" 2>/dev/null
 
 log_pass "monitor + firewall management commands target running normal-or-dind container"
 exit 0

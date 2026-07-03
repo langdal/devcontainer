@@ -23,7 +23,7 @@ remember_container "dev-${WS}"
 HOST_UID=$(id -u)
 
 # Bypass dev to bake labels of 4242:4242 directly.
-docker rm -f "dev-${WS}" >/dev/null 2>&1
+"$RUNTIME" rm -f "dev-${WS}" >/dev/null 2>&1
 build_image_with_uid_gid 4242 4242 || exit 1
 
 # Closed stdin → non-interactive. dev should exit non-zero.

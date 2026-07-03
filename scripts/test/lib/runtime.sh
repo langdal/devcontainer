@@ -98,3 +98,19 @@ build_image_with_uid_gid() {
         --build-arg "USER_UID=${uid}" --build-arg "USER_GID=${gid}" \
         -t "$tag"
 }
+
+# Host-side runtime for cleanup/probing, mirroring dev's preference order
+# (DEV_RUNTIME override, then docker, then podman). Scenarios and the
+# orchestrator use this instead of hardcoding docker so podman-only hosts
+# clean up correctly.
+host_runtime() {
+    if [ -n "${DEV_RUNTIME:-}" ] && command -v "$DEV_RUNTIME" >/dev/null 2>&1; then
+        echo "$DEV_RUNTIME"
+        return
+    fi
+    if command -v docker >/dev/null 2>&1 && docker --version >/dev/null 2>&1; then
+        echo docker
+        return
+    fi
+    echo podman
+}

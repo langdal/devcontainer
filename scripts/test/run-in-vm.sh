@@ -308,7 +308,7 @@ main() {
     SSH_PORT=$(pick_free_port)
     ACCEL=$(detect_accel)
 
-    # shellcheck disable=SC2317  # invoked via trap
+    # shellcheck disable=SC2317,SC2329  # invoked via trap
     cleanup() {
         local rc=$?
         if [ -f "$RUN_DIR/vm.pid" ]; then

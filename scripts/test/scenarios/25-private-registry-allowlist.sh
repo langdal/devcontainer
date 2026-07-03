@@ -14,7 +14,7 @@ cd "$(dirname "$0")/../../.." || exit 1
 WS=$(basename "$(pwd)")
 D="dev-${WS}-dind"
 remember_container "$D"
-docker rm -f "$D" 2>/dev/null
+"$RUNTIME" rm -f "$D" 2>/dev/null
 
 # Add a fake "private registry" hostname to .devcontainer-allowlist for
 # the duration of this scenario. We are NOT going to actually pull from
@@ -29,18 +29,19 @@ if [ -f "$ALLOWLIST" ]; then
 fi
 echo "$SENTINEL" >> "$ALLOWLIST"
 
-# shellcheck disable=SC2317  # invoked via trap
+# shellcheck disable=SC2317,SC2329  # invoked via trap
 cleanup_extra() {
     if [ -f "$ALLOWLIST.bak" ]; then
         mv "$ALLOWLIST.bak" "$ALLOWLIST"
     else
         rm -f "$ALLOWLIST"
     fi
+    rm -f "${XDG_STATE_HOME:-$HOME/.local/state}/devcontainer/${WS}"-*/allowlist.approved
 }
 # Add to the existing trap.
 trap 'cleanup_extra; restore_host' EXIT
 
-filter=$(./dev --dind -- cat /etc/tinyproxy/filter 2>&1) \
+filter=$(DEV_ASSUME_YES=1 ./dev --dind -- cat /etc/tinyproxy/filter 2>&1) \
     || { log_fail "could not read /etc/tinyproxy/filter inside container"; exit 1; }
 
 escaped="${SENTINEL//./\\\\.}"

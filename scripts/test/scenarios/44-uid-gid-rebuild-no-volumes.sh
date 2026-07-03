@@ -22,11 +22,11 @@ remember_container "dev-${WS}"
 
 HOST_UID=$(id -u)
 
-docker rm -f "dev-${WS}" >/dev/null 2>&1
+"$RUNTIME" rm -f "dev-${WS}" >/dev/null 2>&1
 build_image_with_uid_gid 4242 4242 || exit 1
 
 # Make sure the named volumes really do not exist.
-docker volume rm devcontainer-mise devcontainer-home >/dev/null 2>&1 || true
+"$RUNTIME" volume rm devcontainer-mise devcontainer-home >/dev/null 2>&1 || true
 
 if ! DEV_ASSUME_YES=1 ./dev -- true >/dev/null 2>&1; then
     log_fail "dev failed when no volumes existed before rebuild"
@@ -43,7 +43,7 @@ if [ "$img_uid" != "$HOST_UID" ]; then
 fi
 
 # `dev` re-creates the volumes on container start.
-if ! docker volume inspect devcontainer-home >/dev/null 2>&1; then
+if ! "$RUNTIME" volume inspect devcontainer-home >/dev/null 2>&1; then
     log_fail "devcontainer-home was not re-created on container start"
     ./dev --build -- true >/dev/null 2>&1 || true
     exit 1

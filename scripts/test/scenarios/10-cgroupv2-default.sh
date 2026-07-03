@@ -17,12 +17,12 @@ if ! grep -q 'cgroup2' /proc/mounts; then
 fi
 
 cd "$(dirname "$0")/../../.." || exit 1
-docker rm -f "dev-$(basename "$(pwd)")"-dind 2>/dev/null
+"$RUNTIME" rm -f "dev-$(basename "$(pwd)")"-dind 2>/dev/null
 
 if ! ./dev --dind -- docker version >/dev/null 2>&1; then
     log_fail "dev --dind on cgroup v2 failed; check dockerd-rootless.log"
     exit 1
 fi
-docker rm -f "dev-$(basename "$(pwd)")"-dind 2>/dev/null
+"$RUNTIME" rm -f "dev-$(basename "$(pwd)")"-dind 2>/dev/null
 log_pass "cgroup v2 + rootless dockerd works"
 exit 0

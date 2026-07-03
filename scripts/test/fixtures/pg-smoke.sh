@@ -9,6 +9,7 @@ set -u
 NAME="pg-smoke-$$"
 PORT_BIND="127.0.0.1:0:5432"
 
+# shellcheck disable=SC2329  # invoked via trap
 cleanup() {
     # shellcheck disable=SC2317  # invoked via trap
     docker rm -f "$NAME" >/dev/null 2>&1 || true

@@ -20,7 +20,7 @@ trap restore_host EXIT
 sudo chmod 000 /dev/fuse
 
 cd "$(dirname "$0")/../../.." || exit 1
-docker rm -f "dev-$(basename "$(pwd)")"-dind 2>/dev/null
+"$RUNTIME" rm -f "dev-$(basename "$(pwd)")"-dind 2>/dev/null
 
 # Two acceptable outcomes when /dev/fuse is unreadable:
 #  (a) dind-init.sh fails closed with a clean diagnostic — what the
@@ -34,7 +34,7 @@ docker rm -f "dev-$(basename "$(pwd)")"-dind 2>/dev/null
 # happen.
 out=$(timeout 30 ./dev --dind -- docker info -f '{{.Driver}}' 2>&1)
 rc=$?
-docker rm -f "dev-$(basename "$(pwd)")"-dind 2>/dev/null
+"$RUNTIME" rm -f "dev-$(basename "$(pwd)")"-dind 2>/dev/null
 
 if [ "$rc" -ne 0 ]; then
     log_pass "/dev/fuse inaccessible: dind-init fail-closed (clean diagnostic)"

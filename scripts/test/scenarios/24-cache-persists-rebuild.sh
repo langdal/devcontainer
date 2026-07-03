@@ -14,15 +14,15 @@ cd "$(dirname "$0")/../../.." || exit 1
 WS=$(basename "$(pwd)")
 D="dev-${WS}-dind"
 remember_container "$D"
-docker rm -f "$D" 2>/dev/null
+"$RUNTIME" rm -f "$D" 2>/dev/null
 
 # Step A: pull alpine.
 ./dev --dind -- docker pull alpine:3.20 >/dev/null || { log_fail "initial pull failed"; exit 1; }
-docker rm -f "$D" 2>/dev/null
+"$RUNTIME" rm -f "$D" 2>/dev/null
 
 # Step B: rebuild the :dind image (--build).
 ./dev --dind --build -- docker version >/dev/null || { log_fail "rebuild start failed"; exit 1; }
-docker rm -f "$D" 2>/dev/null
+"$RUNTIME" rm -f "$D" 2>/dev/null
 
 # Step C: confirm alpine still cached.
 out=$(./dev --dind -- docker images alpine --format '{{.Repository}}:{{.Tag}}' 2>&1)
