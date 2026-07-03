@@ -830,10 +830,15 @@ fi
 DIND_MIN_SUBIDS=165535 # ids beyond id 0; namespace size = subids + 1
 runtime_is_rootless() {
   # docker may be the podman-docker shim, so classify by --version, not name.
-  if "$RUNTIME" --version 2>/dev/null | grep -qi podman; then
-    [[ "$("$RUNTIME" info --format '{{.Host.Security.Rootless}}' 2>/dev/null)" == "true" ]]
+  # Routed through $RUNTIME_ARGS so the macOS+dind rootful-connection override
+  # (DIND_RUNTIME_ARGS) is honored once it's assigned; empty everywhere else.
+  # shellcheck disable=SC2086  # intentional word-splitting, same as call sites below
+  if $RUNTIME $RUNTIME_ARGS --version 2>/dev/null | grep -qi podman; then
+    # shellcheck disable=SC2086
+    [[ "$($RUNTIME $RUNTIME_ARGS info --format '{{.Host.Security.Rootless}}' 2>/dev/null)" == "true" ]]
   else
-    "$RUNTIME" info --format '{{.SecurityOptions}}' 2>/dev/null | grep -q rootless
+    # shellcheck disable=SC2086
+    $RUNTIME $RUNTIME_ARGS info --format '{{.SecurityOptions}}' 2>/dev/null | grep -q rootless
   fi
 }
 subid_total() {
@@ -1312,9 +1317,49 @@ DOCKER_CMD=($RUNTIME $RUNTIME_ARGS run "${TTY_FLAGS[@]}" --rm --name "$CONTAINER
 # harmless when unused in maintenance mode).
 DOCKER_CMD+=(--cap-add=NET_ADMIN)
 
+# Rootless podman's default user-namespace mapping puts container root (uid 0)
+# at the invoking host user and shifts every other container id — including
+# vscode's baked uid/gid — into the subuid/subgid range. That breaks the
+# "vscode's baked uid == host uid" assumption from the UID/GID build args
+# above: the bind-mounted /workspace (owned by the real host user) shows up
+# as root-owned to vscode, who can't write to it, and named-volume content
+# written by vscode ends up owned by a subuid instead of the host user.
+# --userns=keep-id fixes this by mapping the invoking host user 1:1 onto the
+# matching container id instead, so vscode's baked uid lines up with the real
+# host uid again. Rootful podman and Docker don't remap ids at all, so the
+# baked uid already matches there — this only applies to rootless podman.
+KEEPID_MIGRATE=false
+if $RUNTIME $RUNTIME_ARGS --version 2>/dev/null | grep -qi podman && runtime_is_rootless; then
+  DOCKER_CMD+=(--userns=keep-id)
+  KEEPID_MIGRATE=true
+fi
+
 DOCKER_CMD+=(-v "$(pwd):/workspace")
 DOCKER_CMD+=(-v devcontainer-mise:/mise)
 DOCKER_CMD+=(-v devcontainer-home:/home/vscode)
+
+# Named volumes populated before --userns=keep-id was added are owned
+# on-disk by the old mapping's subuid, not the host user, so vscode (now
+# mapped 1:1 to the host user) can no longer write into them. Re-chown once;
+# checking the volume's raw owner against $HOST_UID makes this a no-op on
+# every run after the first. `podman unshare` runs the chown inside the
+# same default (non-keep-id) mapping the volume was written under, where
+# container id 0 is the invoking host user — chowning to 0:0 there writes
+# the real host UID/GID onto the raw files.
+migrate_volume_for_keepid() {
+  local vol="$1" mountpoint raw_owner
+  mountpoint=$($RUNTIME $RUNTIME_ARGS volume inspect "$vol" --format '{{.Mountpoint}}' 2>/dev/null) || return 0
+  [[ -d "$mountpoint" ]] || return 0
+  raw_owner=$(stat -c '%u' "$mountpoint" 2>/dev/null) || return 0
+  [[ "$raw_owner" == "$HOST_UID" ]] && return 0
+  echo "Migrating $vol ownership for --userns=keep-id (one-time)..." >&2
+  $RUNTIME $RUNTIME_ARGS unshare chown -R 0:0 "$mountpoint"
+}
+if [[ "$KEEPID_MIGRATE" == true && "$DRY_RUN" == false ]]; then
+  migrate_volume_for_keepid devcontainer-mise
+  migrate_volume_for_keepid devcontainer-home
+  [[ "$DIND" == true ]] && migrate_volume_for_keepid devcontainer-dind
+fi
 
 # DinD-specific runtime knobs.
 # SYS_ADMIN is required for rootless dockerd's newuidmap to set up

@@ -194,6 +194,8 @@ docker volume rm devcontainer-mise devcontainer-home
 
 The script reads `id -u` / `id -g` and bakes them into the image. If your host UID/GID later changes, the next `dev` invocation detects the mismatch and prompts to rebuild + wipe volumes.
 
+- **On rootless podman, `dev` runs the container with `--userns=keep-id`.** Rootless podman's default user-namespace mapping puts container root at the invoking host user and shifts every other container id — including the baked `vscode` uid — into the subuid/subgid range, so the baked-uid-matches-host-uid assumption above doesn't hold by default: the bind-mounted workspace shows up root-owned to `vscode`, who can't write to it. `--userns=keep-id` maps the invoking host user 1:1 onto the matching container id instead, fixing that. It only applies when the runtime is actually rootless podman (including the `podman-docker` shim) — Docker and rootful podman don't remap ids and don't need it. The first run after upgrading re-chowns the named volumes (`devcontainer-mise`, `devcontainer-home`, `devcontainer-dind`), since their content was written under the old mapping; you'll see one `Migrating <volume> ownership for --userns=keep-id (one-time)...` line per volume, and nothing on subsequent runs.
+
 ## `dev` Flags
 
 ```
