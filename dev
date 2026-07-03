@@ -39,149 +39,26 @@ resolve_script_dir() {
 }
 SCRIPT_DIR="$(resolve_script_dir)"
 
-# Pick host runtime once at startup. Linux: prefer docker, fall back to
-# podman. macOS: podman only — Docker Desktop is explicitly unsupported.
-# Override with DEV_RUNTIME=docker | DEV_RUNTIME=podman.
-detect_runtime() {
-  if [[ -n "${DEV_RUNTIME:-}" ]]; then
-    if ! command -v "$DEV_RUNTIME" >/dev/null 2>&1; then
-      echo "Error: DEV_RUNTIME=$DEV_RUNTIME but '$DEV_RUNTIME' not found on PATH." >&2
-      exit 1
-    fi
-    RUNTIME="$DEV_RUNTIME"
-    return
-  fi
-  # Probe: a binary is "really" a runtime only if it both resolves and
-  # answers --version. A bare `command -v` would be fooled by a stub
-  # (test scenarios that mask a runtime via PATH overlay; broken
-  # symlinks left on a stale PATH; etc.).
-  _runtime_works() {
-    command -v "$1" >/dev/null 2>&1 && "$1" --version >/dev/null 2>&1
-  }
-  case "$(uname -s)" in
-    Darwin)
-      if _runtime_works podman; then
-        RUNTIME=podman
-        return
-      fi
-      echo "Error: On macOS, podman is required (Docker Desktop is not supported)." >&2
-      echo "       Install with:  brew install podman && podman machine init && podman machine start" >&2
-      exit 1
-      ;;
-    Linux)
-      if _runtime_works docker; then
-        RUNTIME=docker
-        return
-      fi
-      if _runtime_works podman; then
-        RUNTIME=podman
-        return
-      fi
-      echo "Error: Neither docker nor podman found on PATH." >&2
-      exit 1
-      ;;
-    *)
-      echo "Error: Unsupported platform: $(uname -s)" >&2
-      exit 1
-      ;;
-  esac
-}
+# Source the dev modules. Split out of this file for readability; they are
+# plain function-definition files (no side effects at source time). They live
+# next to this script and are found via the symlink-resolved SCRIPT_DIR, so a
+# `dev install` symlink on PATH still locates them.
+for _mod in "$SCRIPT_DIR"/lib/dev/*.sh; do
+  # The glob is literal if the dir is empty/missing; guard so we never source '*.sh'.
+  [[ -e "$_mod" ]] || continue
+  # shellcheck source=/dev/null
+  . "$_mod"
+done
+unset _mod
 
-# On macOS with podman, the VM must be running.
-ensure_runtime_ready() {
-  if [[ "$(uname -s)" == "Darwin" && "$RUNTIME" == "podman" ]]; then
-    if ! podman machine list --format '{{.Running}}' 2>/dev/null | grep -q '^true$'; then
-      echo "Error: podman machine is not running." >&2
-      echo "       Start it with:  podman machine start" >&2
-      exit 1
-    fi
-  fi
-}
-
-# Build a runtime-appropriate 'build' command. Docker uses buildx; podman
-# uses its built-in build. Args after the network/tag are passed through.
-runtime_build() {
-  local tag="$1"; shift
-  local target="$1"; shift   # may be empty string; only docker/podman with --target use it
-  local context="$1"; shift
-  local extra=()
-  if [[ -n "$target" ]]; then
-    extra+=(--target "$target")
-  fi
-  extra+=(--build-arg "USER_UID=$HOST_UID" --build-arg "USER_GID=$HOST_GID")
-  extra+=(--build-arg "DEV_VERSION=$VERSION")
-  # Pass GITHUB_TOKEN as a BuildKit secret so `mise install` can hit the
-  # GitHub API authenticated. Secrets are not persisted in image layers.
-  # Both docker buildx and podman build accept --secret id=...,env=...
-  if [[ -n ${GITHUB_TOKEN:-} ]]; then
-    extra+=(--secret "id=github_token,env=GITHUB_TOKEN")
-  fi
-  if [[ "$RUNTIME" == "docker" ]]; then
-    # buildx is mandatory for docker: this image's Dockerfile uses BuildKit
-    # features (RUN --mount=type=secret, --secret) that the legacy builder
-    # cannot parse, and modern docker (>=23.0) has no built-in BuildKit
-    # without the plugin. Without buildx, `docker buildx build` is parsed as
-    # a top-level `docker` invocation and fails with an opaque
-    # "unknown flag: --network"; check up front and explain the real fix.
-    if ! docker buildx version >/dev/null 2>&1; then
-      echo "Error: 'docker buildx' is required to build the dev image, but it is not installed." >&2
-      echo "       The Dockerfile uses BuildKit features (RUN --mount=type=secret) that the" >&2
-      echo "       legacy builder cannot handle, so buildx is mandatory." >&2
-      echo "       Install it:" >&2
-      echo "         - Debian/Ubuntu:  sudo apt-get install docker-buildx-plugin" >&2
-      echo "         - other:          https://docs.docker.com/go/buildx/" >&2
-      echo "       Or, if podman is available, force it with:  DEV_RUNTIME=podman ./dev" >&2
-      exit 1
-    fi
-    docker buildx build --network=host "${extra[@]}" -t "$tag" "$context"
-  else
-    podman $RUNTIME_ARGS build --network=host "${extra[@]}" -t "$tag" "$context"
-  fi
-}
-
-# Container state predicates. Default to the current connection
-# (RUNTIME_ARGS); pass an explicit connection in $2 to probe a different
-# storage (e.g. DIND_RUNTIME_ARGS to look across the rootful connection on
-# macOS+podman).
-container_running() {
-  # shellcheck disable=SC2086  # intentional word-splitting of RUNTIME_ARGS
-  $RUNTIME ${2-$RUNTIME_ARGS} ps -q -f name="^$1\$" | grep -q .
-}
-container_exists() {
-  # shellcheck disable=SC2086  # intentional word-splitting of RUNTIME_ARGS
-  $RUNTIME ${2-$RUNTIME_ARGS} ps -aq -f name="^$1\$" | grep -q .
-}
-
-# Destructive helpers shared by the rebuild path and --reset. Both take an
-# explicit connection-args string ($2) rather than defaulting — callers
-# operating across storages (macOS+podman dind lives in the rootful
-# connection while normal/maint live in the default rootless one) need to
-# pass the right args per item, so an implicit global default would hide bugs.
-remove_container_if_exists() {
-  local name="$1" args="$2"
-  if ! container_exists "$name" "$args"; then
-    return 0
-  fi
-  echo "Removing container ${name}…" >&2
-  # shellcheck disable=SC2086  # intentional word-splitting of $args
-  if ! $RUNTIME $args rm -f "$name" >/dev/null 2>&1; then
-    echo "Error: failed to remove container ${name}." >&2
-    exit 1
-  fi
-}
-remove_volume_if_exists() {
-  local name="$1" args="$2"
-  # shellcheck disable=SC2086  # intentional word-splitting of $args
-  if ! $RUNTIME $args volume inspect "$name" >/dev/null 2>&1; then
-    return 0
-  fi
-  echo "Removing volume ${name}…" >&2
-  # shellcheck disable=SC2086  # intentional word-splitting of $args
-  if ! $RUNTIME $args volume rm "$name" >/dev/null 2>&1; then
-    echo "Error: failed to remove volume ${name}." >&2
-    exit 1
-  fi
-}
+# The modules above define the bulk of dev's logic. If lib/dev/ is missing
+# (e.g. someone copied only the dev script), fail early with a clear message
+# rather than a cryptic "command not found" mid-run.
+if ! declare -F start_container >/dev/null 2>&1; then
+  echo "Error: dev's lib/dev/ modules were not found next to the script (looked in $SCRIPT_DIR/lib/dev/)." >&2
+  echo "       dev requires a full checkout, not just the dev file. See install.sh / the README." >&2
+  exit 1
+fi
 
 # --- Per-workspace host-side state -----------------------------------------
 # Holds the approved copy of the project allowlist and the GITHUB_TOKEN
@@ -258,6 +135,7 @@ approve_project_allowlist() {
   case "$reply" in
     y|Y|yes|YES)
       cp "$src" "$snap"
+      # shellcheck disable=SC2034  # consumed by start_container in lib/dev/lifecycle.sh
       MOUNT_PROJECT_ALLOWLIST=true
       ;;
     *)
@@ -326,32 +204,37 @@ FORCE_BUILD=false
 DEFAULT_PORTS=false
 MAINTENANCE=false
 DIND=false
-MONITOR=false
-MONITOR_FW=false
-DISABLE_FW=false
-ENABLE_FW=false
-CREATE_DC=false
 FORCE=false
-SELF_UPDATE=false
-RESET=false
 EXTRA_PORTS=()
 HOST_PORTS=()
 CMD_ARGS=()
+
+# Set true by fw_disable (lib/dev/fw.sh) when `dev fw disable`/the deprecated
+# `--disable-firewall` alias finds no running container and falls through to
+# the start path: a fresh container should come up with the firewall already
+# torn down (DEVCONTAINER_FW_DISABLED=1 in start_container).
+# shellcheck disable=SC2034  # consumed by fw_disable (lib/dev/fw.sh) and start_container (lib/dev/lifecycle.sh)
+FW_DISABLED_START=false
 
 # Populated by check_image_uid_match's single `image inspect` call so that
 # check_image_version_match doesn't need to re-inspect, and the build path
 # below can skip a separate `images -q` probe.
 IMAGE_EXISTS=false
+# shellcheck disable=SC2034  # set/read by check_image_uid_match/check_image_version_match in lib/dev/image.sh
 IMAGE_VERSION=""
 
 usage() {
   cat <<EOF
-Usage: dev [OPTIONS] [-- COMMAND...]
+Usage: dev [OPTIONS] [-- COMMAND...]      # start/attach (default)
+       dev fw {disable|enable|log|drops}
+       dev reset
+       dev scaffold [--dind] [--force]
+       dev update [--dry-run]
        dev install
 
 Run or attach to the generic devcontainer.
 
-OPTIONS:
+START OPTIONS (default command):
   --help          Show this help message
   --version       Print the dev script version and exit
   --dry-run       Print docker command without executing
@@ -374,51 +257,61 @@ OPTIONS:
                   name with -dind, mounts /dev/fuse, and uses a
                   dedicated image cache volume. Mutually exclusive
                   with --maintenance.
-  --monitor       Tail the firewall proxy log of the running workspace
-                  container (/var/log/tinyproxy.log). Targets the normal
-                  *or* dind container, whichever is running. Does not
-                  start a container.
-  --monitor-fw    Stream packets dropped by iptables in the running workspace
-                  container (tcpdump on NFLOG group 1). Targets normal or
-                  dind. Does not start a container.
-  --disable-firewall
-                  Bring the workspace up with the firewall open. If a
+  --force         Accepted here for parser-surface parity; only 'dev
+                  scaffold --force' actually consumes it. A bare
+                  'dev --force' is a harmless no-op.
+  --              Pass remaining arguments as command to container
+
+SUBCOMMANDS:
+  fw disable      Bring the workspace up with the firewall open. If a
                   container (normal or dind) is already running, toggle it
                   in place: flush OUTPUT rules + ACCEPT policy, and switch
                   tinyproxy to an allow-all filter (SIGHUP reload); existing
                   shells keep working whether or not HTTPS_PROXY is set. If
                   none is running, start a *fresh* container with the
                   firewall already disabled (same end state). Re-enable
-                  later with --enable-firewall.
-  --enable-firewall
-                  Re-run firewall-init.sh on the running workspace container
+                  later with 'dev fw enable'.
+  fw enable       Re-run firewall-init.sh on the running workspace container
                   (normal or dind) to rebuild the allowlist filter and
                   restore the default-deny iptables policy.
-  --create-dev-container
-                  Generate a self-contained .devcontainer/ in the
+  fw log          Tail the firewall proxy log of the running workspace
+                  container (/var/log/tinyproxy.log). Targets the normal
+                  *or* dind container, whichever is running. Does not
+                  start a container.
+  fw drops        Stream packets dropped by iptables in the running workspace
+                  container (tcpdump on NFLOG group 1). Targets normal or
+                  dind. Does not start a container.
+  reset           Remove the dev container(s) for the current workspace
+                  (normal, dind, and maintenance variants if present)
+                  and prompt individually for each existing named
+                  volume (devcontainer-mise, the workspace home volume
+                  [devcontainer-home-<dir>, or devcontainer-home under
+                  DEV_SHARED_HOME=1], devcontainer-dind). Does not
+                  rebuild the image. Takes no options.
+  scaffold        Generate a self-contained .devcontainer/ in the
                   current directory (devcontainer.json + Dockerfile +
                   support files). VS Code's "Reopen in Container" will
-                  build and attach to it. Compose with --dind for the
-                  Docker-in-Docker variant. Use --force to overwrite
-                  existing files.
-  --force         Overwrite existing files when used with
-                  --create-dev-container.
-  --self-update   Update the dev script's git checkout to the latest
+                  build and attach to it.
+                  --dind           Scaffold the Docker-in-Docker variant.
+                  --force          Overwrite existing files.
+  update          Update the dev script's git checkout to the latest
                   released tag (the same source used by install.sh).
                   Requires SCRIPT_DIR to be a clean git checkout. The
                   image will prompt for a rebuild on the next 'dev' run
-                  via the existing version-mismatch check. Composes with
-                  --dry-run.
-  --reset         Remove the dev container(s) for the current workspace
-                  (normal, dind, and maintenance variants if present)
-                  and prompt individually for each existing named
-                  volume (devcontainer-mise, devcontainer-home,
-                  devcontainer-dind). Does not rebuild the image.
-                  Standalone — does not compose with other flags.
-  --              Pass remaining arguments as command to container
-
-COMMANDS:
+                  via the existing version-mismatch check.
+                  --dry-run        Show what update would do.
   install         Symlink this script into a writable directory on PATH
+
+DEPRECATED FLAGS:
+  The old flag-based spellings below still work but print a deprecation
+  warning to stderr and route to the subcommand shown:
+    --disable-firewall      -> dev fw disable
+    --enable-firewall       -> dev fw enable
+    --monitor               -> dev fw log
+    --monitor-fw            -> dev fw drops
+    --reset                 -> dev reset
+    --create-dev-container  -> dev scaffold
+    --self-update           -> dev update
 
 ENVIRONMENT:
   DEV_RUNTIME=docker|podman
@@ -443,6 +336,9 @@ ENVIRONMENT:
                      Extra args appended to the runtime 'run' invocation
                      (e.g. --dns=8.8.8.8 on a host with broken IPv6
                      resolvers).
+  DEV_SHARED_HOME=1  Use the legacy shared home volume (devcontainer-home) for
+                     every workspace instead of the per-workspace default
+                     (devcontainer-home-<dir>).
   GITHUB_TOKEN       If set on the host, passed through into the container
                      as an env var, and also forwarded to image builds as a
                      BuildKit secret so 'mise install' can hit the GitHub
@@ -457,17 +353,17 @@ EXAMPLES:
   dev --host-port 8080          # Reach host service at host.docker.internal:8080
   dev --maintenance             # Start in maintenance mode (no firewall, sudo enabled)
   dev --dind                    # Start with rootless docker available inside
-  dev --monitor                 # Tail firewall proxy log of running container
-  dev --monitor-fw              # Stream iptables-dropped packets of running container
-  dev --disable-firewall        # Toggle off a running container, or start fresh with fw off
-  dev --enable-firewall         # Restore the firewall on the running container
   dev -- npm run dev            # Run custom command in container
+  dev fw log                    # Tail firewall proxy log of running container
+  dev fw drops                  # Stream iptables-dropped packets of running container
+  dev fw disable                # Toggle off a running container, or start fresh with fw off
+  dev fw enable                 # Restore the firewall on the running container
+  dev reset                     # Remove containers + prompt per volume
+  dev scaffold                  # Scaffold .devcontainer/ for VS Code
+  dev scaffold --dind           # Scaffold dind-mode .devcontainer/
+  dev update                    # Update the checkout to the latest tag
+  dev update --dry-run          # Show what update would do
   dev install                   # Install 'dev' onto your PATH
-  dev --self-update             # Update the checkout to the latest tag
-  dev --self-update --dry-run   # Show what --self-update would do
-  dev --reset                   # Remove containers + prompt per volume
-  dev --create-dev-container             # Scaffold .devcontainer/ for VS Code
-  dev --create-dev-container --dind      # Scaffold dind-mode .devcontainer/
 
 EOF
 }
@@ -544,124 +440,170 @@ install_self() {
   esac
 }
 
-# Reject companion flags that don't compose with the active subcommand.
-# Pass the subcommand label and a comma-separated allow-list; anything set
-# outside that list is reported and the script exits 1.
-forbid_companions() {
-  local subcmd="$1" allowed_csv="$2" bad=()
-  _maybe_bad() {
-    local name="$1" set_to="$2"
-    if [[ "$set_to" != true ]]; then return 0; fi
-    if [[ "$name" == "$subcmd" ]]; then return 0; fi  # the subcommand's own flag is implicit
-    case ",$allowed_csv," in *",$name,"*) return 0;; esac
-    bad+=("$name")
-  }
-  _maybe_bad --dry-run              "$DRY_RUN"
-  _maybe_bad --build                "$FORCE_BUILD"
-  _maybe_bad --default-ports        "$DEFAULT_PORTS"
-  _maybe_bad --maintenance          "$MAINTENANCE"
-  _maybe_bad --dind                 "$DIND"
-  _maybe_bad --monitor              "$MONITOR"
-  _maybe_bad --monitor-fw           "$MONITOR_FW"
-  _maybe_bad --disable-firewall     "$DISABLE_FW"
-  _maybe_bad --enable-firewall      "$ENABLE_FW"
-  _maybe_bad --create-dev-container "$CREATE_DC"
-  _maybe_bad --force                "$FORCE"
-  _maybe_bad --self-update          "$SELF_UPDATE"
-  _maybe_bad --reset                "$RESET"
-  [[ ${#EXTRA_PORTS[@]} -gt 0 ]] && _maybe_bad --port      true
-  [[ ${#HOST_PORTS[@]}  -gt 0 ]] && _maybe_bad --host-port true
-  [[ ${#CMD_ARGS[@]}    -gt 0 ]] && _maybe_bad --          true
-  if [[ ${#bad[@]} -gt 0 ]]; then
-    local allowed_pretty="${allowed_csv//,/, }"
-    echo "Error: $subcmd does not compose with: ${bad[*]}" >&2
-    echo "       Allowed companion(s): ${allowed_pretty:-none}." >&2
-    exit 1
+# --- Subcommand router ------------------------------------------------------
+# First non-flag token selects a subcommand. Bare flags (or --) fall through
+# to the default "start" command. Deprecated flags map to subcommands with a
+# one-line warning. Each subcommand parses only its own flags, so invalid
+# cross-command combinations are simply unrepresentable — no companion guard.
+_deprecated() { echo "Warning: '$1' is deprecated; use 'dev $2'." >&2; }
+
+subcmd=""
+case "${1:-}" in
+  fw|reset|scaffold|update|install) subcmd="$1"; shift ;;
+  --help)       usage; exit 0 ;;
+  --version)    echo "dev $(resolve_dev_version)"; exit 0 ;;
+  # Deprecated flag aliases -> subcommands. Note the ordering for the fw
+  # aliases: shift FIRST to drop the old flag, THEN inject the fw action word,
+  # so `dev --monitor` becomes `dev fw log` (not `dev fw log --monitor`).
+  --self-update)          _deprecated --self-update "update"; subcmd="update"; shift ;;
+  --reset)                _deprecated --reset "reset"; subcmd="reset"; shift ;;
+  --create-dev-container) _deprecated --create-dev-container "scaffold"; subcmd="scaffold"; shift ;;
+  --monitor)              _deprecated --monitor "fw log"; subcmd="fw"; shift; set -- "log" "$@" ;;
+  --monitor-fw)           _deprecated --monitor-fw "fw drops"; subcmd="fw"; shift; set -- "drops" "$@" ;;
+  --disable-firewall)     _deprecated --disable-firewall "fw disable"; subcmd="fw"; shift; set -- "disable" "$@" ;;
+  --enable-firewall)      _deprecated --enable-firewall "fw enable"; subcmd="fw"; shift; set -- "enable" "$@" ;;
+esac
+
+# Resolve the workspace's three container names + the dind storage
+# connection args. Shared by reset/fw (which need it standalone) and the
+# start path below (which resolves it again after runtime detection).
+_resolve_workspace_names() {
+  if [[ "$(uname -s)" == "Darwin" && "$RUNTIME" == "podman" ]]; then
+    DIND_RUNTIME_ARGS="--connection=podman-machine-default-root"
   fi
+  WORKSPACE_BASENAME="$(basename "$(pwd)")"
+  NORMAL_NAME="dev-${WORKSPACE_BASENAME}"
+  MAINT_NAME="dev-${WORKSPACE_BASENAME}-maint"
+  DIND_NAME="dev-${WORKSPACE_BASENAME}-dind"
+  _resolve_home_volume
 }
 
-# --self-update: pull the latest tag in the script's git checkout in place.
-# Detection model: we treat "installed via install.sh OR manual git clone" as
-# the same case — both produce a git checkout at SCRIPT_DIR. The git checkout
-# itself is the source of truth for the installed version (`git describe`),
-# so there is no separate marker file to drift out of sync with reality.
-self_update() {
-  if ! command -v git >/dev/null 2>&1; then
-    echo "Error: git is required for --self-update." >&2
-    exit 1
-  fi
-  if [[ ! -d "$SCRIPT_DIR/.git" ]]; then
-    echo "Error: $SCRIPT_DIR is not a git checkout — --self-update only works" >&2
-    echo "       on install-script (or manual git-clone) installations." >&2
-    echo "       Re-install via:" >&2
-    echo "         curl -fsSL https://raw.githubusercontent.com/langdal/devcontainer/main/install.sh | bash" >&2
-    exit 1
-  fi
-  if [[ -n "$(git -C "$SCRIPT_DIR" status --porcelain 2>/dev/null)" ]]; then
-    echo "Error: uncommitted changes in $SCRIPT_DIR — commit, stash, or reset" >&2
-    echo "       before retrying. Self-update refuses to clobber local edits." >&2
-    exit 1
-  fi
-  local origin_url
-  origin_url="$(git -C "$SCRIPT_DIR" remote get-url origin 2>/dev/null || true)"
-  if [[ -z "$origin_url" ]]; then
-    echo "Error: no 'origin' remote configured in $SCRIPT_DIR." >&2
-    exit 1
-  fi
-  local current_desc current_tag
-  current_desc="$(git -C "$SCRIPT_DIR" describe --tags --always 2>/dev/null || echo "unknown")"
-  current_tag="$(git -C "$SCRIPT_DIR" describe --tags --exact-match HEAD 2>/dev/null || true)"
-
-  if [[ "$DRY_RUN" == true ]]; then
-    echo "Would run: git -C $SCRIPT_DIR fetch --tags --prune origin"
+# Resolve the home volume name. Per-workspace by default so one project's
+# SSH keys / git creds / shell history are not exposed to the agent in
+# another project's container. DEV_SHARED_HOME=1 keeps the legacy single
+# volume. mise (tool cache) and dind (image cache) stay shared regardless.
+# Basename only (matches the dev-<dir> container-name convention and its
+# documented basename-collision caveat).
+_resolve_home_volume() {
+  if [[ "${DEV_SHARED_HOME:-}" == "1" ]]; then
+    # shellcheck disable=SC2034  # consumed by start_container/reset_workspace/cleanup_for_rebuild in lib/dev/*.sh
+    HOME_VOLUME="devcontainer-home"
   else
-    echo ">> fetching tags from $origin_url"
-    git -C "$SCRIPT_DIR" fetch --tags --prune origin
+    # shellcheck disable=SC2034  # consumed by start_container/reset_workspace/cleanup_for_rebuild in lib/dev/*.sh
+    HOME_VOLUME="devcontainer-home-${WORKSPACE_BASENAME}"
   fi
-
-  # Same sort as install.sh: version:refname picks the highest semver tag.
-  local latest
-  latest="$(git -C "$SCRIPT_DIR" ls-remote --tags --refs --sort='version:refname' origin 2>/dev/null \
-    | awk -F/ '{print $NF}' \
-    | tail -1)"
-  if [[ -z "$latest" ]]; then
-    echo "Error: no tags advertised by origin ($origin_url)." >&2
-    exit 1
-  fi
-
-  if [[ -n "$current_tag" && "$current_tag" == "$latest" ]]; then
-    echo "Already up to date: $current_tag"
-    return 0
-  fi
-
-  echo ">> latest tag: $latest"
-  echo ">> current:    ${current_tag:-$current_desc}"
-
-  if [[ "$DRY_RUN" == true ]]; then
-    echo "Would run: git -C $SCRIPT_DIR checkout --quiet --force $latest"
-    return 0
-  fi
-
-  git -C "$SCRIPT_DIR" checkout --quiet --force "$latest"
-  echo "Updated dev to $latest. The image will prompt for a rebuild on the"
-  echo "next 'dev' run (or run 'dev --build' now to rebuild immediately)."
 }
 
-if [[ ${1:-} == "install" ]]; then
-  install_self
-  exit 0
-fi
+case "$subcmd" in
+  install)
+    install_self
+    exit 0
+    ;;
+  update)
+    while [[ $# -gt 0 ]]; do
+      case $1 in
+        --dry-run) DRY_RUN=true; shift ;;
+        *)
+          echo "Error: dev update: unknown option: $1" >&2
+          exit 1
+          ;;
+      esac
+    done
+    self_update
+    exit 0
+    ;;
+  reset)
+    if [[ $# -gt 0 ]]; then
+      echo "Error: dev reset does not take options: $*" >&2
+      exit 1
+    fi
+    detect_runtime
+    ensure_runtime_ready
+    _resolve_workspace_names
+    reset_workspace
+    exit 0
+    ;;
+  scaffold)
+    while [[ $# -gt 0 ]]; do
+      case $1 in
+        --dind) DIND=true; shift ;;
+        --force) FORCE=true; shift ;;
+        *)
+          echo "Error: dev scaffold: unknown option: $1" >&2
+          exit 1
+          ;;
+      esac
+    done
+    create_dev_container
+    exit 0
+    ;;
+  fw)
+    fw_action="${1:-}"
+    case "$fw_action" in
+      log|drops|enable)
+        shift
+        # These three exec into the container and take no further arguments,
+        # so reject anything left over (consistent with reset/scaffold/update).
+        if [[ $# -gt 0 ]]; then
+          echo "Error: dev fw $fw_action does not take extra arguments: $*" >&2
+          exit 1
+        fi
+        ;;
+      disable)
+        shift
+        # Deliberately lenient (unlike log/drops/enable above): the
+        # deprecated `--disable-firewall` alias re-injects trailing args via
+        # `set -- disable "$@"`, and when no container is running fw_disable
+        # falls through into the default start parser below, which needs to
+        # see those args (e.g. --dry-run -- echo hi). Rejecting them here
+        # would break that fallthrough.
+        #
+        # --maintenance is a mode conflict, though: a maintenance container
+        # has no firewall to disable, and silently discarding the flag would
+        # drop the firewall on the normal container instead of starting the
+        # maintenance shell the user asked for. Reject it explicitly, for
+        # both the running-container toggle case and the no-container
+        # fall-through case below.
+        for _a in "$@"; do
+          if [[ "$_a" == "--maintenance" ]]; then
+            echo "Error: 'fw disable' (and --disable-firewall) cannot be combined with --maintenance." >&2
+            echo "       Maintenance mode has no firewall; use 'dev --maintenance' for a maintenance shell." >&2
+            exit 1
+          fi
+        done
+        unset _a
+        ;;
+      *)
+        echo "Error: dev fw: expected an action (log|drops|enable|disable), got '${fw_action:-<none>}'" >&2
+        echo "Run 'dev --help' for usage information" >&2
+        exit 1
+        ;;
+    esac
+    detect_runtime
+    ensure_runtime_ready
+    _resolve_workspace_names
+    case "$fw_action" in
+      log)     fw_log ;;
+      drops)   fw_drops ;;
+      enable)  fw_enable ;;
+      disable)
+        fw_disable
+        # No container was running: fw_disable set FW_DISABLED_START=true and
+        # returned instead of exec'ing (it has no exit/exec on that code
+        # path). Fall through to the default start path below (with
+        # whatever flags/command follow) so a fresh container comes up
+        # with the firewall already disabled.
+        ;;
+    esac
+    ;;
+esac
 
+# --- Default "start" command ------------------------------------------------
+# Reached when no subcommand was typed, or when `fw disable` fell through
+# with no running container (fw_disable returned instead of exec'ing;
+# FW_DISABLED_START is set — see the `disable)` case above).
 while [[ $# -gt 0 ]]; do
   case $1 in
-    --help)
-      usage
-      exit 0
-      ;;
-    --version)
-      echo "dev $(resolve_dev_version)"
-      exit 0
-      ;;
     --dry-run)
       DRY_RUN=true
       shift
@@ -691,6 +633,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --default-ports)
+      # shellcheck disable=SC2034  # consumed by start_container in lib/dev/lifecycle.sh
       DEFAULT_PORTS=true
       shift
       ;;
@@ -702,40 +645,28 @@ while [[ $# -gt 0 ]]; do
       DIND=true
       shift
       ;;
-    --monitor)
-      MONITOR=true
-      shift
-      ;;
-    --monitor-fw)
-      MONITOR_FW=true
-      shift
-      ;;
-    --disable-firewall)
-      DISABLE_FW=true
-      shift
-      ;;
-    --enable-firewall)
-      ENABLE_FW=true
-      shift
-      ;;
-    --create-dev-container)
-      CREATE_DC=true
-      shift
-      ;;
     --force)
+      # shellcheck disable=SC2034  # accepted here for parser-surface parity with
+      # the pre-router flags; only actually consumed by create_dev_container in
+      # lib/dev/scaffold.sh (i.e. 'dev scaffold --force'), which this path never
+      # calls — a bare `dev --force` is (as before the router) a harmless no-op.
       FORCE=true
       shift
       ;;
-    --self-update)
-      SELF_UPDATE=true
-      shift
+    --help)
+      # Position-independent: the router only matches --help as the very
+      # first token, so e.g. `dev --dry-run --help` reaches here instead.
+      usage
+      exit 0
       ;;
-    --reset)
-      RESET=true
-      shift
+    --version)
+      # Position-independent counterpart to the router's first-token --version.
+      echo "dev $(resolve_dev_version)"
+      exit 0
       ;;
     --)
       shift
+      # shellcheck disable=SC2034  # consumed by start_container in lib/dev/lifecycle.sh
       CMD_ARGS=("$@")
       break
       ;;
@@ -747,184 +678,16 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-write_devcontainer_json_normal() {
-  local out="$1"
-  cat > "$out" <<'JSON'
-{
-  "name": "generic-devcontainer",
-  "build": {
-    "dockerfile": "Dockerfile",
-    "context": ".",
-    "target": "base"
-  },
-  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
-  "workspaceFolder": "/workspace",
-  "remoteUser": "vscode",
-  "updateRemoteUserUID": true,
-  "overrideCommand": false,
-  "runArgs": ["--cap-add=NET_ADMIN"],
-  "mounts": [
-    "source=${devcontainerId}-mise,target=/mise,type=volume",
-    "source=${devcontainerId}-home,target=/home/vscode,type=volume"
-  ]
-}
-JSON
-}
-
-write_devcontainer_json_dind() {
-  local out="$1"
-  cat > "$out" <<'JSON'
-{
-  // dind mode requires kernel.apparmor_restrict_unprivileged_userns=0
-  // on Ubuntu 23.10+ / Linux 6.x hosts. See README.md for the
-  // host-side preflight (rootless dockerd needs CLONE_NEWUSER).
-  "name": "generic-devcontainer-dind",
-  "build": {
-    "dockerfile": "Dockerfile",
-    "context": ".",
-    "target": "dind"
-  },
-  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
-  "workspaceFolder": "/workspace",
-  "remoteUser": "vscode",
-  "updateRemoteUserUID": true,
-  "overrideCommand": false,
-  "containerEnv": {
-    "DEVCONTAINER_DIND": "1"
-  },
-  "runArgs": [
-    "--cap-add=NET_ADMIN",
-    "--cap-add=SYS_ADMIN",
-    "--device=/dev/fuse",
-    "--device=/dev/net/tun",
-    "--security-opt", "apparmor=unconfined",
-    "--security-opt", "seccomp=unconfined",
-    "--security-opt", "systempaths=unconfined",
-    "--security-opt", "label=disable"
-  ],
-  "mounts": [
-    "source=${devcontainerId}-mise,target=/mise,type=volume",
-    "source=${devcontainerId}-home,target=/home/vscode,type=volume",
-    "source=${devcontainerId}-dind,target=/home/vscode/.local/share/docker,type=volume"
-  ]
-}
-JSON
-}
-
-create_dev_container() {
-  local target_dir=".devcontainer"
-  local sources=(Dockerfile entrypoint.sh firewall-init.sh \
-                 firewall-disable.sh mise.base.toml allowlist.base)
-  if [[ "$DIND" == true ]]; then
-    sources+=(dind-init.sh allowlist.dind)
-  fi
-  # devcontainer.json is generated, not copied — but it counts toward
-  # the destination set for collision checking.
-  local destinations=("${target_dir}/devcontainer.json")
-  for f in "${sources[@]}"; do
-    destinations+=("${target_dir}/${f}")
-  done
-
-  # Collision check.
-  local existing=()
-  for d in "${destinations[@]}"; do
-    [[ -e "$d" ]] && existing+=("$d")
-  done
-  if [[ ${#existing[@]} -gt 0 && "$FORCE" != true ]]; then
-    echo "Refusing to overwrite:" >&2
-    for d in "${existing[@]}"; do
-      echo "  $d" >&2
-    done
-    echo "Pass --force to overwrite." >&2
-    exit 1
-  fi
-
-  mkdir -p "$target_dir"
-
-  # Copy source files from $SCRIPT_DIR.
-  for f in "${sources[@]}"; do
-    if [[ ! -f "${SCRIPT_DIR}/${f}" ]]; then
-      echo "Error: missing source file ${SCRIPT_DIR}/${f}" >&2
-      exit 1
-    fi
-    cp "${SCRIPT_DIR}/${f}" "${target_dir}/${f}"
-  done
-
-  if [[ "$DIND" == true ]]; then
-    write_devcontainer_json_dind "${target_dir}/devcontainer.json"
-  else
-    write_devcontainer_json_normal "${target_dir}/devcontainer.json"
-  fi
-
-  local mode_label="normal"
-  [[ "$DIND" == true ]] && mode_label="dind"
-  echo "Wrote ${target_dir}/ (${mode_label} mode)."
-  echo
-  echo "Next steps:"
-  echo "  1. Open this directory in VS Code:   code ."
-  echo "  2. When prompted, choose 'Reopen in Container'."
-  echo "  3. (Optional) Add a workspace-root .devcontainer-allowlist"
-  echo "     for project-specific firewall hostnames; firewall-init.sh"
-  echo "     merges it at container startup."
-}
-
-if [[ "$CREATE_DC" == true ]]; then
-  forbid_companions --create-dev-container "--dind,--force"
-  create_dev_container
-  exit 0
-fi
-
-if [[ "$SELF_UPDATE" == true ]]; then
-  forbid_companions --self-update "--dry-run"
-  self_update
-  exit 0
-fi
-
+# Restored mode-conflict guard: --dind and --maintenance are mutually
+# exclusive. Must run before detect_runtime/preflight_subid_grant below so
+# this error wins over the (also-fatal) --dind subid preflight when both
+# flags are given together.
 if [[ "$DIND" == true && "$MAINTENANCE" == true ]]; then
   echo "Error: --dind and --maintenance are mutually exclusive." >&2
   exit 1
 fi
 
-# Validate --reset composition early so the dind-gated preflights below
-# (mutex, apparmor) don't fire and obscure the real error for users who
-# typed e.g. `dev --reset --dind`. The actual reset runs after runtime
-# detection and container-name resolution.
-if [[ "$RESET" == true ]]; then
-  forbid_companions --reset ""
-fi
-
-# Linux 6.x kernels gate unprivileged user namespace creation behind an
-# AppArmor check (Ubuntu 23.10+, Pop!_OS, current Debian testing). The
-# sysctl is on by default. dockerd-rootless inside --dind needs to
-# unshare(CLONE_NEWUSER); --security-opt apparmor=unconfined does NOT
-# bypass this — the kernel applies the restriction to "unconfined" tasks
-# too. Without this preflight the container starts, then rootlesskit
-# fails ~15s in with a confusing "fork/exec /proc/self/exe: operation
-# not permitted". Catch it here with a clear remediation instead.
-if [[ "$DIND" == true && -z "${DEV_SKIP_APPARMOR_CHECK:-}" ]]; then
-  _aa_sysfs=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
-  if [[ -r "$_aa_sysfs" ]] && [[ "$(cat "$_aa_sysfs" 2>/dev/null)" == "1" ]]; then
-    cat >&2 <<'EOF'
-Error: kernel.apparmor_restrict_unprivileged_userns=1 on this host.
-
-This blocks rootless dockerd inside --dind from creating its user
-namespace. --security-opt apparmor=unconfined does not bypass this
-kernel-level restriction.
-
-Allow it on this host:
-    sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-
-Persist across reboots:
-    echo 'kernel.apparmor_restrict_unprivileged_userns=0' \
-      | sudo tee /etc/sysctl.d/99-rootless-userns.conf
-
-Set DEV_SKIP_APPARMOR_CHECK=1 to bypass this preflight (e.g. if you
-have a custom AppArmor profile that grants `userns,`).
-EOF
-    exit 1
-  fi
-  unset _aa_sysfs
-fi
+preflight_apparmor_userns
 
 detect_runtime
 ensure_runtime_ready
@@ -951,84 +714,26 @@ fi
 # The 165536 floor is the image contract: Dockerfile writes
 # "vscode:100000:65536" into the image's /etc/subuid, and 100000+65536
 # container ids must exist for rootless dockerd's two-line map.
+# shellcheck disable=SC2034  # consumed by preflight_subid_grant() in lib/dev/preflight.sh
 DIND_MIN_SUBIDS=165535 # ids beyond id 0; namespace size = subids + 1
-runtime_is_rootless() {
-  # docker may be the podman-docker shim, so classify by --version, not name.
-  # Routed through $RUNTIME_ARGS so the macOS+dind rootful-connection override
-  # (DIND_RUNTIME_ARGS) is honored once it's assigned; empty everywhere else.
-  # shellcheck disable=SC2086  # intentional word-splitting, same as call sites below
-  if $RUNTIME $RUNTIME_ARGS --version 2>/dev/null | grep -qi podman; then
-    # shellcheck disable=SC2086
-    [[ "$($RUNTIME $RUNTIME_ARGS info --format '{{.Host.Security.Rootless}}' 2>/dev/null)" == "true" ]]
-  else
-    # shellcheck disable=SC2086
-    $RUNTIME $RUNTIME_ARGS info --format '{{.SecurityOptions}}' 2>/dev/null | grep -q rootless
-  fi
-}
-subid_total() {
-  # Sum the current user's ranges in /etc/subuid or /etc/subgid ($1).
-  # Prefer getsubids (shadow >= 4.10), which also sees SSSD/nsswitch
-  # sources; fall back to parsing the file. Entries may be keyed by name
-  # or numeric id.
-  local file="$1" gflag="" total=0 count owner
-  [[ "$file" == *subgid* ]] && gflag="-g"
-  if command -v getsubids >/dev/null 2>&1; then
-    # Output lines look like: "0: jakob 100000 65536"
-    # shellcheck disable=SC2086  # $gflag is deliberately unquoted (empty or -g)
-    while read -r _ _ _ count; do
-      total=$((total + count))
-    done < <(getsubids $gflag "$(id -un)" 2>/dev/null)
-  fi
-  if [[ "$total" -eq 0 && -r "$file" ]]; then
-    while IFS=: read -r owner _ count; do
-      [[ "$owner" == "$(id -un)" || "$owner" == "$(id -u)" ]] || continue
-      total=$((total + count))
-    done < "$file"
-  fi
-  echo "$total"
-}
-if [[ "$DIND" == true && "$(uname -s)" == "Linux" && -z "${DEV_SKIP_SUBID_CHECK:-}" ]]; then
-  if runtime_is_rootless; then
-    _uid_total=$(subid_total /etc/subuid)
-    _gid_total=$(subid_total /etc/subgid)
-    if [[ "$_uid_total" -lt "$DIND_MIN_SUBIDS" || "$_gid_total" -lt "$DIND_MIN_SUBIDS" ]]; then
-      _next_id=$((100000 + _uid_total)) # append after the conventional base range
-      _migrate_hint=""
-      if "$RUNTIME" --version 2>/dev/null | grep -qi podman; then
-        _migrate_hint="
-    podman system migrate    # restart podman's user namespace with the new grant"
-      fi
-      cat >&2 <<EOF
-Error: --dind on a rootless runtime needs a larger subuid/subgid grant.
-
-The runtime ($RUNTIME) is rootless, so the dind container's user
-namespace only spans the ids granted to $(id -un) in /etc/subuid and
-/etc/subgid (currently $_uid_total uids / $_gid_total gids). rootless
-dockerd inside the container must map container ids 100000-165535 (the
-image's vscode subuid range), so at least $DIND_MIN_SUBIDS are needed or it
-fails at startup with:
-    newuidmap: write to uid_map failed: Operation not permitted
-
-Grant more ids (any range not colliding with other users), e.g.:
-    sudo usermod --add-subuids ${_next_id}-365535 --add-subgids ${_next_id}-365535 $(id -un)${_migrate_hint}
-
-Set DEV_SKIP_SUBID_CHECK=1 to bypass this preflight.
-EOF
-      exit 1
-    fi
-    unset _uid_total _gid_total _next_id _migrate_hint
-  fi
-fi
+preflight_subid_grant
 
 # Host identity. Used to (a) bake correct UID/GID into the image at
 # build time, and (b) detect when an existing image was built for a
 # different user.
+# shellcheck disable=SC2034  # consumed by refuse_root_uid/image.sh's runtime_build/check_image_uid_match and migrate_volume_for_keepid in lib/dev/lifecycle.sh
 HOST_UID=$(id -u)
+# shellcheck disable=SC2034  # consumed by runtime_build/check_image_uid_match in lib/dev/image.sh
 HOST_GID=$(id -g)
-if [[ "$HOST_UID" == "0" ]]; then
-  echo "Error: refusing to run dev as root (UID 0). The image creates a non-root 'vscode' user; using UID 0 would conflict with the image's existing root user." >&2
-  exit 1
-fi
+refuse_root_uid
+
+# Read the host's git identity so a fresh per-workspace home volume gets a
+# usable identity without manual setup. Empty when the host has none; the
+# entrypoint only seeds these when the container has no identity yet.
+# shellcheck disable=SC2034  # consumed by start_container in lib/dev/lifecycle.sh
+DEV_GIT_NAME="$(git config --get user.name 2>/dev/null || true)"
+# shellcheck disable=SC2034  # consumed by start_container in lib/dev/lifecycle.sh
+DEV_GIT_EMAIL="$(git config --get user.email 2>/dev/null || true)"
 
 # In --dind mode, use the :dind image variant. RUNTIME_ARGS routes all
 # subsequent runtime commands at the dind storage (see DIND_RUNTIME_ARGS).
@@ -1045,329 +750,7 @@ WORKSPACE_BASENAME="$(basename "$(pwd)")"
 NORMAL_NAME="dev-${WORKSPACE_BASENAME}"
 MAINT_NAME="dev-${WORKSPACE_BASENAME}-maint"
 DIND_NAME="dev-${WORKSPACE_BASENAME}-dind"
-
-# --reset: remove this workspace's container(s) and prompt per existing
-# named volume. The volumes are global (shared across all dev workspaces),
-# so each prompt makes the blast radius explicit. Containers are removed
-# unconditionally — that's the point of --reset; the volumes carry user
-# state (home dir, mise tool cache, dind image cache) and deserve a
-# decision each. Honours DEV_ASSUME_YES for non-interactive runs.
-reset_workspace() {
-  local -a containers=() containers_args=()
-  if container_exists "$NORMAL_NAME" ""; then
-    containers+=("$NORMAL_NAME"); containers_args+=("")
-  fi
-  if container_exists "$MAINT_NAME" ""; then
-    containers+=("$MAINT_NAME"); containers_args+=("")
-  fi
-  if container_exists "$DIND_NAME" "$DIND_RUNTIME_ARGS"; then
-    containers+=("$DIND_NAME"); containers_args+=("$DIND_RUNTIME_ARGS")
-  fi
-
-  # mise/home volumes live in default storage. The dind volume may live
-  # in the rootful podman connection on macOS+podman — probe with
-  # DIND_RUNTIME_ARGS (empty on every other host, so the same lookup
-  # works there too).
-  local -a volumes=() volumes_args=()
-  local v
-  for v in devcontainer-mise devcontainer-home; do
-    if $RUNTIME volume inspect "$v" >/dev/null 2>&1; then
-      volumes+=("$v"); volumes_args+=("")
-    fi
-  done
-  # shellcheck disable=SC2086  # intentional word-splitting of DIND_RUNTIME_ARGS
-  if $RUNTIME $DIND_RUNTIME_ARGS volume inspect devcontainer-dind >/dev/null 2>&1; then
-    volumes+=("devcontainer-dind"); volumes_args+=("$DIND_RUNTIME_ARGS")
-  fi
-
-  if [[ ${#containers[@]} -eq 0 && ${#volumes[@]} -eq 0 ]]; then
-    echo "Nothing to reset for this workspace (no dev containers or named volumes found)."
-    return 0
-  fi
-
-  local i
-  for i in "${!containers[@]}"; do
-    remove_container_if_exists "${containers[$i]}" "${containers_args[$i]}"
-  done
-
-  local assume_yes="${DEV_ASSUME_YES:-0}"
-  local interactive=true
-  [[ -t 0 ]] || interactive=false
-  local name args reply
-  for i in "${!volumes[@]}"; do
-    name="${volumes[$i]}"; args="${volumes_args[$i]}"
-    if [[ "$assume_yes" == "1" ]]; then
-      reply=y
-      echo "DEV_ASSUME_YES set — removing volume ${name}." >&2
-    elif [[ "$interactive" != true ]]; then
-      echo "Skipping volume ${name} (non-interactive; set DEV_ASSUME_YES=1 to remove)." >&2
-      continue
-    else
-      read -r -p "Remove volume ${name}? [y/N] " reply
-    fi
-    case "$reply" in
-      y|Y|yes|YES)
-        remove_volume_if_exists "$name" "$args"
-        ;;
-      *)
-        echo "Kept volume ${name}." >&2
-        ;;
-    esac
-  done
-}
-
-# --reset dispatch: standalone teardown. Runs after runtime detection and
-# after the workspace container names are resolved, so it sees the same
-# NORMAL/MAINT/DIND_NAME triplet the rest of the script targets. Must come
-# before the management commands and the three-way conflict guard —
-# otherwise an already-running container would block the reset that's
-# meant to remove it. Composition was validated earlier (before the dind
-# preflights).
-if [[ "$RESET" == true ]]; then
-  reset_workspace
-  exit 0
-fi
-
-# Resolve which workspace container the management commands target. Sets:
-#   MANAGED_TARGET       = "normal" | "dind" | "maint" | ""   (empty = none running)
-#   MANAGED_NAME         = the container name (when MANAGED_TARGET is non-empty)
-#   MANAGED_RUNTIME_ARGS = runtime connection args for that container's storage
-# Each name is looked up in its own storage because on macOS+podman the dind
-# container lives in the rootful connection while normal/maint live in the
-# default rootless one — a single-storage probe would miss the dind container.
-resolve_managed_container() {
-  MANAGED_TARGET=""
-  MANAGED_NAME=""
-  MANAGED_RUNTIME_ARGS=""
-  if container_running "$NORMAL_NAME" ""; then
-    MANAGED_TARGET="normal"; MANAGED_NAME="$NORMAL_NAME"; MANAGED_RUNTIME_ARGS=""; return
-  fi
-  if container_running "$DIND_NAME" "$DIND_RUNTIME_ARGS"; then
-    MANAGED_TARGET="dind"; MANAGED_NAME="$DIND_NAME"; MANAGED_RUNTIME_ARGS="$DIND_RUNTIME_ARGS"; return
-  fi
-  if container_running "$MAINT_NAME" ""; then
-    MANAGED_TARGET="maint"; MANAGED_NAME="$MAINT_NAME"; MANAGED_RUNTIME_ARGS=""; return
-  fi
-}
-
-# Shared preamble for management commands that need a running firewall-capable
-# container (--monitor, --monitor-fw, --disable-firewall, --enable-firewall).
-# Exits with a clear error if nothing is running, or if the only running
-# container is maintenance (which has no firewall).
-require_workspace_firewall_container() {
-  local op="$1"
-  resolve_managed_container
-  if [[ -z "$MANAGED_TARGET" ]]; then
-    echo "Error: no dev container is running for this workspace (looked for ${NORMAL_NAME}, ${DIND_NAME}, ${MAINT_NAME}). Start one with 'dev', 'dev --dind', or 'dev --maintenance' first." >&2
-    exit 1
-  fi
-  if [[ "$MANAGED_TARGET" == "maint" ]]; then
-    echo "Error: maintenance container ${MAINT_NAME} has no firewall — $op is meaningless in maintenance mode." >&2
-    exit 1
-  fi
-}
-
-# --monitor / --monitor-fw: read firewall logs from the running workspace
-# container (normal or dind — both run firewall-init.sh and have the same
-# tinyproxy + NFLOG stack). Maintenance mode has no firewall.
-if [[ "$MONITOR" == true || "$MONITOR_FW" == true ]]; then
-  if [[ "$MONITOR" == true && "$MONITOR_FW" == true ]]; then
-    echo "Error: --monitor and --monitor-fw are mutually exclusive." >&2
-    exit 1
-  fi
-  if [[ "$MAINTENANCE" == true ]]; then
-    echo "Error: --monitor* and --maintenance are mutually exclusive (no firewall in maintenance mode)." >&2
-    exit 1
-  fi
-  require_workspace_firewall_container "--monitor/--monitor-fw"
-  if [[ "$MONITOR" == true ]]; then
-    exec $RUNTIME $MANAGED_RUNTIME_ARGS exec -it "$MANAGED_NAME" tail -F /var/log/tinyproxy.log
-  else
-    # tcpdump on the NFLOG group set by firewall-init.sh. Needs CAP_NET_ADMIN
-    # (the container already has it) and root inside the container.
-    exec $RUNTIME $MANAGED_RUNTIME_ARGS exec -it --user root "$MANAGED_NAME" \
-        tcpdump -i nflog:1 -nn -l
-  fi
-fi
-
-# --disable-firewall / --enable-firewall: toggle iptables on the running
-# workspace container without restarting it. Works for both normal and dind
-# (both have CAP_NET_ADMIN and the same firewall stack).
-#
-# --disable-firewall doubles as a start flag: if no firewall-capable container
-# is running for this workspace, it falls through to the normal startup path
-# with DEVCONTAINER_FW_DISABLED=1 so a *fresh* container comes up with the
-# firewall already open (same end state as start-then-toggle). FW_DISABLED_START
-# carries that intent to the docker-run env block below.
-FW_DISABLED_START=false
-if [[ "$DISABLE_FW" == true || "$ENABLE_FW" == true ]]; then
-  if [[ "$DISABLE_FW" == true && "$ENABLE_FW" == true ]]; then
-    echo "Error: --disable-firewall and --enable-firewall are mutually exclusive." >&2
-    exit 1
-  fi
-  if [[ "$MAINTENANCE" == true ]]; then
-    echo "Error: --disable-firewall/--enable-firewall and --maintenance are mutually exclusive (no firewall in maintenance mode)." >&2
-    exit 1
-  fi
-  if [[ "$ENABLE_FW" == true ]]; then
-    # Re-enabling only makes sense on an already-running container.
-    require_workspace_firewall_container "--enable-firewall"
-    exec $RUNTIME $MANAGED_RUNTIME_ARGS exec --user root "$MANAGED_NAME" /usr/local/sbin/firewall-init.sh
-  fi
-  # --disable-firewall: toggle a running firewall container in place, otherwise
-  # start a fresh one with the firewall disabled from the start.
-  resolve_managed_container
-  if [[ "$MANAGED_TARGET" == "maint" ]]; then
-    echo "Error: maintenance container ${MAINT_NAME} has no firewall — --disable-firewall is meaningless in maintenance mode." >&2
-    exit 1
-  elif [[ -n "$MANAGED_TARGET" ]]; then
-    exec $RUNTIME $MANAGED_RUNTIME_ARGS exec --user root "$MANAGED_NAME" /usr/local/sbin/firewall-disable.sh
-  else
-    FW_DISABLED_START=true
-  fi
-fi
-
-# Three-way conflict guard: normal / maintenance / dind. Each pair refuses
-# while the other is running for the same workspace; both would mount
-# /workspace and produce surprising state. Takes an optional 3rd arg with
-# extra runtime args so a non-dind invocation can still reach into the
-# dind storage when checking for a running dind container.
-refuse_if_running() {
-  local other_name="$1" other_label="$2" extra_args="${3:-}"
-  if container_running "$other_name" "$extra_args"; then
-    echo "Error: ${other_label} container ${other_name} is running for this workspace." >&2
-    # shellcheck disable=SC2086  # intentional word-splitting of $extra_args
-    echo "       Stop it first:  $RUNTIME $extra_args stop ${other_name}" >&2
-    exit 1
-  fi
-}
-
-# Remove the workspace's container (running or stopped) and the named
-# volumes for the current invocation's image variant. Used after the
-# user accepts the rebuild prompt; the rebuild path that follows
-# replaces the image and the next container start re-populates the
-# volumes from the freshly-built image.
-cleanup_for_rebuild() {
-  local container="$1" with_dind="$2"
-  remove_container_if_exists "$container" "$RUNTIME_ARGS"
-  local vols=(devcontainer-mise devcontainer-home)
-  if [[ "$with_dind" == true ]]; then
-    vols+=(devcontainer-dind)
-  fi
-  local v
-  for v in "${vols[@]}"; do
-    remove_volume_if_exists "$v" "$RUNTIME_ARGS"
-  done
-}
-
-# Compare host UID/GID to the labels on $IMAGE_TAG. On a clean match (or
-# image absent), return 0. On mismatch, either prompt-and-rebuild
-# (interactive) or print a diagnostic and exit 1 (non-interactive). The
-# explicit `--build` flag and `--dry-run` make this advisory rather than
-# fatal — the build branch will still rebuild with the right args.
-# Sets the global IMAGE_EXISTS so the build path below can skip a separate
-# `images -q` probe.
-check_image_uid_match() {
-  local tag="$1"
-  local labels img_uid img_gid
-  # Single inspect retrieves all three labels we care about; IMAGE_VERSION
-  # is stashed for check_image_version_match so it doesn't re-inspect.
-  if ! labels=$($RUNTIME $RUNTIME_ARGS image inspect "$tag" \
-      --format '{{ index .Config.Labels "dev.uid" }} {{ index .Config.Labels "dev.gid" }} {{ index .Config.Labels "dev.version" }}' \
-      2>/dev/null); then
-    IMAGE_EXISTS=false
-    IMAGE_VERSION=""
-    return 0
-  fi
-  IMAGE_EXISTS=true
-  read -r img_uid img_gid IMAGE_VERSION <<< "$labels"
-  if [[ -n "$img_uid" && -n "$img_gid" \
-        && "$img_uid" == "$HOST_UID" && "$img_gid" == "$HOST_GID" ]]; then
-    return 0
-  fi
-  local img_id="${img_uid:-?}:${img_gid:-?}"
-  if [[ "$FORCE_BUILD" == true ]]; then
-    echo "Note: image $tag built for UID:GID $img_id; rebuilding for $HOST_UID:$HOST_GID." >&2
-    cleanup_for_rebuild "$CONTAINER_NAME" "$DIND"
-    return 0
-  fi
-  if [[ "$DRY_RUN" == true ]]; then
-    echo "Would rebuild $tag for UID:GID $HOST_UID:$HOST_GID (current labels: $img_id)" >&2
-    return 0
-  fi
-  if [[ "${DEV_ASSUME_YES:-0}" == "1" ]]; then
-    echo "Note: image $tag built for UID:GID $img_id; DEV_ASSUME_YES set, rebuilding for $HOST_UID:$HOST_GID." >&2
-    cleanup_for_rebuild "$CONTAINER_NAME" "$DIND"
-    FORCE_BUILD=true
-    return 0
-  fi
-  if [[ ! -t 0 ]]; then
-    echo "Error: image $tag was built for UID:GID $img_id, but you are $HOST_UID:$HOST_GID." >&2
-    echo "       Run 'dev --build' to rebuild for UID:GID $HOST_UID:$HOST_GID." >&2
-    exit 1
-  fi
-  echo "Image $tag was built for UID:GID $img_id, but you are $HOST_UID:$HOST_GID." >&2
-  local vol_list="devcontainer-mise, devcontainer-home"
-  if [[ "$DIND" == true ]]; then
-    vol_list="${vol_list}, devcontainer-dind"
-  fi
-  local reply
-  read -r -p "Rebuild image and remove volumes (${vol_list})? [y/N] " reply
-  case "$reply" in
-    y|Y|yes|YES)
-      cleanup_for_rebuild "$CONTAINER_NAME" "$DIND"
-      FORCE_BUILD=true
-      ;;
-    *)
-      echo "Aborted." >&2
-      exit 1
-      ;;
-  esac
-}
-
-# Compare the dev-script's $VERSION to the image's dev.version label.
-# Unlike the UID check this is advisory: a stale image still works, so
-# declining the prompt continues with the existing image. Sets
-# FORCE_BUILD=true only when the user (or DEV_ASSUME_YES) opts in.
-# Volumes are NOT wiped — they're version-agnostic.
-check_image_version_match() {
-  local tag="$1"
-  if [[ "$IMAGE_EXISTS" != true ]]; then
-    return 0
-  fi
-  if [[ "$FORCE_BUILD" == true ]]; then
-    return 0
-  fi
-  # IMAGE_VERSION was populated by check_image_uid_match's inspect call.
-  if [[ "$IMAGE_VERSION" == "$VERSION" ]]; then
-    return 0
-  fi
-  local img_label="${IMAGE_VERSION:-<missing>}"
-  if [[ "$DRY_RUN" == true ]]; then
-    echo "Would rebuild $tag for dev version $VERSION (image label: $img_label)" >&2
-    return 0
-  fi
-  if [[ "${DEV_ASSUME_YES:-0}" == "1" ]]; then
-    echo "Note: image $tag built with dev version $img_label; DEV_ASSUME_YES set, rebuilding for $VERSION." >&2
-    FORCE_BUILD=true
-    return 0
-  fi
-  if [[ ! -t 0 ]]; then
-    echo "Note: image $tag built with dev version $img_label; current dev script is $VERSION. Run 'dev --build' to rebuild." >&2
-    return 0
-  fi
-  echo "Image $tag was built with dev version $img_label; current dev script is $VERSION." >&2
-  local reply
-  read -r -p "Rebuild image? [y/N] " reply
-  case "$reply" in
-    y|Y|yes|YES)
-      FORCE_BUILD=true
-      ;;
-    *)
-      echo "Continuing with existing image. Run 'dev --build' later to rebuild." >&2
-      ;;
-  esac
-}
+_resolve_home_volume
 
 if [[ "$DIND" == true ]]; then
   refuse_if_running "$NORMAL_NAME" "normal"
@@ -1380,6 +763,7 @@ elif [[ "$MAINTENANCE" == true ]]; then
 else
   refuse_if_running "$MAINT_NAME" "maintenance"
   refuse_if_running "$DIND_NAME" "dind" "$DIND_RUNTIME_ARGS"
+  # shellcheck disable=SC2034  # consumed by start_container in lib/dev/lifecycle.sh
   CONTAINER_NAME="$NORMAL_NAME"
 fi
 
@@ -1406,204 +790,15 @@ if [[ "$FORCE_BUILD" == true ]] || [[ "$IMAGE_EXISTS" == false ]]; then
   fi
 fi
 
-# Allocate a TTY only when stdin AND stdout are real terminals; otherwise
-# docker rejects -it with "the input device is not a TTY" and scripted
-# invocations (CI, test runners, piped usage) fail.
-TTY_FLAGS=(-i)
-if [[ -t 0 && -t 1 ]]; then
-  TTY_FLAGS=(-it)
+# One-time heads-up: isolated home is now the default. If this workspace has
+# no per-workspace home volume yet but a legacy shared one exists, the user is
+# transitioning — the old volume is left untouched.
+if [[ "$DRY_RUN" != true && "${DEV_SHARED_HOME:-}" != "1" ]] \
+   && ! $RUNTIME $RUNTIME_ARGS volume inspect "$HOME_VOLUME" >/dev/null 2>&1 \
+   && $RUNTIME $RUNTIME_ARGS volume inspect devcontainer-home >/dev/null 2>&1; then
+  echo "Note: dev now uses a per-workspace home volume ($HOME_VOLUME) by default." >&2
+  echo "      Your old shared 'devcontainer-home' volume is untouched; set" >&2
+  echo "      DEV_SHARED_HOME=1 to keep using it for this workspace." >&2
 fi
 
-if [[ "$DRY_RUN" == false ]]; then
-  # The image's USER is root because entrypoint.sh needs root to run
-  # firewall-init.sh / dind-init.sh and only afterwards drops to vscode via
-  # `gosu vscode`. `docker exec` bypasses the entrypoint and uses the image's
-  # configured User, so without --user the second terminal would land as
-  # root. Pin to vscode to match the first terminal.
-  attach=false
-  if container_running "$CONTAINER_NAME"; then
-    echo "Attaching to running container $CONTAINER_NAME..."
-    attach=true
-  elif container_exists "$CONTAINER_NAME"; then
-    echo "Starting stopped container $CONTAINER_NAME..."
-    $RUNTIME $RUNTIME_ARGS start "$CONTAINER_NAME"
-    attach=true
-  fi
-  if [[ "$attach" == true ]]; then
-    if [[ ${#CMD_ARGS[@]} -gt 0 ]]; then
-      exec $RUNTIME $RUNTIME_ARGS exec --user vscode "${TTY_FLAGS[@]}" "$CONTAINER_NAME" "${CMD_ARGS[@]}"
-    else
-      exec $RUNTIME $RUNTIME_ARGS exec --user vscode "${TTY_FLAGS[@]}" "$CONTAINER_NAME" zsh
-    fi
-  fi
-fi
-
-# shellcheck disable=SC2206  # intentional word-splitting of RUNTIME_ARGS into array
-DOCKER_CMD=($RUNTIME $RUNTIME_ARGS run "${TTY_FLAGS[@]}" --rm --name "$CONTAINER_NAME")
-
-# Capability needed by entrypoint to configure iptables (used in normal mode;
-# harmless when unused in maintenance mode).
-DOCKER_CMD+=(--cap-add=NET_ADMIN)
-
-# Rootless podman's default user-namespace mapping puts container root (uid 0)
-# at the invoking host user and shifts every other container id — including
-# vscode's baked uid/gid — into the subuid/subgid range. That breaks the
-# "vscode's baked uid == host uid" assumption from the UID/GID build args
-# above: the bind-mounted /workspace (owned by the real host user) shows up
-# as root-owned to vscode, who can't write to it, and named-volume content
-# written by vscode ends up owned by a subuid instead of the host user.
-# --userns=keep-id fixes this by mapping the invoking host user 1:1 onto the
-# matching container id instead, so vscode's baked uid lines up with the real
-# host uid again. Rootful podman and Docker don't remap ids at all, so the
-# baked uid already matches there — this only applies to rootless podman.
-KEEPID_MIGRATE=false
-if $RUNTIME $RUNTIME_ARGS --version 2>/dev/null | grep -qi podman && runtime_is_rootless; then
-  DOCKER_CMD+=(--userns=keep-id)
-  KEEPID_MIGRATE=true
-fi
-
-DOCKER_CMD+=(-v "$(pwd):/workspace")
-DOCKER_CMD+=(-v devcontainer-mise:/mise)
-DOCKER_CMD+=(-v devcontainer-home:/home/vscode)
-
-# Approved project allowlist: mount the state dir read-only. firewall-init.sh
-# reads allowlist.approved from here, never from the agent-writable workspace.
-if [[ "$MOUNT_PROJECT_ALLOWLIST" == true ]]; then
-  DOCKER_CMD+=(-v "$STATE_DIR:/etc/devcontainer/project:ro")
-fi
-
-# Named volumes populated before --userns=keep-id was added are owned
-# on-disk by the old mapping's subuid, not the host user, so vscode (now
-# mapped 1:1 to the host user) can no longer write into them. Re-chown once;
-# checking the volume's raw owner against $HOST_UID makes this a no-op on
-# every run after the first. `podman unshare` runs the chown inside the
-# same default (non-keep-id) mapping the volume was written under, where
-# container id 0 is the invoking host user — chowning to 0:0 there writes
-# the real host UID/GID onto the raw files.
-migrate_volume_for_keepid() {
-  local vol="$1" mountpoint raw_owner
-  mountpoint=$($RUNTIME $RUNTIME_ARGS volume inspect "$vol" --format '{{.Mountpoint}}' 2>/dev/null) || return 0
-  [[ -d "$mountpoint" ]] || return 0
-  raw_owner=$(stat -c '%u' "$mountpoint" 2>/dev/null) || return 0
-  [[ "$raw_owner" == "$HOST_UID" ]] && return 0
-  echo "Migrating $vol ownership for --userns=keep-id (one-time)..." >&2
-  $RUNTIME $RUNTIME_ARGS unshare chown -R 0:0 "$mountpoint"
-}
-if [[ "$KEEPID_MIGRATE" == true && "$DRY_RUN" == false ]]; then
-  migrate_volume_for_keepid devcontainer-mise
-  migrate_volume_for_keepid devcontainer-home
-  [[ "$DIND" == true ]] && migrate_volume_for_keepid devcontainer-dind
-fi
-
-# DinD-specific runtime knobs.
-# SYS_ADMIN is required for rootless dockerd's newuidmap to set up
-# multi-range user-namespace mappings. The kernel checks CAP_SYS_ADMIN
-# in the writer's userns chain when writing /proc/<pid>/uid_map with
-# more than one range; default docker drops this cap from the container's
-# bounding set. This is far less than --privileged: vscode is not in
-# sudoers, so the container's root caps are only reachable via setuid
-# binaries (notably newuidmap), which is exactly the path the rootlesskit
-# stack uses anyway. Without SYS_ADMIN, dockerd-rootless fails at start
-# with "newuidmap: write to uid_map failed: Operation not permitted".
-if [[ "$DIND" == true ]]; then
-  DOCKER_CMD+=(--device=/dev/fuse)
-  DOCKER_CMD+=(--device=/dev/net/tun)   # slirp4netns needs tun for nested-container networking
-  DOCKER_CMD+=(--cap-add=SYS_ADMIN)
-  DOCKER_CMD+=(--security-opt apparmor=unconfined)
-  DOCKER_CMD+=(--security-opt seccomp=unconfined)
-  # systempaths=unconfined undoes Docker's default masking of /proc paths
-  # (e.g. /proc/sys/kernel/*). The nested runc inside dockerd-rootless needs
-  # to (re-)mount procfs in the spawned container; the default mask makes
-  # that fail with "mount proc:/proc ... operation not permitted".
-  DOCKER_CMD+=(--security-opt systempaths=unconfined)
-  # label=disable turns off SELinux confinement for the container. On
-  # SELinux hosts (Fedora — including the rootful podman-machine VM on
-  # macOS), the default container_t label blocks the nested runc from
-  # mounting a fresh procfs in the spawned container, surfacing as
-  # `mount proc:/proc ... permission denied`. systempaths=unconfined
-  # alone is not enough; SELinux denies the mount even after the proc
-  # masks are removed. Silently ignored on hosts without SELinux.
-  DOCKER_CMD+=(--security-opt label=disable)
-  DOCKER_CMD+=(-v devcontainer-dind:/home/vscode/.local/share/docker)
-fi
-
-# Skip default ports if another dev-* container is already running (they'd collide).
-# Explicit --port requests are left alone so conflicts there still surface.
-if [[ "$DEFAULT_PORTS" == true ]]; then
-  OTHER_DEV=$($RUNTIME $RUNTIME_ARGS ps --format '{{.Names}}' | grep '^dev-' | grep -vx "$CONTAINER_NAME" || true)
-  if [[ -n "$OTHER_DEV" ]]; then
-    echo "Note: another dev container is running ($(echo "$OTHER_DEV" | paste -sd, -)); skipping default port forwards." >&2
-    DEFAULT_PORTS=false
-  fi
-fi
-
-if [[ "$DEFAULT_PORTS" == true ]]; then
-  DOCKER_CMD+=(-p 5173:5173 -p 5174:5174 -p 8080:8080 -p 2345:2345 -p 3000:3000)
-fi
-
-if [[ ${#EXTRA_PORTS[@]} -gt 0 ]]; then
-  for port in "${EXTRA_PORTS[@]}"; do
-    DOCKER_CMD+=(-p "$port:$port")
-  done
-fi
-
-# --host-port: map host.docker.internal and pass the port list to the
-# entrypoint so firewall-init.sh can add a per-port iptables ACCEPT for
-# the host gateway. The mapping uses Docker's host-gateway sentinel,
-# resolved by the runtime to the bridge IP (Linux) or the Docker Desktop
-# host (macOS).
-if [[ ${#HOST_PORTS[@]} -gt 0 ]]; then
-  DOCKER_CMD+=(--add-host=host.docker.internal:host-gateway)
-  _hp_csv="$(IFS=,; echo "${HOST_PORTS[*]}")"
-  DOCKER_CMD+=(-e "DEVCONTAINER_HOST_PORTS=$_hp_csv")
-fi
-
-if [[ -n ${GITHUB_TOKEN:-} ]]; then
-  DOCKER_CMD+=(-e GITHUB_TOKEN)
-fi
-
-# Escape hatch for hosts/test runs that need to inject extra `docker run`
-# args (e.g. --dns=8.8.8.8 on a host with broken IPv6 resolvers, or extra
-# --tmpfs / --label arguments for a CI environment). Word-split with
-# read -ra so callers can pass multiple args in a single env var.
-if [[ -n ${DEV_EXTRA_RUN_ARGS:-} ]]; then
-  read -ra _DEV_EXTRA <<< "$DEV_EXTRA_RUN_ARGS"
-  DOCKER_CMD+=("${_DEV_EXTRA[@]}")
-fi
-
-# Maintenance mode: tell entrypoint.sh to skip firewall init and grant sudo.
-# Also passes through /dev/kvm when present on the host, so developers can
-# exercise scripts/test/run-in-vm.sh (KVM-accelerated QEMU) from inside the
-# sandbox. Gracefully skipped on macOS hosts (no /dev/kvm).
-if [[ "$MAINTENANCE" == true ]]; then
-  DOCKER_CMD+=(-e DEVCONTAINER_MAINTENANCE=1)
-  if [[ -e /dev/kvm ]]; then
-    DOCKER_CMD+=(--device=/dev/kvm)
-  fi
-fi
-
-# DinD mode: tell entrypoint.sh to start dockerd-rootless.
-if [[ "$DIND" == true ]]; then
-  DOCKER_CMD+=(-e DEVCONTAINER_DIND=1)
-fi
-
-# --disable-firewall with no running container: bring the fresh container up
-# with the firewall already torn down (entrypoint still runs firewall-init.sh,
-# then firewall-disable.sh).
-if [[ "$FW_DISABLED_START" == true ]]; then
-  DOCKER_CMD+=(-e DEVCONTAINER_FW_DISABLED=1)
-fi
-
-DOCKER_CMD+=("$IMAGE_TAG")
-
-if [[ ${#CMD_ARGS[@]} -gt 0 ]]; then
-  DOCKER_CMD+=("${CMD_ARGS[@]}")
-else
-  DOCKER_CMD+=(zsh)
-fi
-
-if [[ "$DRY_RUN" == true ]]; then
-  echo "${DOCKER_CMD[*]}"
-else
-  exec "${DOCKER_CMD[@]}"
-fi
+start_container

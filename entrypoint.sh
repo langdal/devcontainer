@@ -98,6 +98,15 @@ fi
 
 # Configure git to trust /workspace as a safe directory.
 git config --global --add safe.directory /workspace
+
+# Seed git identity from the host ONLY if the container has none yet (never
+# clobber an identity already present on a persisted/shared home volume).
+if [ -n "${DEV_GIT_NAME:-}" ] && [ -z "$(git config --global user.name || true)" ]; then
+    git config --global user.name "$DEV_GIT_NAME"
+fi
+if [ -n "${DEV_GIT_EMAIL:-}" ] && [ -z "$(git config --global user.email || true)" ]; then
+    git config --global user.email "$DEV_GIT_EMAIL"
+fi
 INNER
 
 # Drop privileges to vscode for the actual command.

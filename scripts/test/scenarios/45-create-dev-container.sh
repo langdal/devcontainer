@@ -2,7 +2,7 @@
 # scripts/test/scenarios/45-create-dev-container.sh
 # platform: any
 #
-# `dev --create-dev-container` writes a self-contained .devcontainer/
+# `dev scaffold` writes a self-contained .devcontainer/
 # in the CWD. Covers: normal mode, collision refusal, --force overwrite,
 # dind mode. Pure host-side file manipulation; no container is started.
 set -u
@@ -33,7 +33,7 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK" "${WORK}_b" "${WORK}_d"' EXIT
 
 cd "$WORK" || exit 1
-if ! "$DEV" --create-dev-container >/dev/null 2>&1; then
+if ! "$DEV" scaffold >/dev/null 2>&1; then
     log_fail "normal-mode generation failed in clean dir"
     exit 1
 fi
@@ -73,7 +73,7 @@ fi
 
 # ---------- collision: refuse without --force ----------
 SHA_BEFORE=$(sha256sum .devcontainer/devcontainer.json | awk '{print $1}')
-if "$DEV" --create-dev-container >/dev/null 2>&1; then
+if "$DEV" scaffold >/dev/null 2>&1; then
     log_fail "second generation should fail without --force"
     exit 1
 fi
@@ -85,7 +85,7 @@ fi
 
 # ---------- collision: --force overwrites ----------
 echo "stub" > .devcontainer/Dockerfile
-if ! "$DEV" --create-dev-container --force >/dev/null 2>&1; then
+if ! "$DEV" scaffold --force >/dev/null 2>&1; then
     log_fail "--force should succeed over existing files"
     exit 1
 fi
@@ -98,7 +98,7 @@ fi
 WORK_D="${WORK}_d"
 mkdir -p "$WORK_D"
 cd "$WORK_D" || exit 1
-if ! "$DEV" --create-dev-container --dind >/dev/null 2>&1; then
+if ! "$DEV" scaffold --dind >/dev/null 2>&1; then
     log_fail "dind-mode generation failed"
     exit 1
 fi
@@ -134,10 +134,10 @@ fi
 WORK_B="${WORK}_b"
 mkdir -p "$WORK_B"
 cd "$WORK_B" || exit 1
-if "$DEV" --create-dev-container --build >/dev/null 2>&1; then
-    log_fail "should reject --create-dev-container --build"
+if "$DEV" scaffold --build >/dev/null 2>&1; then
+    log_fail "should reject scaffold --build"
     exit 1
 fi
 
-log_pass "create-dev-container generates valid normal/dind .devcontainer/"
+log_pass "scaffold generates valid normal/dind .devcontainer/"
 exit 0

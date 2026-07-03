@@ -65,5 +65,15 @@ refuse_normal_due_to "$D" || exit 1
 refuse_flag_due_to --maintenance "$D" || exit 1
 "$RUNTIME" stop "$D" 2>/dev/null; "$RUNTIME" rm -f "$D" 2>/dev/null
 
-log_pass "three-way conflict guard correct on all pairs"
+# Pair 4: --dind and --maintenance together in the same invocation are
+# mutually exclusive, independent of any running container.
+"$RUNTIME" rm -f "$N" "$M" "$D" 2>/dev/null
+if out=$(./dev --dind --maintenance -- true 2>&1); then
+    log_fail "--dind --maintenance together should have been rejected"
+    exit 1
+fi
+expect_grep "$out" "mutually exclusive" \
+    || { log_fail "expected mutual-exclusivity error; got: $out"; exit 1; }
+
+log_pass "three-way conflict guard and --dind/--maintenance mutex correct"
 exit 0

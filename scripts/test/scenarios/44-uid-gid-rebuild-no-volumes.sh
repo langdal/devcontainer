@@ -5,6 +5,11 @@
 # cleanup_for_rebuild must skip absent volumes silently. Otherwise a
 # user who manually wiped their volumes hits a `volume rm: no such
 # volume` and fails the rebuild flow.
+#
+# The home volume is per-workspace by default (devcontainer-home-<dir>);
+# this scenario is about the generic rebuild/re-create behavior, not
+# naming, so it opts into DEV_SHARED_HOME=1 to keep exercising the literal
+# devcontainer-home volume with the least churn.
 set -u
 LIB="$(dirname "$0")/../lib"
 # shellcheck source=scripts/test/lib/assert.sh
@@ -21,6 +26,7 @@ WS=$(basename "$(pwd)")
 remember_container "dev-${WS}"
 
 HOST_UID=$(id -u)
+export DEV_SHARED_HOME=1
 
 "$RUNTIME" rm -f "dev-${WS}" >/dev/null 2>&1
 build_image_with_uid_gid 4242 4242 || exit 1
