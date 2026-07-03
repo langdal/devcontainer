@@ -40,14 +40,11 @@ docker rm -f "dev-${WS}" >/dev/null 2>&1
 # Bake a matching UID/GID image with an intentionally-stale dev.version
 # label. UID matches so the UID check passes and the version check is
 # what we actually exercise.
-if ! docker buildx build --network=host \
-        --build-arg "USER_UID=${HOST_UID}" \
-        --build-arg "USER_GID=${HOST_GID}" \
-        --build-arg "DEV_VERSION=${OLD_VERSION}" \
-        -t generic-devcontainer . >/dev/null 2>&1; then
-    log_fail "could not build image with stale dev.version label"
-    exit 1
-fi
+build_scenario_image "could not build image with stale dev.version label" \
+    --build-arg "USER_UID=${HOST_UID}" \
+    --build-arg "USER_GID=${HOST_GID}" \
+    --build-arg "DEV_VERSION=${OLD_VERSION}" \
+    -t generic-devcontainer || exit 1
 
 # --- Path 1: non-interactive default-no ---
 # Closed stdin → not a TTY → dev should warn and continue (rc=0).

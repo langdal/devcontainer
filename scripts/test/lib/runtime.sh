@@ -66,3 +66,35 @@ apt_remove_if_installed_by_test() {
         sudo apt-get autoremove -y >/dev/null 2>&1 || true
     fi
 }
+
+# Build a scenario-specific image directly with `docker buildx build`,
+# forwarding GITHUB_TOKEN as a BuildKit secret when set, mirroring dev's
+# own runtime_build() — without it, `mise install` in the Dockerfile hits
+# GitHub's API anonymously, and the 60/hr unauthenticated limit is shared
+# across the whole CI runner IP pool, so it's easy to exhaust well before
+# these scenarios run. On failure, prints the captured build output via
+# the given failure message so the real error doesn't get silently lost.
+# Extra args (e.g. --build-arg, -t) are passed through as-is.
+build_scenario_image() {
+    local fail_msg="$1"; shift
+    local extra=() out rc
+    if [ -n "${GITHUB_TOKEN:-}" ]; then
+        extra+=(--secret "id=github_token,env=GITHUB_TOKEN")
+    fi
+    out=$(docker buildx build --network=host "${extra[@]}" "$@" . 2>&1)
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+        log_fail "${fail_msg}: ${out}"
+    fi
+    return "$rc"
+}
+
+# Build the image with a given UID/GID pair, the way the uid-gid-mismatch
+# scenarios do to simulate a stale/foreign image. See build_scenario_image
+# for why GITHUB_TOKEN forwarding matters here.
+build_image_with_uid_gid() {
+    local uid="$1" gid="$2" tag="${3:-generic-devcontainer}"
+    build_scenario_image "could not build mismatched image" \
+        --build-arg "USER_UID=${uid}" --build-arg "USER_GID=${gid}" \
+        -t "$tag"
+}

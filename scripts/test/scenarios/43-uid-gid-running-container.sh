@@ -15,11 +15,17 @@ LIB="$(dirname "$0")/../lib"
 . "$LIB/restore.sh"
 require_platform linux
 
-# TODO(devcontainer-ci): quarantined on Debian 13 (trixie). Scenario fails
-# consistently when run inside the QEMU CI cell (passes locally on
-# Ubuntu, mixed on Fedora). Root cause unknown — likely a race between
-# the rebuild path's container teardown and the subsequent re-attach.
-# Remove this skip once the underlying interaction is debugged.
+# TODO(devcontainer-ci): quarantined on Debian 13 (trixie). Originally
+# filed as "root cause unknown" because the build step's stderr was
+# swallowed. 2026-07-03: the sibling scenarios (41/42/44) hit the same
+# "could not build mismatched image" failure in CI, traced to this
+# scenario's raw `docker buildx build` not forwarding GITHUB_TOKEN as a
+# BuildKit secret (unlike dev's own runtime_build()) — mise install then
+# hits GitHub's API anonymously and can hit the 60/hr limit, which is
+# shared across the whole CI runner IP pool. Now fixed via
+# build_image_with_uid_gid() in lib/runtime.sh. Leaving the skip in place
+# until a green Debian run confirms this was the whole story — remove it
+# then.
 if [ -r /etc/os-release ] && grep -q '^ID=debian$' /etc/os-release; then
     log_skip "quarantined on Debian (flaky; see TODO in scenario)"
     exit 0
@@ -35,12 +41,7 @@ remember_container "$CN"
 HOST_UID=$(id -u)
 
 docker rm -f "$CN" >/dev/null 2>&1
-if ! docker buildx build --network=host \
-        --build-arg USER_UID=4242 --build-arg USER_GID=4242 \
-        -t generic-devcontainer . >/dev/null 2>&1; then
-    log_fail "could not build mismatched image"
-    exit 1
-fi
+build_image_with_uid_gid 4242 4242 || exit 1
 OLD_IMAGE_ID=$(docker images -q generic-devcontainer)
 
 # Long-running stale container.
