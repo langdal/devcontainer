@@ -24,12 +24,7 @@ HOST_UID=$(id -u)
 
 # Bypass dev to bake labels of 4242:4242 directly.
 docker rm -f "dev-${WS}" >/dev/null 2>&1
-if ! docker buildx build --network=host \
-        --build-arg USER_UID=4242 --build-arg USER_GID=4242 \
-        -t generic-devcontainer . >/dev/null 2>&1; then
-    log_fail "could not build mismatched image"
-    exit 1
-fi
+build_image_with_uid_gid 4242 4242 || exit 1
 
 # Closed stdin → non-interactive. dev should exit non-zero.
 out=$(./dev -- true </dev/null 2>&1)

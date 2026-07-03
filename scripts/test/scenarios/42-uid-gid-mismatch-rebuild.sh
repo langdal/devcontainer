@@ -24,12 +24,7 @@ HOST_UID=$(id -u)
 
 # Build mismatched image directly.
 docker rm -f "dev-${WS}" >/dev/null 2>&1
-if ! docker buildx build --network=host \
-        --build-arg USER_UID=4242 --build-arg USER_GID=4242 \
-        -t generic-devcontainer . >/dev/null 2>&1; then
-    log_fail "could not build mismatched image"
-    exit 1
-fi
+build_image_with_uid_gid 4242 4242 || exit 1
 
 # Plant a marker in devcontainer-home that the rebuild path must wipe.
 docker volume create devcontainer-home >/dev/null
