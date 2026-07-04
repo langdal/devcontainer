@@ -15,6 +15,11 @@ container_exists() {
   # shellcheck disable=SC2086  # intentional word-splitting of RUNTIME_ARGS
   $RUNTIME ${2-$RUNTIME_ARGS} ps -aq -f name="^$1\$" | grep -q .
 }
+# Value of a label on container $1, or "<no value>" if the label is absent.
+container_label() {
+  # shellcheck disable=SC2086  # intentional word-splitting of RUNTIME_ARGS
+  $RUNTIME $RUNTIME_ARGS inspect --format "{{index .Config.Labels \"$2\"}}" "$1" 2>/dev/null
+}
 
 # Destructive helpers shared by the rebuild path and --reset. Both take an
 # explicit connection-args string ($2) rather than defaulting — callers
@@ -209,6 +214,16 @@ start_container() {
     TTY_FLAGS=(-it)
   fi
 
+  # Whether this invocation would create the container with --userns=keep-id
+  # (rootless podman only; see the create path below). Computed up front so the
+  # reuse guard and the create path agree, and recorded as the dev.keepid label
+  # so a later run can tell how an existing container was created.
+  EXPECT_KEEPID=false
+  # shellcheck disable=SC2086  # intentional word-splitting of RUNTIME_ARGS
+  if $RUNTIME $RUNTIME_ARGS --version 2>/dev/null | grep -qi podman && runtime_is_rootless; then
+    EXPECT_KEEPID=true
+  fi
+
   if [[ "$DRY_RUN" == false ]]; then
     # The image's USER is root because entrypoint.sh needs root to run
     # firewall-init.sh / dind-init.sh and only afterwards drops to vscode via
@@ -216,14 +231,28 @@ start_container() {
     # configured User, so without --user the second terminal would land as
     # root. Pin to vscode to match the first terminal.
     attach=false
-    if container_running "$CONTAINER_NAME"; then
-      echo "Attaching to running container $CONTAINER_NAME..."
-      attach=true
-    elif container_exists "$CONTAINER_NAME"; then
-      echo "Starting stopped container $CONTAINER_NAME..."
-      # shellcheck disable=SC2086  # intentional word-splitting of RUNTIME_ARGS
-      $RUNTIME $RUNTIME_ARGS start "$CONTAINER_NAME"
-      attach=true
+    if container_exists "$CONTAINER_NAME"; then
+      if [[ "$EXPECT_KEEPID" == true ]] \
+         && [[ "$(container_label "$CONTAINER_NAME" dev.keepid)" != "true" ]]; then
+        # The existing container predates --userns=keep-id (older dev version,
+        # or created before this label existed). Reusing it via `exec` would
+        # leave vscode's uid mapped so it cannot write /mise or $HOME under
+        # rootless podman -- the "java/JAVA_HOME missing after an upgrade" trap.
+        # Recreate it with the correct mapping instead of attaching.
+        echo "Recreating $CONTAINER_NAME: it was created without --userns=keep-id" >&2
+        echo "  (older dev version or different runtime). Reusing it would leave vscode" >&2
+        echo "  unable to write /mise and \$HOME under rootless podman." >&2
+        # shellcheck disable=SC2086  # intentional word-splitting of RUNTIME_ARGS
+        $RUNTIME $RUNTIME_ARGS rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
+      elif container_running "$CONTAINER_NAME"; then
+        echo "Attaching to running container $CONTAINER_NAME..."
+        attach=true
+      else
+        echo "Starting stopped container $CONTAINER_NAME..."
+        # shellcheck disable=SC2086  # intentional word-splitting of RUNTIME_ARGS
+        $RUNTIME $RUNTIME_ARGS start "$CONTAINER_NAME"
+        attach=true
+      fi
     fi
     if [[ "$attach" == true ]]; then
       if [[ ${#CMD_ARGS[@]} -gt 0 ]]; then
@@ -255,11 +284,13 @@ start_container() {
   # host uid again. Rootful podman and Docker don't remap ids at all, so the
   # baked uid already matches there — this only applies to rootless podman.
   KEEPID_MIGRATE=false
-  # shellcheck disable=SC2086  # intentional word-splitting of RUNTIME_ARGS
-  if $RUNTIME $RUNTIME_ARGS --version 2>/dev/null | grep -qi podman && runtime_is_rootless; then
+  if [[ "$EXPECT_KEEPID" == true ]]; then
     DOCKER_CMD+=(--userns=keep-id)
     KEEPID_MIGRATE=true
   fi
+  # Record how the container was created so a later invocation's reuse guard
+  # (see above) can detect a mapping mismatch and recreate instead of attaching.
+  DOCKER_CMD+=(--label "dev.keepid=$EXPECT_KEEPID")
 
   DOCKER_CMD+=(-v "$(pwd):/workspace")
   DOCKER_CMD+=(-v devcontainer-mise:/mise)
