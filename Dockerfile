@@ -100,16 +100,21 @@ RUN --mount=type=secret,id=github_token,uid=1000 \
         mise install; \
     fi
 
-# Add mise shell activation to zsh. Single quotes are intentional — we
-# want the literal '$(mise activate zsh)' written to .zshrc, not the
-# build-time expansion.
+# Add mise shell activation to zsh AND bash. Single quotes are intentional —
+# we want the literal '$(mise activate ...)' written to the rc file, not the
+# build-time expansion. Activation (not just the /mise/shims PATH entry baked
+# via ENV) is what exports tool env vars like JAVA_HOME; without it a bash
+# shell resolves `java` via the shim but leaves JAVA_HOME unset, which breaks
+# JAVA_HOME-dependent tooling such as gradlew.
 # hadolint ignore=DL3059,SC2016
-RUN echo 'eval "$(mise activate zsh)"' >> /home/vscode/.zshrc
+RUN echo 'eval "$(mise activate zsh)"'  >> /home/vscode/.zshrc && \
+    echo 'eval "$(mise activate bash)"' >> /home/vscode/.bashrc
 
 # Stage reference copy of managed home files for entrypoint sync
 USER root
 RUN mkdir -p /etc/skel.devcontainer && \
-    cp /home/vscode/.zshrc /etc/skel.devcontainer/.zshrc
+    cp /home/vscode/.zshrc  /etc/skel.devcontainer/.zshrc && \
+    cp /home/vscode/.bashrc /etc/skel.devcontainer/.bashrc
 
 # --- Firewall staging ---
 # Ensure the 'proxy' system user exists (the tinyproxy package may already
