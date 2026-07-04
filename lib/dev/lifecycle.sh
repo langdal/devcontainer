@@ -267,8 +267,13 @@ start_container() {
 
   # Approved project allowlist: mount the state dir read-only. firewall-init.sh
   # reads allowlist.approved from here, never from the agent-writable workspace.
+  # The env signal lets entrypoint.sh tell "mise install failed because a tool's
+  # download host was blocked by an unapproved allowlist" apart from other
+  # failures, and point the user at the approval step instead of leaving the
+  # tool silently missing from PATH.
   if [[ "$MOUNT_PROJECT_ALLOWLIST" == true ]]; then
     DOCKER_CMD+=(-v "$STATE_DIR:/etc/devcontainer/project:ro")
+    DOCKER_CMD+=(-e DEVCONTAINER_PROJECT_ALLOWLIST=applied)
   fi
 
   if [[ "$KEEPID_MIGRATE" == true && "$DRY_RUN" == false ]]; then

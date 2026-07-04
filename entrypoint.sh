@@ -112,6 +112,19 @@ ensure_mise_activate .bashrc bash
 if [[ -f /workspace/mise.toml ]] || [[ -f /workspace/.mise.toml ]]; then
     if ! mise install; then
         echo "WARNING: mise install failed, but continuing with container startup" >&2
+        # A common, easy-to-miss cause: a project tool downloads from a host
+        # that is only in the workspace .devcontainer-allowlist, but that
+        # allowlist was not approved on the host, so the firewall blocked the
+        # download. The tool then silently never lands on PATH. Point at the
+        # fix rather than leaving the user to rediscover it.
+        if [[ -f /workspace/.devcontainer-allowlist ]] \
+           && [[ "${DEVCONTAINER_PROJECT_ALLOWLIST:-}" != "applied" ]]; then
+            echo "         NOTE: /workspace/.devcontainer-allowlist is present but was NOT" >&2
+            echo "         applied to the firewall, so any download host listed only there" >&2
+            echo "         is blocked. If that caused the failure above, approve the allowlist" >&2
+            echo "         on the host: run 'dev' interactively and accept the prompt (or set" >&2
+            echo "         DEV_ASSUME_YES=1), then restart the container so mise install retries." >&2
+        fi
     fi
 fi
 
