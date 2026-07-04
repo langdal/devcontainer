@@ -31,6 +31,13 @@ nodejs.org
 mise-versions.jdx.dev
 *.jdx.dev
 
+# Sigstore — mise verifies GitHub artifact attestations for aqua/ubi/github
+# backend tools (jq, actionlint, hadolint, ...). Without these the install
+# fails at "verify GitHub artifact attestations" with a TUF fetch error.
+tuf-repo-cdn.sigstore.dev
+rekor.sigstore.dev
+fulcio.sigstore.dev
+
 # OS packages
 deb.debian.org
 security.debian.org
