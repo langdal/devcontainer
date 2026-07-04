@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.5.1](https://github.com/langdal/devcontainer/compare/v1.5.0...v1.5.1) (2026-07-04)
+
+
+### Bug Fixes
+
+* **dev:** bust buildah label cache on DEV_VERSION build-arg change ([2f38fb0](https://github.com/langdal/devcontainer/commit/2f38fb0e1ba3daae2c07ff79bada5c9ba14c3fec))
+* **dev:** bust buildah label cache on DEV_VERSION build-arg change ([6d19dac](https://github.com/langdal/devcontainer/commit/6d19dac80acf02932ee8da691f1e044710e5951a))
+
 ## [1.5.0](https://github.com/langdal/devcontainer/compare/v1.4.0...v1.5.0) (2026-07-04)
 
 
