@@ -83,11 +83,30 @@ fi
 gosu vscode bash <<'INNER'
 set -u
 
-# Seed .zshrc from the Dockerfile's staged copy if the home volume came up
-# empty (the volume mount shadows the .zshrc baked into the image).
-if [[ ! -f /home/vscode/.zshrc ]] && [[ -f /etc/skel.devcontainer/.zshrc ]]; then
-    cp /etc/skel.devcontainer/.zshrc /home/vscode/.zshrc
-fi
+# Seed .zshrc/.bashrc from the Dockerfile's staged copies if the home volume
+# came up empty (the volume mount shadows the rc files baked into the image).
+for rc in .zshrc .bashrc; do
+    if [[ ! -f "/home/vscode/$rc" ]] && [[ -f "/etc/skel.devcontainer/$rc" ]]; then
+        cp "/etc/skel.devcontainer/$rc" "/home/vscode/$rc"
+    fi
+done
+
+# Idempotently ensure mise activation is present in both rc files. A home
+# volume created by an older image (or a user's pre-existing one) can have an
+# rc file that predates a given activation line — most notably .bashrc, which
+# never carried `mise activate` before. Without activation a bash shell gets
+# the /mise/shims PATH entry (so `java` resolves) but no exported tool env,
+# leaving JAVA_HOME unset and breaking gradlew and similar. Append only when
+# missing so a customised rc file is otherwise left untouched.
+ensure_mise_activate() {
+    local rc="/home/vscode/$1" shell="$2" line
+    line="eval \"\$(mise activate ${shell})\""
+    [[ -f "$rc" ]] || return 0
+    grep -qF "mise activate ${shell}" "$rc" && return 0
+    printf '%s\n' "$line" >> "$rc"
+}
+ensure_mise_activate .zshrc  zsh
+ensure_mise_activate .bashrc bash
 
 # Try to install mise-managed tools if a project mise.toml exists.
 if [[ -f /workspace/mise.toml ]] || [[ -f /workspace/.mise.toml ]]; then
