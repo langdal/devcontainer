@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.5.0](https://github.com/langdal/devcontainer/compare/v1.4.0...v1.5.0) (2026-07-04)
+
+
+### Features
+
+* **dev:** surface unapproved allowlist as a likely mise-install cause ([12c49aa](https://github.com/langdal/devcontainer/commit/12c49aaf28a2aedd57877ab1cef6594a2abadf6f))
+
+
+### Bug Fixes
+
+* **dev:** recreate a stale non-keep-id container instead of reusing it ([2345432](https://github.com/langdal/devcontainer/commit/234543270ca9dc0671311e631f4ce1c326892478))
+* **firewall:** allowlist Sigstore hosts for mise attestation verification ([8b36b69](https://github.com/langdal/devcontainer/commit/8b36b6983f4df6f783df20fd8b12f7a5c7669241))
+* **shell:** activate mise for bash so JAVA_HOME and tool env are set ([71abbae](https://github.com/langdal/devcontainer/commit/71abbae35f3bed7beada1e569c2e277006ce82ef))
+
 ## [1.4.0](https://github.com/langdal/devcontainer/compare/v1.3.0...v1.4.0) (2026-07-03)
 
 
