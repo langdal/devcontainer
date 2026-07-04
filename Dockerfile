@@ -142,7 +142,19 @@ COPY --chmod=755 entrypoint.sh /entrypoint.sh
 # an image was built by an older script and prompt for a rebuild. Kept as
 # the last LABEL layer so version bumps don't bust the heavy layers above;
 # the dind stage inherits this label via FROM base.
+#
+# The no-op RUN below is required for the LABEL's cache to invalidate
+# correctly: Docker's BuildKit includes an ARG's resolved value in the
+# cache key of every following instruction, but podman/buildah's build
+# engine does not do this for metadata-only instructions (LABEL/ENV) —
+# only for instructions it substitutes into an actual shell command
+# (RUN). Without it, `docker buildx build` on a host where `docker` is
+# podman's docker-shim (common on Linux without real Docker installed)
+# silently reuses the cached LABEL layer forever, so accepting `./dev`'s
+# version-rebuild prompt never actually updates the label and the prompt
+# reappears on every subsequent run.
 ARG DEV_VERSION=unknown
+RUN : "${DEV_VERSION}"
 LABEL dev.version="${DEV_VERSION}"
 
 # Use entrypoint for initialization. CMD is "sleep infinity" so the
