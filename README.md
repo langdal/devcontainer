@@ -276,6 +276,53 @@ Three components:
 - **entrypoint.sh** — Runs on every container start. Sets up the firewall (or skips it in maintenance mode), runs `mise install` if a `mise.toml` is in `/workspace`, marks `/workspace` as a safe git directory, then `exec`s the shell.
 - **dev** — Host-side wrapper. Manages container lifecycle: image build, container reuse, volume mounts, port forwarding, mode selection, firewall toggling.
 
+The whole tool is those three files wired so an agent running as `vscode` can
+code in a real container but cannot reach the network except through a filtered
+gate. A run flows from your terminal to a locked-down shell like this:
+
+```
+  HOST  (runs as you)
+  +---------------------------------------+   +---------------------------------------+
+  | ./dev  -- lifecycle wrapper           |   | Dockerfile  -- image recipe           |
+  |   * bakes UID/GID, builds the image   |   |   * mise + base tools  -> /mise       |
+  |   * reuses the dev-<dir> container    |   |   * allowlist.base + firewall scripts |
+  |   * mounts volumes, forwards ports    |   |   * stages entrypoint.sh + .zshrc     |
+  |   * passes GITHUB_TOKEN + git ident   |   |                                       |
+  |   * merges allowlists, picks a mode   |   |   Dockerfile  --build-->  image       |
+  +---------------------------------------+   +---------------------------------------+
+                     |
+                     |  ./dev  ->  docker run
+                     v
+  +===================================================================================+   user: vscode, no sudo
+  |                                                                                   |
+  |  entrypoint.sh   (runs as root on start, then drops privilege)                    |
+  |    1. firewall-init.sh   iptables OUTPUT->DROP, tinyproxy up, exports HTTPS_PROXY |
+  |         |  [fails closed -- no firewall, no container]                            |
+  |    2. mise install       installs tools from /workspace/mise.toml                 |
+  |         |                                                                         |
+  |    3. git config         marks /workspace safe; seeds git identity if unset       |
+  |         |                                                                         |
+  |    4. exec gosu vscode   your shell -- unprivileged, behind the wall              |
+  |                                                                                   |
+  |  persisted state:   devcontainer-mise -> /mise            (shared)                |
+  |                     home-<dir>        -> /home/vscode      (per-project)          |
+  |                     devcontainer-dind -> docker data       (dind only)            |
+  |                     bind mount        -> ./ = /workspace   (your live code)       |
+  |                                                                                   |
+  |  -- the only way out is the gate ------------------------------------------       |
+  |    [ok]   allowed   tinyproxy -> allowlisted host:443                             |
+  |    [xx]   dropped   raw socket / off-allowlist host  (iptables owner rule)        |
+  +===================================================================================+
+```
+
+Same wiring, three modes: `./dev` (firewall on, no sudo — the default),
+`./dev --maintenance` (separate container, firewall off, sudo back on) and
+`./dev --dind` (adds rootless dockerd; nested pulls still routed through the
+proxy).
+
+A rendered version of this diagram lives at [`docs/architecture.html`](docs/architecture.html)
+(open it in a browser).
+
 ## Tests
 
 End-to-end suite under `scripts/test/` (needs passwordless `sudo`):

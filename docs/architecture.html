@@ -1,0 +1,553 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How the dev tool fits together</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  body { margin: 0; }
+  img { max-width: 100%; }
+  :root {
+    --bg: #E8E9E5;
+    --grid: #d7d9d1;
+    --surface: #F6F6F3;
+    --surface-2: #FDFDFB;
+    --ink: #23241F;
+    --muted: #6C6E66;
+    --line: #C6C9BF;
+    --line-strong: #A9AC9F;
+    --accent: #A96E14;
+    --accent-soft: #f0e3c8;
+    --allow: #2F7D5B;
+    --allow-soft: #dcebe1;
+    --drop: #B44A32;
+    --drop-soft: #f1ddd5;
+    --shadow: 0 1px 2px rgba(35,36,31,.06), 0 8px 24px rgba(35,36,31,.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #131512;
+      --grid: #1d201b;
+      --surface: #1C1F1B;
+      --surface-2: #23261F;
+      --ink: #E9EBE4;
+      --muted: #969A8E;
+      --line: #33362F;
+      --line-strong: #4a4e44;
+      --accent: #E6B24C;
+      --accent-soft: #37301d;
+      --allow: #5FB98A;
+      --allow-soft: #1b2c23;
+      --drop: #E07B5F;
+      --drop-soft: #2e1f1a;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 30px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: #E8E9E5; --grid: #d7d9d1; --surface: #F6F6F3; --surface-2: #FDFDFB;
+    --ink: #23241F; --muted: #6C6E66; --line: #C6C9BF; --line-strong: #A9AC9F;
+    --accent: #A96E14; --accent-soft: #f0e3c8;
+    --allow: #2F7D5B; --allow-soft: #dcebe1; --drop: #B44A32; --drop-soft: #f1ddd5;
+    --shadow: 0 1px 2px rgba(35,36,31,.06), 0 8px 24px rgba(35,36,31,.06);
+  }
+  :root[data-theme="dark"] {
+    --bg: #131512; --grid: #1d201b; --surface: #1C1F1B; --surface-2: #23261F;
+    --ink: #E9EBE4; --muted: #969A8E; --line: #33362F; --line-strong: #4a4e44;
+    --accent: #E6B24C; --accent-soft: #37301d;
+    --allow: #5FB98A; --allow-soft: #1b2c23; --drop: #E07B5F; --drop-soft: #2e1f1a;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 30px rgba(0,0,0,.35);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background-color: var(--bg);
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 26px 26px;
+    color: var(--ink);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: clamp(28px, 5vw, 72px) clamp(18px, 4vw, 40px) 80px;
+  }
+
+  .mono {
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+
+  /* ---- header ---- */
+  .eyebrow {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 12px;
+    letter-spacing: .22em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .eyebrow::before {
+    content: "";
+    width: 26px; height: 2px;
+    background: var(--accent);
+  }
+  h1 {
+    font-size: clamp(30px, 5.2vw, 50px);
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+    font-weight: 720;
+    margin: 0 0 18px;
+    text-wrap: balance;
+    max-width: 18ch;
+  }
+  .lede {
+    font-size: clamp(16px, 2vw, 18.5px);
+    color: var(--muted);
+    max-width: 62ch;
+    margin: 0;
+  }
+  .lede strong { color: var(--ink); font-weight: 620; }
+
+  /* ---- generic panel ---- */
+  .zone {
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: color-mix(in srgb, var(--surface) 82%, transparent);
+    backdrop-filter: blur(2px);
+    padding: clamp(16px, 2.4vw, 24px);
+    box-shadow: var(--shadow);
+  }
+  .zone-label {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 11px;
+    letter-spacing: .2em;
+    text-transform: uppercase;
+    color: var(--muted);
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+  .zone-label .tag {
+    color: var(--ink);
+    font-weight: 600;
+  }
+  .zone-label .note { margin-left: auto; color: var(--muted); font-size: 10.5px; letter-spacing: .12em; }
+
+  /* card */
+  .card {
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: 11px;
+    padding: 16px 17px;
+  }
+  .card h3 {
+    margin: 0 0 4px;
+    font-size: 15px;
+    letter-spacing: -0.01em;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .card .fname {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 13px;
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .card p { margin: 0; font-size: 13.5px; color: var(--muted); }
+  .card ul {
+    margin: 8px 0 0; padding: 0; list-style: none;
+    display: flex; flex-direction: column; gap: 5px;
+  }
+  .card li {
+    font-size: 12.5px; color: var(--muted);
+    padding-left: 15px; position: relative;
+  }
+  .card li::before {
+    content: "→"; position: absolute; left: 0; color: var(--line-strong);
+  }
+
+  /* ---- host zone grid ---- */
+  .host-grid {
+    display: grid;
+    grid-template-columns: 1.15fr 1fr;
+    gap: 14px;
+  }
+  .build-flow {
+    display: flex; align-items: center; gap: 10px;
+    font-family: ui-monospace, monospace; font-size: 11px;
+    letter-spacing: .1em; text-transform: uppercase; color: var(--muted);
+    margin-top: 12px;
+  }
+  .chip {
+    border: 1px dashed var(--line-strong);
+    border-radius: 7px; padding: 5px 10px;
+    color: var(--ink); background: var(--surface);
+    white-space: nowrap;
+  }
+  .arrow-h { color: var(--accent); font-weight: 700; }
+
+  /* ---- seam between host and container ---- */
+  .seam {
+    display: flex; flex-direction: column; align-items: center;
+    padding: 4px 0;
+    gap: 2px;
+  }
+  .seam .rail { width: 2px; height: 16px; background: var(--line-strong); }
+  .seam .cmd {
+    font-family: ui-monospace, monospace; font-size: 11.5px;
+    letter-spacing: .06em;
+    background: var(--ink); color: var(--bg);
+    padding: 5px 12px; border-radius: 20px;
+    box-shadow: var(--shadow);
+  }
+  .seam .cmd b { color: var(--accent); font-weight: 700; }
+
+  /* ---- container region (the hero boundary) ---- */
+  .container-zone {
+    position: relative;
+    border: 2px solid var(--accent);
+    border-radius: 16px;
+    background:
+      color-mix(in srgb, var(--surface) 88%, transparent);
+    padding: clamp(16px, 2.4vw, 26px);
+    box-shadow: var(--shadow), 0 0 0 5px color-mix(in srgb, var(--accent) 12%, transparent);
+  }
+  .boundary-tab {
+    position: absolute; top: -13px; left: 22px;
+    background: var(--accent);
+    color: #1b1500;
+    font-family: ui-monospace, monospace;
+    font-size: 11px; font-weight: 700;
+    letter-spacing: .16em; text-transform: uppercase;
+    padding: 5px 12px; border-radius: 7px;
+  }
+  .boundary-sub {
+    position: absolute; top: -11px; right: 22px;
+    font-family: ui-monospace, monospace;
+    font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--muted); background: var(--bg);
+    padding: 2px 8px; border-radius: 6px;
+    border: 1px solid var(--line);
+  }
+
+  .container-inner {
+    display: grid;
+    grid-template-columns: 1fr 210px;
+    gap: 16px;
+    margin-top: 6px;
+  }
+
+  /* boot chain */
+  .boot h4, .side h4 {
+    font-family: ui-monospace, monospace;
+    font-size: 11px; letter-spacing: .18em; text-transform: uppercase;
+    color: var(--muted); margin: 0 0 12px;
+  }
+  .boot h4 b { color: var(--accent); }
+  .chain { display: flex; flex-direction: column; gap: 0; }
+  .step {
+    display: flex; gap: 12px; align-items: flex-start;
+    padding: 10px 0;
+    position: relative;
+  }
+  .step:not(:last-child)::after {
+    content: ""; position: absolute;
+    left: 13px; top: 30px; bottom: -2px;
+    width: 2px; background: var(--line);
+  }
+  .step .dot {
+    flex: 0 0 auto;
+    width: 28px; height: 28px; border-radius: 8px;
+    background: var(--surface-2);
+    border: 1px solid var(--line-strong);
+    display: grid; place-items: center;
+    font-family: ui-monospace, monospace; font-size: 12px; font-weight: 700;
+    color: var(--accent);
+    z-index: 1;
+  }
+  .step .body { padding-top: 2px; }
+  .step .body .t {
+    font-size: 13.5px; font-weight: 600;
+    display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap;
+  }
+  .step .body .t code {
+    font-family: ui-monospace, monospace; font-size: 12px;
+    color: var(--muted); font-weight: 500;
+  }
+  .step .body .d { font-size: 12.5px; color: var(--muted); }
+  .step.fw .dot { color: var(--drop); border-color: var(--drop); background: var(--drop-soft); }
+  .step.shell .dot { color: var(--allow); border-color: var(--allow); background: var(--allow-soft); }
+
+  /* side rail: volumes */
+  .side { display: flex; flex-direction: column; gap: 14px; }
+  .vol-list { display: flex; flex-direction: column; gap: 8px; }
+  .vol {
+    display: flex; gap: 10px; align-items: center;
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--line-strong);
+    border-radius: 8px; padding: 9px 11px;
+  }
+  .vol .ic { font-size: 15px; line-height: 1; opacity: .8; }
+  .vol .txt .n {
+    font-family: ui-monospace, monospace; font-size: 11.5px;
+    font-weight: 600; color: var(--ink);
+  }
+  .vol .txt .m { font-size: 11px; color: var(--muted); }
+
+  .workspace-note {
+    border: 1px dashed var(--accent);
+    border-radius: 8px; padding: 10px 11px;
+    background: var(--accent-soft);
+    font-size: 12px; color: var(--ink);
+  }
+  .workspace-note .n {
+    font-family: ui-monospace, monospace; font-weight: 700; font-size: 11.5px;
+    color: var(--accent); letter-spacing: .04em;
+  }
+
+  /* firewall / egress bar */
+  .egress {
+    margin-top: 16px;
+    border-top: 1px dashed var(--line-strong);
+    padding-top: 16px;
+  }
+  .egress h4 {
+    font-family: ui-monospace, monospace;
+    font-size: 11px; letter-spacing: .18em; text-transform: uppercase;
+    color: var(--muted); margin: 0 0 12px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .egress h4 b { color: var(--drop); }
+  .flows { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .flow {
+    border-radius: 10px; padding: 12px 14px;
+    font-size: 12.5px;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .flow .h {
+    font-family: ui-monospace, monospace; font-size: 12px; font-weight: 700;
+    letter-spacing: .04em; display: flex; align-items: center; gap: 8px;
+  }
+  .flow .h .badge {
+    margin-left: auto; font-size: 10px; letter-spacing: .1em;
+    text-transform: uppercase; padding: 2px 7px; border-radius: 20px;
+  }
+  .flow p { margin: 0; color: var(--muted); }
+  .flow.ok { background: var(--allow-soft); border: 1px solid color-mix(in srgb, var(--allow) 40%, var(--line)); }
+  .flow.ok .h, .flow.ok .h .badge { color: var(--allow); }
+  .flow.ok .h .badge { background: color-mix(in srgb, var(--allow) 18%, transparent); }
+  .flow.no { background: var(--drop-soft); border: 1px solid color-mix(in srgb, var(--drop) 40%, var(--line)); }
+  .flow.no .h, .flow.no .h .badge { color: var(--drop); }
+  .flow.no .h .badge { background: color-mix(in srgb, var(--drop) 18%, transparent); }
+
+  /* modes footer */
+  .modes {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;
+    margin-top: 22px;
+  }
+  .mode {
+    border: 1px solid var(--line); border-radius: 11px;
+    background: color-mix(in srgb, var(--surface) 70%, transparent);
+    padding: 14px 15px;
+  }
+  .mode .k {
+    font-family: ui-monospace, monospace; font-size: 12.5px;
+    color: var(--accent); font-weight: 600; margin-bottom: 4px;
+  }
+  .mode .v { font-size: 12.5px; color: var(--muted); }
+
+  .section-head {
+    display: flex; align-items: baseline; gap: 12px;
+    margin: 40px 0 16px;
+  }
+  .section-head h2 {
+    font-size: 16px; letter-spacing: .02em; margin: 0; font-weight: 680;
+  }
+  .section-head .idx {
+    font-family: ui-monospace, monospace; font-size: 12px;
+    color: var(--accent); letter-spacing: .1em;
+  }
+  .section-head .rule { flex: 1; height: 1px; background: var(--line); }
+
+  .flow-stack { display: flex; flex-direction: column; }
+
+  @media (max-width: 720px) {
+    .host-grid, .container-inner, .flows, .modes { grid-template-columns: 1fr; }
+    .boundary-sub { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <p class="eyebrow">generic-devcontainer · architecture</p>
+  <h1>Three files, one guarded sandbox</h1>
+  <p class="lede">
+    The whole tool is a host-side script, a <strong>Dockerfile</strong>, and an
+    <strong>entrypoint</strong> — wired together so an AI agent can code inside a
+    real container but <strong>cannot reach the network except through a filtered gate</strong>.
+    Here is how a run flows from your terminal to a locked-down shell.
+  </p>
+
+  <div class="section-head">
+    <span class="idx">01</span>
+    <h2>On the host — orchestration &amp; build</h2>
+    <span class="rule"></span>
+  </div>
+
+  <div class="zone">
+    <div class="zone-label"><span>Your machine</span><span class="tag">·  runs as you</span>
+      <span class="note">no container yet</span></div>
+    <div class="host-grid">
+      <div class="card">
+        <h3><span class="fname">./dev</span> — the lifecycle wrapper</h3>
+        <p>Bash script you invoke from any project. It owns everything outside the container.</p>
+        <ul>
+          <li>Bakes your <span class="mono">UID/GID</span> into the image; auto-builds &amp; rebuilds</li>
+          <li>Reuses / restarts the <span class="mono">dev-&lt;dir&gt;</span> container, else creates one</li>
+          <li>Mounts volumes, forwards ports, passes <span class="mono">GITHUB_TOKEN</span> &amp; git identity</li>
+          <li>Merges allowlists; selects the mode (normal / maint / dind)</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3><span class="fname">Dockerfile</span> — the image recipe</h3>
+        <p>Built once into the base image everything runs from.</p>
+        <ul>
+          <li>Installs <span class="mono">mise</span> + base tools into <span class="mono">/mise</span></li>
+          <li>Bakes in <span class="mono">allowlist.base</span> &amp; firewall scripts</li>
+          <li>Stages <span class="mono">entrypoint.sh</span> and the <span class="mono">.zshrc</span> skel</li>
+        </ul>
+        <div class="build-flow">
+          <span class="chip">Dockerfile</span>
+          <span class="arrow-h">→ build →</span>
+          <span class="chip">image</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="seam">
+    <span class="rail"></span>
+    <span class="cmd">./dev  →  <b>docker run</b>  (drops into the container)</span>
+    <span class="rail"></span>
+  </div>
+
+  <div class="section-head">
+    <span class="idx">02</span>
+    <h2>Inside the container — boot sequence &amp; the boundary</h2>
+    <span class="rule"></span>
+  </div>
+
+  <div class="container-zone">
+    <span class="boundary-tab">Container boundary</span>
+    <span class="boundary-sub">user: vscode · no sudo</span>
+
+    <div class="container-inner">
+      <div class="boot">
+        <h4><b>entrypoint.sh</b> — runs as root on every start, then drops privileges</h4>
+        <div class="chain">
+          <div class="step fw">
+            <div class="dot">1</div>
+            <div class="body">
+              <div class="t">Raise the firewall <code>firewall-init.sh</code></div>
+              <div class="d">iptables OUTPUT → DROP, tinyproxy up, exports <span class="mono">HTTPS_PROXY</span>. Fails closed — no firewall, no start.</div>
+            </div>
+          </div>
+          <div class="step">
+            <div class="dot">2</div>
+            <div class="body">
+              <div class="t">Install project tools <code>mise install</code></div>
+              <div class="d">Seeds rc files, ensures <span class="mono">mise activate</span>, installs from <span class="mono">/workspace/mise.toml</span>.</div>
+            </div>
+          </div>
+          <div class="step">
+            <div class="dot">3</div>
+            <div class="body">
+              <div class="t">Configure git</div>
+              <div class="d">Marks <span class="mono">/workspace</span> safe; seeds identity from host only if unset.</div>
+            </div>
+          </div>
+          <div class="step shell">
+            <div class="dot">4</div>
+            <div class="body">
+              <div class="t">Drop to vscode <code>exec gosu vscode</code></div>
+              <div class="d">Everything you run happens here — unprivileged, behind the wall.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="side">
+        <h4>Persisted state</h4>
+        <div class="vol-list">
+          <div class="vol">
+            <span class="ic">💾</span>
+            <span class="txt"><span class="n">devcontainer-mise</span><span class="m">→ /mise · tools, shared</span></span>
+          </div>
+          <div class="vol">
+            <span class="ic">🏠</span>
+            <span class="txt"><span class="n">home-&lt;dir&gt;</span><span class="m">→ /home/vscode · per-project</span></span>
+          </div>
+          <div class="vol">
+            <span class="ic">🐳</span>
+            <span class="txt"><span class="n">devcontainer-dind</span><span class="m">docker data · dind only</span></span>
+          </div>
+        </div>
+        <div class="workspace-note">
+          <span class="n">bind: ./ → /workspace</span><br>
+          Your live code, edited in place.
+        </div>
+      </div>
+    </div>
+
+    <div class="egress">
+      <h4><b>The security boundary</b> — the only way out is the gate</h4>
+      <div class="flows">
+        <div class="flow ok">
+          <div class="h">Allowed egress <span class="badge">via proxy</span></div>
+          <p>Requests to allowlisted hosts flow out through <span class="mono">tinyproxy</span> — the one user permitted to reach <span class="mono">:80 / :443</span>.</p>
+        </div>
+        <div class="flow no">
+          <div class="h">Dropped <span class="badge">kernel</span></div>
+          <p>Any raw socket or off-allowlist host from <span class="mono">vscode</span> is dropped by the iptables owner rule. No exfiltration.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section-head">
+    <span class="idx">03</span>
+    <h2>Same wiring, three modes</h2>
+    <span class="rule"></span>
+  </div>
+
+  <div class="modes">
+    <div class="mode">
+      <div class="k">./dev</div>
+      <div class="v">Normal. Firewall on, no sudo. The everyday hardened shell.</div>
+    </div>
+    <div class="mode">
+      <div class="k">./dev --maintenance</div>
+      <div class="v">Separate container, firewall off, sudo back on — for installing system packages.</div>
+    </div>
+    <div class="mode">
+      <div class="k">./dev --dind</div>
+      <div class="v">Adds rootless dockerd; nested pulls still routed through the proxy.</div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
