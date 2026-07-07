@@ -123,6 +123,14 @@ if podman build --no-cache --network=host \
 else
     fail "P6 self-build of base target"
 fi
+podman rmi -f pind-selfbuild >/dev/null 2>&1 || true
+
+# Cleanup: drop images pulled/built by the probes above so the persistent
+# pind volume doesn't accumulate them across runs. Best-effort (a cleanup
+# failure must not fail the probe); done last so an earlier retry within
+# this same run still has the image cached. alpine (P1) is intentionally
+# left in place since it's small and reused across probes/runs.
+podman rmi -f docker.io/library/postgres:16-alpine >/dev/null 2>&1 || true
 
 echo
 echo "Results: $PASS passed, $FAIL failed"

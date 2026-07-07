@@ -147,8 +147,8 @@ SKIP_IN_MAINT=1 run_check "4. raw socket bypass blocked"         raw_socket_bloc
 SKIP_IN_MAINT=1 run_check "6. sudo blocked"                      sudo_blocked
 SKIP_IN_MAINT=1 run_check "7. iptables flush blocked"            iptables_flush_blocked
 
-SKIP_UNLESS_NESTED=1 run_check "8. dockerd reachable"               dockerd_reachable
-SKIP_UNLESS_NESTED=1 run_check "9. dockerd in rootless mode"        dockerd_rootless
+SKIP_UNLESS_NESTED=1 run_check "8. nested engine reachable"         dockerd_reachable
+SKIP_UNLESS_NESTED=1 run_check "9. nested engine rootless"          dockerd_rootless
 SKIP_UNLESS_NESTED=1 run_check "10. registry pull through proxy"    nested_pull_works
 SKIP_UNLESS_NESTED=1 run_check "11. nested container egress blocked" nested_egress_blocked
 SKIP_UNLESS_NESTED=1 run_check "12. nested container loopback works" nested_loopback_works

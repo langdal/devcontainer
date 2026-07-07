@@ -780,7 +780,7 @@ _resolve_home_volume
 if [[ "$DIND" == true ]]; then
   refuse_if_running "$NORMAL_NAME" "normal"
   refuse_if_running "$MAINT_NAME" "maintenance"
-  refuse_if_running "$PIND_NAME" "pind"
+  refuse_if_running "$PIND_NAME" "pind" "$DIND_RUNTIME_ARGS"
   CONTAINER_NAME="$DIND_NAME"
 elif [[ "$PIND" == true ]]; then
   CONTAINER_NAME="$PIND_NAME"
@@ -790,12 +790,12 @@ elif [[ "$PIND" == true ]]; then
 elif [[ "$MAINTENANCE" == true ]]; then
   refuse_if_running "$NORMAL_NAME" "normal"
   refuse_if_running "$DIND_NAME" "dind" "$DIND_RUNTIME_ARGS"
-  refuse_if_running "$PIND_NAME" "pind"
+  refuse_if_running "$PIND_NAME" "pind" "$DIND_RUNTIME_ARGS"
   CONTAINER_NAME="$MAINT_NAME"
 else
   refuse_if_running "$MAINT_NAME" "maintenance"
   refuse_if_running "$DIND_NAME" "dind" "$DIND_RUNTIME_ARGS"
-  refuse_if_running "$PIND_NAME" "pind"
+  refuse_if_running "$PIND_NAME" "pind" "$DIND_RUNTIME_ARGS"
   # shellcheck disable=SC2034  # consumed by start_container in lib/dev/lifecycle.sh
   CONTAINER_NAME="$NORMAL_NAME"
 fi

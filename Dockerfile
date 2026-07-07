@@ -297,7 +297,6 @@ USER root
 # slirp4netns       - per-container network stack (pinned backend; see
 #                     containers.conf in pind-init.sh)
 # dbus-user-session - user session paths for rootless podman
-# jq                - pind-init.sh merges config json
 # podman-docker     - provides /usr/bin/docker as a podman-native shim (NOT
 #                     the real Docker CLI) so `docker ...` / DOCKER_HOST
 #                     tooling resolves against the same podman engine.
@@ -309,7 +308,6 @@ RUN apt-get update && \
         uidmap \
         slirp4netns \
         dbus-user-session \
-        jq \
         podman-docker && \
     rm -rf /var/lib/apt/lists/*
 

@@ -78,9 +78,9 @@ preflight_apparmor_userns() {
     cat >&2 <<'EOF'
 Error: kernel.apparmor_restrict_unprivileged_userns=1 on this host.
 
-This blocks rootless dockerd inside --dind from creating its user
-namespace. --security-opt apparmor=unconfined does not bypass this
-kernel-level restriction.
+This blocks rootless dockerd/podman inside --dind/--pind from creating
+its user namespace. --security-opt apparmor=unconfined does not bypass
+this kernel-level restriction.
 
 Allow it on this host:
     sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
@@ -161,14 +161,14 @@ preflight_subid_grant() {
     podman system migrate    # restart podman's user namespace with the new grant"
       fi
       cat >&2 <<EOF
-Error: --dind on a rootless runtime needs a larger subuid/subgid grant.
+Error: --dind/--pind on a rootless runtime needs a larger subuid/subgid grant.
 
-The runtime ($RUNTIME) is rootless, so the dind container's user
+The runtime ($RUNTIME) is rootless, so the dind/pind container's user
 namespace only spans the ids granted to $(id -un) in /etc/subuid and
 /etc/subgid (currently $_uid_total uids / $_gid_total gids). rootless
-dockerd inside the container must map container ids 100000-165535 (the
-image's vscode subuid range), so at least $DIND_MIN_SUBIDS are needed or it
-fails at startup with:
+dockerd/podman inside the container must map container ids 100000-165535
+(the image's vscode subuid range), so at least $DIND_MIN_SUBIDS are needed
+or it fails at startup with:
     newuidmap: write to uid_map failed: Operation not permitted
 
 Grant more ids (any range not colliding with other users), e.g.:
