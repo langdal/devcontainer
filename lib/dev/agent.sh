@@ -107,6 +107,88 @@ _agent_expand() {
   printf '%s\n' "${out[@]}" | awk '!seen[$0]++'
 }
 
+# _agent_keepid: prints "true" when this runtime would create the workspace
+# container with --userns=keep-id (rootless podman only), matching the logic
+# in start_container. Otherwise "false".
+_agent_keepid() {
+  # shellcheck disable=SC2086  # intentional word-splitting of RUNTIME_ARGS
+  if $RUNTIME $RUNTIME_ARGS --version 2>/dev/null | grep -qi podman && runtime_is_rootless; then
+    echo true
+  else
+    echo false
+  fi
+}
+
+# _agent_copy_into_volume <name>: stage the resolved sources into a temp dir
+# (dereferencing symlinks) and extract them into the workspace home volume
+# through a short-lived helper container running as vscode with the same
+# --userns=keep-id args the real container uses, so ownership is correct on
+# Docker, rootful podman, and rootless podman alike.
+_agent_copy_into_volume() {
+  local name="$1" resolved
+  resolved="$(_agent_resolve "$name")"
+  if [[ -z "$resolved" ]]; then
+    echo "  ${name}: no source files found on host — nothing to copy." >&2
+    return 0
+  fi
+
+  local staging
+  staging="$(mktemp -d)"
+  local -a secret_dests=()
+  local src dest kind mode
+  while IFS=$'\t' read -r src dest kind mode; do
+    [[ -n "$src" ]] || continue
+    mkdir -p "$staging/$(dirname "$dest")"
+    if [[ "$kind" == dir ]]; then
+      mkdir -p "$staging/$dest"
+      # -R recurse, -L dereference: links pointing outside the copied tree
+      # become real files. Broken links make cp non-zero; warn, don't abort.
+      if ! cp -RL "$src/." "$staging/$dest/" 2>/dev/null; then
+        echo "  ${name}: warning: some entries under ${dest} were skipped (broken symlinks?)" >&2
+      fi
+    else
+      if ! cp -L "$src" "$staging/$dest" 2>/dev/null; then
+        echo "  ${name}: warning: skipped ${dest} (broken symlink?)" >&2
+        continue
+      fi
+    fi
+    echo "  ${name}: + ${dest}"
+    [[ "$mode" == 0600 ]] && secret_dests+=("$dest")
+  done <<< "$resolved"
+
+  # Ensure the volume exists; under keep-id also make sure it is owned by the
+  # host user before we write (reuses lifecycle.sh's one-time migration).
+  local keepid
+  keepid="$(_agent_keepid)"
+  # shellcheck disable=SC2086  # intentional word-splitting of RUNTIME_ARGS
+  $RUNTIME $RUNTIME_ARGS volume create "$HOME_VOLUME" >/dev/null
+  [[ "$keepid" == true ]] && migrate_volume_for_keepid "$HOME_VOLUME"
+
+  # Remote command: extract, then tighten secret modes. Quote each dest.
+  local remote='cd /home/vscode && tar -xf -'
+  if [[ ${#secret_dests[@]} -gt 0 ]]; then
+    remote+=' && chmod 600'
+    local d
+    for d in "${secret_dests[@]}"; do
+      remote+=" $(printf '%q' "$d")"
+    done
+  fi
+
+  local -a keepid_args=()
+  [[ "$keepid" == true ]] && keepid_args=(--userns=keep-id)
+
+  local rc=0
+  # shellcheck disable=SC2086  # intentional word-splitting of RUNTIME_ARGS
+  tar -C "$staging" -cf - . \
+    | $RUNTIME $RUNTIME_ARGS run --rm -i \
+        "${keepid_args[@]}" -u vscode \
+        -v "$HOME_VOLUME":/home/vscode \
+        --entrypoint sh "$IMAGE_TAG" -c "$remote" \
+    || rc=$?
+  rm -rf "$staging"
+  return $rc
+}
+
 _agent_usage() {
   cat <<'EOF'
 Usage: dev agent add  <name>... | all    Copy an agent's creds+settings in

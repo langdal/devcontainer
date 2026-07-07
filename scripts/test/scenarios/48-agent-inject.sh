@@ -73,3 +73,56 @@ if echo "$dry" | grep -Eq "\.claude\.json|projects|history\.jsonl"; then
 else
     log_pass "dry-run excludes .claude.json / projects/ / history.jsonl"
 fi
+
+# ---------- real copy into the home volume (needs runtime + base image) ----------
+
+WORK="$(mktemp -d)/proj-agent48"
+mkdir -p "$WORK"
+VOL="devcontainer-home-proj-agent48"
+remember_volume "$VOL"
+remember_container "dev-proj-agent48"
+"$RUNTIME" rm -f dev-proj-agent48 >/dev/null 2>&1 || true
+"$RUNTIME" volume rm "$VOL" >/dev/null 2>&1 || true
+
+# Add a symlink pointing outside the tree to exercise dereferencing.
+mkdir -p "$FAKE_HOME/.claude/skills"
+printf 'external\n' > "$FAKE_HOME/outside-skill.md"
+ln -s "$FAKE_HOME/outside-skill.md" "$FAKE_HOME/.claude/skills/linked.md"
+
+( cd "$WORK" && HOME="$FAKE_HOME" "$DEV" agent add claude ) \
+    || { log_fail "dev agent add claude (real) exited non-zero"; }
+
+# Helper: test a path inside the volume as vscode.
+vol_has() {
+    "$RUNTIME" run --rm -u vscode -v "$VOL":/home/vscode \
+        --entrypoint sh generic-devcontainer -c "test -e /home/vscode/$1"
+}
+vol_mode() {
+    "$RUNTIME" run --rm -u vscode -v "$VOL":/home/vscode \
+        --entrypoint sh generic-devcontainer -c "stat -c %a /home/vscode/$1"
+}
+
+vol_has ".claude/.credentials.json" \
+    && log_pass "credentials.json landed in the volume" \
+    || log_fail "credentials.json missing from volume"
+vol_has ".claude/commands/x.md" \
+    && log_pass "commands/x.md landed in the volume" \
+    || log_fail "commands/x.md missing from volume"
+[ "$(vol_mode .claude/.credentials.json)" = "600" ] \
+    && log_pass "credentials.json is mode 600 in the volume" \
+    || log_fail "credentials.json mode is $(vol_mode .claude/.credentials.json), want 600"
+
+# Symlink was dereferenced to a real file with real content.
+if "$RUNTIME" run --rm -u vscode -v "$VOL":/home/vscode --entrypoint sh \
+      generic-devcontainer -c 'test -f /home/vscode/.claude/skills/linked.md && ! test -L /home/vscode/.claude/skills/linked.md'; then
+    log_pass "symlinked skill was dereferenced to a real file"
+else
+    log_fail "symlinked skill not dereferenced (missing or still a symlink)"
+fi
+
+# Exclusions never made it in.
+if vol_has ".claude.json" || vol_has ".claude/projects" || vol_has ".claude/history.jsonl"; then
+    log_fail "an excluded path leaked into the volume"
+else
+    log_pass "excluded paths absent from the volume"
+fi
