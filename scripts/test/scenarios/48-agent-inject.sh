@@ -126,3 +126,19 @@ if vol_has ".claude.json" || vol_has ".claude/projects" || vol_has ".claude/hist
 else
     log_pass "excluded paths absent from the volume"
 fi
+
+# ---------- list ----------
+listout="$( cd "$WORK" && HOME="$FAKE_HOME" "$DEV" agent list 2>&1 )"
+echo "$listout" | grep -E "claude.*yes.*yes" >/dev/null \
+    && log_pass "list shows claude present on host and injected" \
+    || log_fail "list output unexpected: $listout"
+
+# ---------- rm ----------
+( cd "$WORK" && HOME="$FAKE_HOME" DEV_ASSUME_YES=1 "$DEV" agent rm claude ) \
+    || log_fail "dev agent rm claude exited non-zero"
+
+if vol_has ".claude/.credentials.json"; then
+    log_fail "rm did not remove .credentials.json"
+else
+    log_pass "rm removed claude's injected files"
+fi

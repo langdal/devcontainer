@@ -189,6 +189,122 @@ _agent_copy_into_volume() {
   return $rc
 }
 
+# _agent_volume_exists: 0 if the workspace home volume exists.
+_agent_volume_exists() {
+  # shellcheck disable=SC2086  # intentional word-splitting of RUNTIME_ARGS
+  $RUNTIME $RUNTIME_ARGS volume inspect "$HOME_VOLUME" >/dev/null 2>&1
+}
+
+# _agent_all_dests <name>: print every manifest DEST_REL for the agent
+# (independent of whether the source exists on the host).
+_agent_all_dests() {
+  local src_rel dest_rel kind mode
+  while IFS=$'\t' read -r src_rel dest_rel kind mode; do
+    [[ -n "$dest_rel" ]] && printf '%s\n' "$dest_rel"
+  done < <(_agent_manifest "$1")
+}
+
+# _agent_volume_present_dests: read candidate dest paths on stdin (one per
+# line) and print those that exist in the home volume. One helper container
+# for the whole set. Prints nothing if the volume does not exist.
+_agent_volume_present_dests() {
+  _agent_volume_exists || return 0
+  # shellcheck disable=SC2086  # intentional word-splitting of RUNTIME_ARGS
+  # shellcheck disable=SC2016  # single-quoted: runs in the helper container's shell, not the host
+  # Trailing ": true" ensures the helper's own exit status stays 0 regardless
+  # of whether the *last* candidate happened to exist — under our caller's
+  # set -e/pipefail, a bare `present=$(... | this)` assignment would otherwise
+  # abort the whole `dev` invocation whenever the last dest is absent (the
+  # common case, since most agents' dests aren't all injected).
+  $RUNTIME $RUNTIME_ARGS run --rm -i -u vscode \
+    -v "$HOME_VOLUME":/home/vscode --entrypoint sh "$IMAGE_TAG" -c \
+    'cd /home/vscode && while IFS= read -r p; do [ -e "$p" ] && printf "%s\n" "$p"; done; :'
+}
+
+# _agent_list: per-agent table of host-present? / injected-here?
+_agent_list() {
+  [[ $# -eq 0 ]] || { echo "Error: dev agent list takes no arguments: $*" >&2; exit 1; }
+
+  # One helper call to learn which manifest dests currently exist in the volume.
+  local present=""
+  if _agent_volume_exists; then
+    local a
+    local all=""
+    for a in "${AGENT_KNOWN[@]}"; do
+      all+="$(_agent_all_dests "$a")"$'\n'
+    done
+    present="$(printf '%s' "$all" | _agent_volume_present_dests)"
+  fi
+
+  printf '%-10s  %-8s  %-11s\n' AGENT ON-HOST INJECTED-HERE
+  local name host_yn inj_yn dest
+  for name in "${AGENT_KNOWN[@]}"; do
+    if [[ -n "$(_agent_resolve "$name")" ]]; then host_yn=yes; else host_yn=no; fi
+    inj_yn=no
+    while IFS= read -r dest; do
+      [[ -n "$dest" ]] || continue
+      if printf '%s\n' "$present" | grep -Fxq "$dest"; then inj_yn=yes; break; fi
+    done < <(_agent_all_dests "$name")
+    printf '%-10s  %-8s  %-11s\n' "$name" "$host_yn" "$inj_yn"
+  done
+}
+
+# _agent_rm <name>... | all: delete an agent's injected files from the volume.
+_agent_rm() {
+  local -a raw=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --) shift ;;
+      -*) echo "Error: dev agent rm: unknown option: $1" >&2; exit 1 ;;
+      *) raw+=("$1"); shift ;;
+    esac
+  done
+  [[ ${#raw[@]} -gt 0 ]] || {
+    echo "Error: dev agent rm: name required (${AGENT_KNOWN[*]}, or 'all')" >&2
+    exit 1
+  }
+
+  if ! _agent_volume_exists; then
+    echo "No home volume (${HOME_VOLUME}) for this workspace — nothing to remove."
+    return 0
+  fi
+
+  local -a targets=()
+  local line
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && targets+=("$line")
+  done < <(_agent_expand known "${raw[@]}")
+
+  local name dest reply
+  local -a dests
+  for name in "${targets[@]}"; do
+    dests=()
+    while IFS= read -r dest; do
+      [[ -n "$dest" ]] && dests+=("$dest")
+    done < <(_agent_all_dests "$name")
+
+    if [[ "${DEV_ASSUME_YES:-}" != "1" ]]; then
+      echo "About to remove ${name} files from ${HOME_VOLUME}:"
+      printf '  %s\n' "${dests[@]}"
+      read -r -p "Remove them? [y/N] " reply
+      case "$reply" in
+        y|Y|yes|YES) ;;
+        *) echo "Skipped ${name}."; continue ;;
+      esac
+    fi
+
+    # Build the remote rm; quote each dest path.
+    local remote='cd /home/vscode && rm -rf'
+    for dest in "${dests[@]}"; do
+      remote+=" $(printf '%q' "$dest")"
+    done
+    # shellcheck disable=SC2086  # intentional word-splitting of RUNTIME_ARGS
+    $RUNTIME $RUNTIME_ARGS run --rm -u vscode \
+      -v "$HOME_VOLUME":/home/vscode --entrypoint sh "$IMAGE_TAG" -c "$remote"
+    echo "Removed ${name} files from ${HOME_VOLUME}."
+  done
+}
+
 _agent_usage() {
   cat <<'EOF'
 Usage: dev agent add  <name>... | all    Copy an agent's creds+settings in
@@ -258,8 +374,3 @@ _agent_add() {
     echo "'dev agent rm' or 'dev reset' to remove."
   fi
 }
-
-# Stub handlers — implemented in later tasks. Each receives the argv that
-# followed the action word (names and/or --dry-run).
-_agent_list() { echo "dev agent list: not yet implemented" >&2; exit 1; }
-_agent_rm()   { echo "dev agent rm: not yet implemented" >&2; exit 1; }
