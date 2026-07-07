@@ -35,3 +35,41 @@ else
         && log_pass "dev agent add <bad-name> lists valid agents" \
         || log_fail "dev agent add <bad-name> error missing agent list: $out"
 fi
+
+# ---------- manifest / dry-run resolution (fake HOME, no runtime writes) ----------
+
+FAKE_HOME="$(mktemp -d)"
+# shellcheck disable=SC2317,SC2329  # invoked via trap
+cleanup_extra() { rm -rf "$FAKE_HOME"; }
+trap 'cleanup_extra; restore_host' EXIT
+
+# Curated files that SHOULD be picked up.
+mkdir -p "$FAKE_HOME/.claude/commands"
+printf '{}\n'        > "$FAKE_HOME/.claude/.credentials.json"
+printf '{}\n'        > "$FAKE_HOME/.claude/settings.json"
+printf '# hi\n'      > "$FAKE_HOME/.claude/CLAUDE.md"
+printf 'cmd\n'       > "$FAKE_HOME/.claude/commands/x.md"
+# Excluded files that must NEVER appear.
+printf 'x\n'         > "$FAKE_HOME/.claude.json"
+mkdir -p "$FAKE_HOME/.claude/projects/secret-proj"
+printf 'log\n'       > "$FAKE_HOME/.claude/history.jsonl"
+
+dry="$(HOME="$FAKE_HOME" "$DEV" agent add claude --dry-run 2>&1)"
+
+echo "$dry" | grep -q ".claude/.credentials.json" \
+    && log_pass "dry-run includes .credentials.json" \
+    || log_fail "dry-run missing .credentials.json: $dry"
+
+echo "$dry" | grep -q "mode 0600" \
+    && log_pass "dry-run marks the credential file 0600" \
+    || log_fail "dry-run did not mark a 0600 secret: $dry"
+
+echo "$dry" | grep -q ".claude/commands" \
+    && log_pass "dry-run includes commands/ dir" \
+    || log_fail "dry-run missing commands/: $dry"
+
+if echo "$dry" | grep -Eq "\.claude\.json|projects|history\.jsonl"; then
+    log_fail "dry-run leaked an excluded path: $dry"
+else
+    log_pass "dry-run excludes .claude.json / projects/ / history.jsonl"
+fi

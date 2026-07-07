@@ -17,6 +17,96 @@ _agent_is_known() {
   return 1
 }
 
+# _agent_manifest <name>: print one TSV line per manifest entry:
+#   SRC_REL <TAB> DEST_REL <TAB> KIND <TAB> MODE
+# SRC_REL is relative to the host $HOME; DEST_REL relative to /home/vscode.
+# KIND is "file" or "dir"; MODE is "0600" for secrets, "-" otherwise.
+# printf reuses the 4-field format for each group of 4 arguments.
+_agent_manifest() {
+  case "$1" in
+    claude)
+      printf '%s\t%s\t%s\t%s\n' \
+        '.claude/.credentials.json' '.claude/.credentials.json' file 0600 \
+        '.claude/settings.json'     '.claude/settings.json'     file -    \
+        '.claude/CLAUDE.md'         '.claude/CLAUDE.md'         file -    \
+        '.claude/commands'          '.claude/commands'          dir  -    \
+        '.claude/agents'            '.claude/agents'            dir  -    \
+        '.claude/skills'            '.claude/skills'            dir  -
+      ;;
+    opencode)
+      printf '%s\t%s\t%s\t%s\n' \
+        '.local/share/opencode/auth.json'     '.local/share/opencode/auth.json'     file 0600 \
+        '.local/share/opencode/mcp-auth.json' '.local/share/opencode/mcp-auth.json' file 0600 \
+        '.config/opencode/opencode.json'      '.config/opencode/opencode.json'      file 0600 \
+        '.config/opencode/tui.json'           '.config/opencode/tui.json'           file -    \
+        '.config/opencode/agents'             '.config/opencode/agents'             dir  -    \
+        '.config/opencode/commands'           '.config/opencode/commands'           dir  -    \
+        '.config/opencode/skills'             '.config/opencode/skills'             dir  -
+      ;;
+    pi)
+      printf '%s\t%s\t%s\t%s\n' \
+        '.pi/agent/auth.json'     '.pi/agent/auth.json'     file 0600 \
+        '.pi/agent/settings.json' '.pi/agent/settings.json' file -    \
+        '.pi/agent/models.json'   '.pi/agent/models.json'   file 0600 \
+        '.pi/agent/skills'        '.pi/agent/skills'        dir  -    \
+        '.pi/agent/extensions'    '.pi/agent/extensions'    dir  -
+      ;;
+  esac
+}
+
+# _agent_src_abs <name> <src_rel>: absolute host path for a manifest source.
+# For pi, honor PI_CODING_AGENT_DIR (which relocates ~/.pi/agent) when set,
+# keeping the DEST layout under the default .pi/agent/.
+_agent_src_abs() {
+  local name="$1" src_rel="$2"
+  if [[ "$name" == pi && -n "${PI_CODING_AGENT_DIR:-}" && "$src_rel" == .pi/agent/* ]]; then
+    printf '%s/%s\n' "${PI_CODING_AGENT_DIR%/}" "${src_rel#.pi/agent/}"
+  else
+    printf '%s/%s\n' "$HOME" "$src_rel"
+  fi
+}
+
+# _agent_resolve <name>: print manifest lines whose source exists on the host,
+# as TSV: SRC_ABS <TAB> DEST_REL <TAB> KIND <TAB> MODE. A top-level broken
+# symlink fails the -e test and is skipped here; broken links *inside* a
+# copied dir are handled at copy time.
+_agent_resolve() {
+  local name="$1" src_rel dest_rel kind mode src_abs
+  while IFS=$'\t' read -r src_rel dest_rel kind mode; do
+    [[ -n "$src_rel" ]] || continue
+    src_abs="$(_agent_src_abs "$name" "$src_rel")"
+    [[ -e "$src_abs" ]] || continue
+    printf '%s\t%s\t%s\t%s\n' "$src_abs" "$dest_rel" "$kind" "$mode"
+  done < <(_agent_manifest "$name")
+}
+
+# _agent_expand <mode> <arg...>: resolve name arguments to a deduped list,
+# one per line. mode="host": 'all' -> known agents that have >=1 source on
+# the host. mode="known": 'all' -> every known agent. Unknown names are fatal.
+_agent_expand() {
+  local mode="$1"; shift
+  local a k
+  local -a out=()
+  for a in "$@"; do
+    if [[ "$a" == all ]]; then
+      for k in "${AGENT_KNOWN[@]}"; do
+        if [[ "$mode" == known ]]; then
+          out+=("$k")
+        elif [[ -n "$(_agent_resolve "$k")" ]]; then
+          out+=("$k")
+        fi
+      done
+    elif _agent_is_known "$a"; then
+      out+=("$a")
+    else
+      echo "Error: unknown agent '$a' (valid: ${AGENT_KNOWN[*]}, or 'all')" >&2
+      exit 1
+    fi
+  done
+  [[ ${#out[@]} -gt 0 ]] || return 0
+  printf '%s\n' "${out[@]}" | awk '!seen[$0]++'
+}
+
 _agent_usage() {
   cat <<'EOF'
 Usage: dev agent add  <name>... | all    Copy an agent's creds+settings in
@@ -32,8 +122,62 @@ or wipe the whole home volume with 'dev reset'.
 EOF
 }
 
+# _agent_add [--dry-run] <name>... | all
+_agent_add() {
+  local dry=false
+  local -a raw=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --dry-run) dry=true; shift ;;
+      --) shift ;;
+      -*) echo "Error: dev agent add: unknown option: $1" >&2; exit 1 ;;
+      *) raw+=("$1"); shift ;;
+    esac
+  done
+  [[ ${#raw[@]} -gt 0 ]] || {
+    echo "Error: dev agent add: name required (${AGENT_KNOWN[*]}, or 'all')" >&2
+    exit 1
+  }
+
+  local -a targets=()
+  local line expanded
+  # Capture via command substitution (not process substitution): _agent_expand
+  # calls `exit` on an unknown name, and that exit code only propagates
+  # through $? of a command substitution, not through a `< <(...)` pipeline.
+  expanded="$(_agent_expand host "${raw[@]}")" || exit 1
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && targets+=("$line")
+  done <<< "$expanded"
+  [[ ${#targets[@]} -gt 0 ]] || { echo "No matching agents found on host."; return 0; }
+
+  local name src dest kind mode resolved
+  for name in "${targets[@]}"; do
+    if [[ "$dry" == true ]]; then
+      resolved="$(_agent_resolve "$name")"
+      if [[ -z "$resolved" ]]; then
+        echo "  ${name}: no source files found on host."
+        continue
+      fi
+      while IFS=$'\t' read -r src dest kind mode; do
+        [[ -n "$src" ]] || continue
+        if [[ "$mode" == 0600 ]]; then
+          echo "  ${name}: would copy ${dest} (mode 0600)"
+        else
+          echo "  ${name}: would copy ${dest}"
+        fi
+      done <<< "$resolved"
+    else
+      _agent_copy_into_volume "$name"
+    fi
+  done
+
+  if [[ "$dry" == false ]]; then
+    echo "Done. Injected into ${HOME_VOLUME}. Re-run 'dev agent add' to refresh;"
+    echo "'dev agent rm' or 'dev reset' to remove."
+  fi
+}
+
 # Stub handlers — implemented in later tasks. Each receives the argv that
 # followed the action word (names and/or --dry-run).
-_agent_add()  { echo "dev agent add: not yet implemented" >&2; exit 1; }
 _agent_list() { echo "dev agent list: not yet implemented" >&2; exit 1; }
 _agent_rm()   { echo "dev agent rm: not yet implemented" >&2; exit 1; }
