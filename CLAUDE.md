@@ -57,6 +57,13 @@ docker build -t generic-devcontainer .
 # Remove this workspace's dev container(s) and prompt per named volume.
 ./dev reset
 
+# Inject a curated snapshot of an AI agent's host credentials + settings
+# into this workspace's home volume (claude/opencode/pi). One-way copy,
+# not a mount; re-run to refresh. `list` shows status; `rm` removes.
+./dev agent add claude
+./dev agent list
+./dev agent rm claude
+
 # Scaffold a self-contained .devcontainer/ for VS Code's "Reopen in Container".
 ./dev scaffold
 
@@ -166,6 +173,17 @@ Three components, each with a distinct role:
   `--dind` and `--maintenance` (four-way conflict guard: normal /
   maintenance / dind / pind). Shares the same `kernel.apparmor_restrict_unprivileged_userns=0`
   and subuid/subgid preflights as `--dind`. See README.md for details.
+- **Opt-in agent credential injection** via `./dev agent add <name>`
+  (`claude`/`opencode`/`pi`). Copies a curated allowlist of each agent's
+  auth + settings + customizations from the host into the per-workspace home
+  volume — a one-way snapshot, never a host mount and never baked into an
+  image (secrets would leak into shared/cacheable layers). Excludes every
+  tool's conversation/project/session history to preserve per-workspace home
+  isolation. Secret files are forced to `0600`. Copy runs through a
+  short-lived helper container executing `tar -x` as `vscode` under the same
+  `--userns=keep-id` mapping as the real container, so ownership is correct
+  across Docker, rootful podman, and rootless podman. Refresh by re-running
+  `add`; remove with `dev agent rm` or `dev reset`. See README.md.
 
 ## Firewall (security boundary)
 
