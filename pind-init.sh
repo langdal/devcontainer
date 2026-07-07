@@ -46,14 +46,15 @@ graphroot = "$DATA_DIR/storage"
 mount_program = "/usr/bin/fuse-overlayfs"
 EOF
 
-# 4. containers.conf: pin slirp4netns (NOT podman 5.x's pasta default, whose
-#    host-loopback mapping does not expose 10.0.2.2) and inject the proxy env
-#    into every nested container so `podman build` RUN steps and `podman run`
-#    workloads reach tinyproxy. This is the podman analogue of dind's
-#    ~/.docker/config.json proxies block.
+# 4. containers.conf: pin slirp4netns via default_rootless_network_cmd (NOT
+#    podman 5.x's pasta default, whose host-loopback mapping does not expose
+#    10.0.2.2) and inject the proxy env into every nested container so
+#    `podman build` RUN steps and `podman run` workloads reach tinyproxy.
+#    This is the podman analogue of dind's ~/.docker/config.json proxies
+#    block.
 cat > "$CFG_DIR/containers.conf" <<EOF
 [network]
-network_backend = "slirp4netns"
+default_rootless_network_cmd = "slirp4netns"
 
 [containers]
 env = [
