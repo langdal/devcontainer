@@ -323,7 +323,7 @@ start_container() {
   # binaries (notably newuidmap), which is exactly the path the rootlesskit
   # stack uses anyway. Without SYS_ADMIN, dockerd-rootless fails at start
   # with "newuidmap: write to uid_map failed: Operation not permitted".
-  if [[ "$DIND" == true ]]; then
+  if [[ "$DIND" == true || "$PIND" == true ]]; then
     DOCKER_CMD+=(--device=/dev/fuse)
     DOCKER_CMD+=(--device=/dev/net/tun)   # slirp4netns needs tun for nested-container networking
     DOCKER_CMD+=(--cap-add=SYS_ADMIN)
@@ -342,7 +342,11 @@ start_container() {
     # alone is not enough; SELinux denies the mount even after the proc
     # masks are removed. Silently ignored on hosts without SELinux.
     DOCKER_CMD+=(--security-opt label=disable)
-    DOCKER_CMD+=(-v devcontainer-dind:/home/vscode/.local/share/docker)
+    if [[ "$DIND" == true ]]; then
+      DOCKER_CMD+=(-v devcontainer-dind:/home/vscode/.local/share/docker)
+    else
+      DOCKER_CMD+=(-v devcontainer-pind:/home/vscode/.local/share/containers)
+    fi
   fi
 
   # Skip default ports if another dev-* container is already running (they'd collide).
@@ -411,6 +415,11 @@ start_container() {
   # DinD mode: tell entrypoint.sh to start dockerd-rootless.
   if [[ "$DIND" == true ]]; then
     DOCKER_CMD+=(-e DEVCONTAINER_DIND=1)
+  fi
+
+  # PinD mode: tell entrypoint.sh to start the rootless podman system service.
+  if [[ "$PIND" == true ]]; then
+    DOCKER_CMD+=(-e DEVCONTAINER_PIND=1)
   fi
 
   # --disable-firewall with no running container: bring the fresh container up
