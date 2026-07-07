@@ -222,6 +222,12 @@ _agent_all_dests() {
 _agent_volume_present_dests() {
   _agent_volume_exists || return 0
   _agent_require_image
+  # Run the probe under the same --userns=keep-id mapping the volume was
+  # written with (rootless podman). Without it, vscode maps to a subuid that
+  # cannot even traverse the keep-id-owned /home/vscode mount, so `cd` fails
+  # ("can't cd to /home/vscode") and every dest reads as absent.
+  local -a keepid_args=()
+  [[ "$(_agent_keepid)" == true ]] && keepid_args=(--userns=keep-id)
   # shellcheck disable=SC2086  # intentional word-splitting of RUNTIME_ARGS
   # shellcheck disable=SC2016  # single-quoted: runs in the helper container's shell, not the host
   # Trailing ": true" ensures the helper's own exit status stays 0 regardless
@@ -229,7 +235,7 @@ _agent_volume_present_dests() {
   # set -e/pipefail, a bare `present=$(... | this)` assignment would otherwise
   # abort the whole `dev` invocation whenever the last dest is absent (the
   # common case, since most agents' dests aren't all injected).
-  $RUNTIME $RUNTIME_ARGS run --rm -i -u vscode \
+  $RUNTIME $RUNTIME_ARGS run --rm -i ${keepid_args[@]+"${keepid_args[@]}"} -u vscode \
     -v "$HOME_VOLUME":/home/vscode --entrypoint sh "$IMAGE_TAG" -c \
     'cd /home/vscode && while IFS= read -r p; do [ -e "$p" ] && printf "%s\n" "$p"; done; :'
 }
@@ -283,6 +289,11 @@ _agent_rm() {
   fi
   _agent_require_image
 
+  # Match the volume's --userns=keep-id ownership (rootless podman) so the
+  # removal helper's vscode can traverse and delete under /home/vscode.
+  local -a keepid_args=()
+  [[ "$(_agent_keepid)" == true ]] && keepid_args=(--userns=keep-id)
+
   local -a targets=()
   local line expanded
   # Capture via command substitution (not process substitution): _agent_expand
@@ -317,7 +328,7 @@ _agent_rm() {
       remote+=" $(printf '%q' "$dest")"
     done
     # shellcheck disable=SC2086  # intentional word-splitting of RUNTIME_ARGS
-    $RUNTIME $RUNTIME_ARGS run --rm -u vscode \
+    $RUNTIME $RUNTIME_ARGS run --rm ${keepid_args[@]+"${keepid_args[@]}"} -u vscode \
       -v "$HOME_VOLUME":/home/vscode --entrypoint sh "$IMAGE_TAG" -c "$remote"
     echo "Removed ${name} files from ${HOME_VOLUME}."
   done
