@@ -298,6 +298,9 @@ USER root
 #                     containers.conf in pind-init.sh)
 # dbus-user-session - user session paths for rootless podman
 # jq                - pind-init.sh merges config json
+# podman-docker     - provides /usr/bin/docker as a podman-native shim (NOT
+#                     the real Docker CLI) so `docker ...` / DOCKER_HOST
+#                     tooling resolves against the same podman engine.
 # hadolint ignore=DL3008
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
@@ -306,7 +309,8 @@ RUN apt-get update && \
         uidmap \
         slirp4netns \
         dbus-user-session \
-        jq && \
+        jq \
+        podman-docker && \
     rm -rf /var/lib/apt/lists/*
 
 # docker compose v2 CLI plugin, so `docker compose ...` (and DOCKER_HOST-based
@@ -325,6 +329,18 @@ RUN set -eux; \
     echo "${expected}  /tmp/docker-compose" | sha256sum -c -; \
     install -D -m 0755 /tmp/docker-compose /usr/local/lib/docker/cli-plugins/docker-compose; \
     rm -f /tmp/docker-compose
+
+# Symlink the compose plugin as a standalone `docker-compose` binary so
+# both invocation styles (`docker compose ...` and `docker-compose ...`)
+# work, matching upstream Docker's convenience shim. `ln -sf` + `test -e`
+# fails the build if the plugin path above ever moves.
+RUN ln -sf /usr/local/lib/docker/cli-plugins/docker-compose /usr/local/bin/docker-compose && \
+    test -e /usr/local/bin/docker-compose
+
+# podman-docker's `docker` shim prints an "Emulate Docker CLI using podman"
+# warning to stderr on every invocation unless this marker file exists —
+# silence it so `dev -- docker ...` output stays clean.
+RUN : > /etc/containers/nodocker
 
 COPY allowlist.dind /etc/devcontainer/allowlist.dind
 COPY --chmod=755 pind-init.sh /usr/local/sbin/pind-init.sh
