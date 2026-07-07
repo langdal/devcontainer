@@ -231,6 +231,51 @@ per-project deploy key) via `DEV_EXTRA_RUN_ARGS`, e.g.:
 DEV_EXTRA_RUN_ARGS="-v $SSH_AUTH_SOCK:/ssh-agent -e SSH_AUTH_SOCK=/ssh-agent" ./dev
 ```
 
+## Injecting agent credentials
+
+`dev agent` copies a **curated** set of an AI coding agent's credentials and
+settings from your host into this workspace's home volume, so the agent is
+logged in and configured inside the sandbox without re-running its login flow.
+
+```bash
+dev agent add claude            # copy claude's creds+settings into this workspace
+dev agent add claude opencode   # several at once
+dev agent add all               # every agent detected on the host
+dev agent add claude --dry-run  # preview the exact file list, copy nothing
+dev agent list                  # per-agent: present on host? injected here?
+dev agent rm claude             # remove claude's injected files (confirms)
+```
+
+Supported agents: `claude`, `opencode`, `pi`.
+
+**It is a one-way snapshot, not a mount.** Files are *copied* into the
+per-workspace home volume (`devcontainer-home-<dir>`). The host's live
+credential files are never bind-mounted, nothing is baked into an image, and
+changes inside the container are never mirrored back to the host. Credentials
+rotate, so re-run `dev agent add <name>` to refresh the snapshot.
+
+**What is copied (curated allowlist):** each agent's auth file(s), its
+settings/config, and its user-level customizations (global instructions,
+commands, agents, skills, extensions). **What is deliberately excluded:**
+conversation, project, and session history; caches; and plugin-install
+machinery — so injecting an agent does not drag one project's history into
+another's sandbox. Files holding secrets (auth tokens, and any config with
+inline provider API keys) are forced to mode `0600` in the volume.
+
+Copying **dereferences symlinks** found inside those customization dirs (a
+broken link is skipped with a warning, not fatal) — keep dirs like
+`.claude/skills/` free of links to sensitive host files, since those would
+be copied into the volume as real file contents.
+
+**Teardown:** `dev agent rm <name>` removes just that agent's files;
+`dev reset` prompts to remove the whole home volume.
+
+**Local (127.0.0.1) providers:** if your agent config points at a
+host-side server (e.g. a local LLM at `http://127.0.0.1:PORT`), that address
+means the container itself inside the sandbox. Start with
+`dev --host-port PORT` and edit the in-volume config to use
+`host.docker.internal:PORT` instead.
+
 ## Host Requirements
 
 - **Linux**: `docker` or `podman`. Docker is preferred when both are installed. Override with `DEV_RUNTIME=docker` or `DEV_RUNTIME=podman`.
