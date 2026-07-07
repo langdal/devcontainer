@@ -256,11 +256,16 @@ rotate, so re-run `dev agent add <name>` to refresh the snapshot.
 
 **What is copied (curated allowlist):** each agent's auth file(s), its
 settings/config, and its user-level customizations (global instructions,
-commands, agents, skills). **What is deliberately excluded:** conversation,
-project, and session history; caches; and plugin-install machinery — so
-injecting an agent does not drag one project's history into another's
-sandbox. Files holding secrets (auth tokens, and any config with inline
-provider API keys) are forced to mode `0600` in the volume.
+commands, agents, skills, extensions). **What is deliberately excluded:**
+conversation, project, and session history; caches; and plugin-install
+machinery — so injecting an agent does not drag one project's history into
+another's sandbox. Files holding secrets (auth tokens, and any config with
+inline provider API keys) are forced to mode `0600` in the volume.
+
+Copying **dereferences symlinks** found inside those customization dirs (a
+broken link is skipped with a warning, not fatal) — keep dirs like
+`.claude/skills/` free of links to sensitive host files, since those would
+be copied into the volume as real file contents.
 
 **Teardown:** `dev agent rm <name>` removes just that agent's files;
 `dev reset` prompts to remove the whole home volume.

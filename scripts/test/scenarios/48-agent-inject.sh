@@ -89,6 +89,9 @@ mkdir -p "$FAKE_HOME/.claude/skills"
 printf 'external\n' > "$FAKE_HOME/outside-skill.md"
 ln -s "$FAKE_HOME/outside-skill.md" "$FAKE_HOME/.claude/skills/linked.md"
 
+# Broken symlink inside a copied dir must be skipped (warn), not abort the copy.
+ln -s /nonexistent/nope "$FAKE_HOME/.claude/commands/broken.md"
+
 ( cd "$WORK" && HOME="$FAKE_HOME" "$DEV" agent add claude ) \
     || { log_fail "dev agent add claude (real) exited non-zero"; }
 
@@ -111,6 +114,18 @@ vol_has ".claude/commands/x.md" \
 [ "$(vol_mode .claude/.credentials.json)" = "600" ] \
     && log_pass "credentials.json is mode 600 in the volume" \
     || log_fail "credentials.json mode is $(vol_mode .claude/.credentials.json), want 600"
+
+# Broken symlink inside commands/ must not abort the dir copy: the sibling
+# good file lands, and the broken link itself is skipped (not copied as a
+# dangling symlink).
+vol_has ".claude/commands/x.md" \
+    && log_pass "broken symlink did not abort commands/ dir copy (sibling x.md present)" \
+    || log_fail "commands/x.md missing — broken symlink may have aborted the dir copy"
+if vol_has ".claude/commands/broken.md"; then
+    log_fail "broken symlink was copied into the volume (should have been skipped)"
+else
+    log_pass "broken symlink was skipped, not copied into the volume"
+fi
 
 # Symlink was dereferenced to a real file with real content.
 if "$RUNTIME" run --rm -u vscode -v "$VOL":/home/vscode --entrypoint sh \

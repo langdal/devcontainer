@@ -119,6 +119,17 @@ _agent_keepid() {
   fi
 }
 
+# _agent_require_image: fail clearly if the helper image is not built yet.
+# The agent helpers (copy/probe/rm) all run this image; the dev agent path
+# never builds it (unlike the start path), so check before any helper run.
+_agent_require_image() {
+  # shellcheck disable=SC2086  # intentional word-splitting of RUNTIME_ARGS
+  if ! $RUNTIME $RUNTIME_ARGS image inspect "$IMAGE_TAG" >/dev/null 2>&1; then
+    echo "Error: image '$IMAGE_TAG' is not built yet. Run './dev --build' (or start the container once with './dev') first." >&2
+    exit 1
+  fi
+}
+
 # _agent_copy_into_volume <name>: stage the resolved sources into a temp dir
 # (dereferencing symlinks) and extract them into the workspace home volume
 # through a short-lived helper container running as vscode with the same
@@ -126,6 +137,7 @@ _agent_keepid() {
 # Docker, rootful podman, and rootless podman alike.
 _agent_copy_into_volume() {
   local name="$1" resolved
+  _agent_require_image
   resolved="$(_agent_resolve "$name")"
   if [[ -z "$resolved" ]]; then
     echo "  ${name}: no source files found on host — nothing to copy." >&2
@@ -209,6 +221,7 @@ _agent_all_dests() {
 # for the whole set. Prints nothing if the volume does not exist.
 _agent_volume_present_dests() {
   _agent_volume_exists || return 0
+  _agent_require_image
   # shellcheck disable=SC2086  # intentional word-splitting of RUNTIME_ARGS
   # shellcheck disable=SC2016  # single-quoted: runs in the helper container's shell, not the host
   # Trailing ": true" ensures the helper's own exit status stays 0 regardless
@@ -268,6 +281,7 @@ _agent_rm() {
     echo "No home volume (${HOME_VOLUME}) for this workspace — nothing to remove."
     return 0
   fi
+  _agent_require_image
 
   local -a targets=()
   local line expanded
