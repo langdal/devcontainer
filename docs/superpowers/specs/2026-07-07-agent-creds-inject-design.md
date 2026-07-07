@@ -114,51 +114,85 @@ per-project history/pastes), `projects/`, `sessions/`, `history.jsonl`,
 > iteration; a future `--with-mcp` flag could `jq`-extract just the
 > `mcpServers` key into a minimal `.claude.json`.
 
-### opencode (best guess — substantiated, confirm on a machine with it installed)
+### opencode (confirmed against this host's install)
 
 | Source (under `~/`) | Dest | Kind |
 |---|---|---|
-| `.local/share/opencode/auth.json` | `.local/share/opencode/auth.json` | file (auth) |
-| `.config/opencode/opencode.json` | `.config/opencode/opencode.json` | file |
+| `.local/share/opencode/auth.json` | `.local/share/opencode/auth.json` | file (auth, mode 0600) |
+| `.local/share/opencode/mcp-auth.json` | `.local/share/opencode/mcp-auth.json` | file (auth, mode 0600, optional) |
+| `.config/opencode/opencode.json` | `.config/opencode/opencode.json` | file (**contains plaintext provider `apiKey`s** → mode 0600) |
 | `.config/opencode/tui.json` | `.config/opencode/tui.json` | file (optional) |
-| `.config/opencode/agents/` | `.config/opencode/agents/` | dir |
-| `.config/opencode/commands/` | `.config/opencode/commands/` | dir |
-| `.config/opencode/skills/` | `.config/opencode/skills/` | dir |
+| `.config/opencode/agents/` | `.config/opencode/agents/` | dir (optional) |
+| `.config/opencode/commands/` | `.config/opencode/commands/` | dir (optional) |
+| `.config/opencode/skills/` | `.config/opencode/skills/` | dir (optional) |
 
-Sources: [OpenCode Config docs](https://opencode.ai/docs/config/) (global
-dir `~/.config/opencode/` with `opencode.json`, `tui.json`, and plural
-`agents/`, `commands/`, `skills/`, `themes/`, `plugins/`, `modes/`, `tools/`
-subdirs); auth stored at `~/.local/share/opencode/auth.json` per the
-provider setup guidance. **Excluded:** `plugins/`, `themes/`, `modes/`,
-`tools/` (parity with claude — customizations we're unsure carry cleanly),
-and any project/session state.
+Confirmed on a real install (2026-07-07): `auth.json` does live at
+`~/.local/share/opencode/auth.json`, mode 0600, holding provider
+credentials (e.g. a github-copilot OAuth refresh/access token pair).
+A sibling `mcp-auth.json` (0600, MCP-server OAuth tokens) sits next to it
+and is included as optional auth. The plural `agents/`/`commands/`/`skills/`
+subdirs did **not** exist on the inspected host — keep them in the manifest
+(sources that don't exist are skipped), but they are unverified upstream.
 
-> **TODO (resolve on a machine with opencode installed):** confirm
-> `auth.json` really lives at `~/.local/share/opencode/auth.json` (the docs
-> page didn't list it explicitly), and confirm which of the plural subdirs
-> are worth including.
+**Excluded (confirmed to exist and deliberately skipped):**
 
-### pi (best guess — substantiated, confirm on a machine with it installed)
+- `~/.local/share/opencode/`: `opencode.db*` (hundreds of MB of session
+  storage), `storage/`, `snapshot/`, `log/`, `repos/`, `tool-output/`,
+  `bin/` — all session/project state or caches.
+- `~/.config/opencode/`: `node_modules/`, `package.json`,
+  `package-lock.json`, `bun.lock` (plugin install machinery — opencode
+  reinstalls plugins declared in `opencode.json`'s `plugin` array on
+  startup, which works through the firewall for allowlisted hosts like
+  GitHub/npm), plus third-party plugin configs and stray `*.bak` /
+  `*.backup` / `*_1.json` copies (e.g. `oh-my-opencode.json` and friends).
+  This means the manifest must copy **named files**, not the whole config
+  dir.
 
-Global dir is `~/.pi/agent/` (overridable via `PI_CODING_AGENT_DIR`).
+### pi (confirmed against this host's install)
+
+Global dir is `~/.pi/agent/` (overridable via `PI_CODING_AGENT_DIR`;
+honor it when reading the **host** source if set, but always write to the
+default `.pi/agent/` dest in the volume).
 
 | Source (under `~/`) | Dest | Kind |
 |---|---|---|
 | `.pi/agent/auth.json` | `.pi/agent/auth.json` | file (auth, mode 0600) |
 | `.pi/agent/settings.json` | `.pi/agent/settings.json` | file |
+| `.pi/agent/models.json` | `.pi/agent/models.json` | file (**contains plaintext provider `apiKey`s** → mode 0600) |
+| `.pi/agent/skills/` | `.pi/agent/skills/` | dir (optional, may contain symlinks — see below) |
+| `.pi/agent/extensions/` | `.pi/agent/extensions/` | dir (optional) |
 
-Sources: [Pi settings docs](https://pi.dev/docs/latest/settings) (global
-`~/.pi/agent/settings.json`, `trust.json`, session dir) and community
-reports that credentials live at `~/.pi/agent/auth.json` (0600), config dir
-overridable via `PI_CODING_AGENT_DIR`. **Excluded:** `trust.json`
-(per-project trust decisions — cross-project state), `npm/`, session data.
+Confirmed on a real install (2026-07-07): `~/.pi/agent/` exists with
+`auth.json` (0600 — may be an empty `{}` when the user authenticates via
+API keys instead of OAuth; copy it anyway), `settings.json`, and a
+**`models.json`** the earlier draft missed — it defines custom
+OpenAI-compatible providers *including their API keys*, so it is both
+required config (the `defaultProvider`/`defaultModel` in `settings.json`
+may reference providers defined there) and a secret (force 0600).
+`skills/` and `extensions/` do exist as real directories (no path arrays
+needed) and are included.
 
-> **TODO (resolve on a machine with pi installed):** pi's skills /
-> extensions / prompts are referenced by path arrays in `settings.json`
-> rather than a fixed directory, so their default locations aren't
-> documented. Confirm whether there's a `~/.pi/agent/skills/` (or similar)
-> worth adding, and whether `PI_CODING_AGENT_DIR` should be honored when
-> reading the host source.
+**Excluded (confirmed to exist and deliberately skipped):** `sessions/`
+(conversation history — the isolation guarantee), `npm/` (package cache
+for the `packages` array in `settings.json`; pi reinstalls those on
+startup, which works through the firewall for npm). `trust.json`
+(per-project trust decisions) was absent on the inspected host but stays
+excluded if present.
+
+> **Symlink caveat (real-world case):** the inspected host's
+> `.pi/agent/skills/` contained a symlink pointing outside `$HOME`
+> (`skills/omarchy -> ~/.local/share/omarchy/...`). A plain `tar` copy
+> would recreate it as a dangling link in the volume. The copy step must
+> dereference symlinks (`tar -h`) and tolerate broken ones (warn + skip)
+> rather than fail the whole injection.
+
+> **Localhost-provider caveat:** on the inspected host both pi's
+> `models.json` and opencode's `opencode.json` define providers at
+> `http://127.0.0.1:<port>` (a llama-server on the Docker host). Inside
+> the container 127.0.0.1 is the container itself, so those providers
+> won't resolve. Not this feature's problem to fix, but the README section
+> should point at `--host-port PORT` + editing the in-volume config to use
+> `host.docker.internal:<port>` as the supported workaround.
 
 ## Copy mechanism & ownership
 
@@ -170,7 +204,10 @@ irrelevant to this operation.
    resolution in `dev` + `lib/dev/lifecycle.sh`).
 2. For each requested agent, build the list of **existing** manifest sources.
 3. `tar` those sources on the host with paths rewritten to the dest layout
-   (`--transform` / a staging dir), streamed to stdout.
+   (`--transform` / a staging dir), streamed to stdout. Use `-h` to
+   dereference symlinks (real installs symlink skill dirs to paths outside
+   the copied tree, which would otherwise land as dangling links); warn and
+   skip broken symlinks instead of failing the injection.
 4. Pipe the stream into a short-lived helper container:
    - image: the project's own image tag (already built; `busybox`-level
      tools like `tar` are present in the devcontainers base),
@@ -179,8 +216,10 @@ irrelevant to this operation.
      `EXPECT_KEEPID` is true, run **as `vscode`**, so extracted files are
      owned correctly and uniformly across Docker, rootful podman, and
      rootless podman — no separate `chown` pass,
-   - command: `cd /home/vscode && tar -xf -` (plus `chmod 600` on known
-     secret files like `.credentials.json` / `auth.json`).
+   - command: `cd /home/vscode && tar -xf -` (plus `chmod 600` on the
+     manifest entries marked mode 0600 — for claude `.credentials.json`;
+     for opencode `auth.json`, `mcp-auth.json`, and `opencode.json`; for
+     pi `auth.json` and `models.json`).
 5. If a workspace container is already running, the helper still writes to
    the same underlying volume, so the change is visible inside the running
    container immediately (the paths are under the live-mounted
@@ -214,8 +253,10 @@ irrelevant to this operation.
   The `agent rm` command is the targeted alternative.
 - **No new network exposure.** The copy never leaves the host↔container
   boundary; the firewall posture is unchanged.
-- **Secret file modes** (`.credentials.json`, `auth.json`) are forced to
-  `600` after extraction.
+- **Secret file modes** are forced to `600` after extraction. This covers
+  more than the obvious auth files: on real installs, opencode's
+  `opencode.json` and pi's `models.json` embed plaintext provider API keys,
+  so they get 0600 too (see the per-agent manifests for the full list).
 - **Snapshot staleness**: OAuth tokens rotate; a stale in-volume token means
   re-running `dev agent add <name>`. Documented, not automated.
 - **Isolation preserved**: manifests exclude every tool's project/session
@@ -252,8 +293,10 @@ scenario is self-contained and uses `scripts/test/lib/` like the others.
 
 ## Open items for user review
 
-1. **opencode/pi manifest paths** — marked `TODO` above; resolve on a
-   machine where those tools are installed and correct the tables.
+1. ~~**opencode/pi manifest paths**~~ — **resolved 2026-07-07** by
+   inspecting a host with both tools installed; the tables above are now
+   confirmed (opencode's plural `agents/`/`commands/`/`skills/` subdirs
+   remain unverified-but-harmless since missing sources are skipped).
 2. Confirm the excluded-vs-included calls for claude's `commands/`,
    `agents/`, `skills/` (included) and `plugins/` (excluded).
 3. Confirm the command verbs (`add` / `list` / `rm`) and that `all` should
