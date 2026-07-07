@@ -95,8 +95,8 @@ bash scripts/test/scenarios/22-cold-start-budget.sh
 The orchestrator needs passwordless `sudo`. It auto-installs `docker.io`,
 `docker-buildx`, and `podman` on Debian/Ubuntu hosts if a runtime is
 missing, auto-detects broken in-container DNS resolvers and sets
-`DEV_EXTRA_RUN_ARGS=--dns=8.8.8.8 --dns=1.1.1.1` if needed, builds both
-the base and `:dind` image targets, then walks every script under
+`DEV_EXTRA_RUN_ARGS=--dns=8.8.8.8 --dns=1.1.1.1` if needed, builds the
+base, `:dind`, and `:pind` image targets, then walks every script under
 `scripts/test/scenarios/` and reports a pass/fail/skip table. Logs land
 at `scripts/test/last-run.log` and `scripts/test/last-summary.log`.
 
