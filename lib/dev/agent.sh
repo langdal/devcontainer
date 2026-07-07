@@ -270,10 +270,14 @@ _agent_rm() {
   fi
 
   local -a targets=()
-  local line
+  local line expanded
+  # Capture via command substitution (not process substitution): _agent_expand
+  # calls `exit` on an unknown name, and that exit code only propagates
+  # through $? of a command substitution, not through a `< <(...)` pipeline.
+  expanded="$(_agent_expand known "${raw[@]}")" || exit 1
   while IFS= read -r line; do
     [[ -n "$line" ]] && targets+=("$line")
-  done < <(_agent_expand known "${raw[@]}")
+  done <<< "$expanded"
 
   local name dest reply
   local -a dests

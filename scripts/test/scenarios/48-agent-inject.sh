@@ -134,6 +134,19 @@ echo "$listout" | grep -E "claude.*yes.*yes" >/dev/null \
     || log_fail "list output unexpected: $listout"
 
 # ---------- rm ----------
+
+# Unknown name must exit non-zero and remove nothing (regression: process-sub
+# swallowed exit — dev agent rm claude bogus used to exit 0 and no-op).
+if ( cd "$WORK" && HOME="$FAKE_HOME" DEV_ASSUME_YES=1 "$DEV" agent rm bogus ) >/dev/null 2>&1; then
+    log_fail "dev agent rm bogus should exit non-zero"
+else
+    log_pass "dev agent rm bogus exits non-zero (no silent no-op)"
+fi
+# ...and claude is still injected (nothing was removed by the failed call)
+vol_has ".claude/.credentials.json" \
+    && log_pass "failed rm left claude files intact" \
+    || log_fail "failed rm removed files it should not have"
+
 ( cd "$WORK" && HOME="$FAKE_HOME" DEV_ASSUME_YES=1 "$DEV" agent rm claude ) \
     || log_fail "dev agent rm claude exited non-zero"
 
@@ -141,4 +154,14 @@ if vol_has ".claude/.credentials.json"; then
     log_fail "rm did not remove .credentials.json"
 else
     log_pass "rm removed claude's injected files"
+fi
+vol_has ".claude/commands/x.md" \
+    && log_fail "rm did not remove commands/x.md" \
+    || log_pass "rm removed commands/x.md (non-secret dest)"
+
+listout2="$( cd "$WORK" && HOME="$FAKE_HOME" "$DEV" agent list 2>&1 )"
+if echo "$listout2" | grep -E "claude.*yes.*yes" >/dev/null; then
+    log_fail "list still shows claude injected after rm: $listout2"
+else
+    log_pass "list shows claude no longer injected after rm"
 fi
