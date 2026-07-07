@@ -276,3 +276,57 @@ COPY --chmod=755 dind-init.sh /usr/local/sbin/dind-init.sh
 # NOTE: do NOT switch USER to vscode here. The entrypoint runs as root in
 # the base image (firewall-init.sh + dind-init.sh both need root) and drops
 # to vscode via gosu. Setting `USER vscode` would break firewall-init.
+
+# =============================================================================
+FROM base AS pind
+# Rootless podman engine as a sibling to the dind (rootless dockerd) target.
+# Podman is daemonless: `podman pull`/`build` run in the calling vscode
+# process in the container's main netns, so their own egress uses the same
+# OUTPUT chain as an ordinary curl. Nested-container egress still routes via
+# the slirp gateway 10.0.2.2:8888, exactly like dind.
+# Stays root: entrypoint runs firewall-init.sh + pind-init.sh as root, then
+# drops to vscode via gosu. Do NOT set USER vscode here.
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+# hadolint ignore=DL3002
+USER root
+
+# podman            - the nested container engine (pulls in crun/conmon/
+#                     containers-common transitively)
+# fuse-overlayfs    - rootless storage driver
+# uidmap            - newuidmap / newgidmap for user-namespace allocation
+# slirp4netns       - per-container network stack (pinned backend; see
+#                     containers.conf in pind-init.sh)
+# dbus-user-session - user session paths for rootless podman
+# jq                - pind-init.sh merges config json
+# hadolint ignore=DL3008
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        podman \
+        fuse-overlayfs \
+        uidmap \
+        slirp4netns \
+        dbus-user-session \
+        jq && \
+    rm -rf /var/lib/apt/lists/*
+
+# docker compose v2 CLI plugin, so `docker compose ...` (and DOCKER_HOST-based
+# tooling) resolves against the podman compat socket. Installed under the
+# system-wide plugin path.
+ARG COMPOSE_VERSION=2.40.3
+RUN set -eux; \
+    arch="$(uname -m)"; \
+    case "$arch" in \
+        x86_64|aarch64) ;; \
+        *) echo "unsupported arch: $arch" >&2; exit 1 ;; \
+    esac; \
+    url="https://github.com/docker/compose/releases/download/v${COMPOSE_VERSION}/docker-compose-linux-${arch}"; \
+    curl -fsSLo /tmp/docker-compose "${url}"; \
+    expected="$(curl -fsSL "${url}.sha256" | awk '{print $1}')"; \
+    echo "${expected}  /tmp/docker-compose" | sha256sum -c -; \
+    install -D -m 0755 /tmp/docker-compose /usr/local/lib/docker/cli-plugins/docker-compose; \
+    rm -f /tmp/docker-compose
+
+COPY allowlist.dind /etc/devcontainer/allowlist.dind
+COPY --chmod=755 pind-init.sh /usr/local/sbin/pind-init.sh
+
+# NOTE: do NOT switch USER to vscode here (same reason as the dind target).
