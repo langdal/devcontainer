@@ -52,17 +52,19 @@ refuse_flag_due_to --dind "$N" || exit 1
 refuse_flag_due_to --maintenance "$N" || exit 1
 "$RUNTIME" stop "$N" 2>/dev/null; "$RUNTIME" rm -f "$N" 2>/dev/null
 
-# Pair 2: --maintenance running -> normal, --dind refused.
+# Pair 2: --maintenance running -> normal, --dind, --pind refused.
 run_bg ./dev --maintenance -- sleep 60
 refuse_normal_due_to "$M" || exit 1
 refuse_flag_due_to --dind "$M" || exit 1
+refuse_flag_due_to --pind "$M" || exit 1
 "$RUNTIME" stop "$M" 2>/dev/null; "$RUNTIME" rm -f "$M" 2>/dev/null
 
-# Pair 3: --dind running -> normal, --maintenance refused.
+# Pair 3: --dind running -> normal, --maintenance, --pind refused.
 run_bg ./dev --dind -- sleep 60
 sleep 6   # dockerd-rootless takes longer to come up
 refuse_normal_due_to "$D" || exit 1
 refuse_flag_due_to --maintenance "$D" || exit 1
+refuse_flag_due_to --pind "$D" || exit 1
 "$RUNTIME" stop "$D" 2>/dev/null; "$RUNTIME" rm -f "$D" 2>/dev/null
 
 # Pair 4: --dind and --maintenance together in the same invocation are
@@ -102,5 +104,5 @@ fi
 expect_grep "$out" "mutually exclusive" \
     || { log_fail "expected mutual-exclusivity error; got: $out"; exit 1; }
 
-log_pass "four-way conflict guard and --dind/--pind/--maintenance mutex correct"
+log_pass "four-way conflict guard and --dind/--pind/--maintenance mutex correct (all six pairwise running->refused directions plus same-invocation pairs)"
 exit 0
