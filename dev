@@ -625,6 +625,8 @@ case "$subcmd" in
     _resolve_workspace_names
     # shellcheck disable=SC2034  # IMAGE_TAG consumed by lib/dev/agent.sh helpers
     IMAGE_TAG="$IMAGE_NAME"
+    # shellcheck disable=SC2034  # consumed by migrate_volume_for_keepid in lib/dev/lifecycle.sh
+    HOST_UID=$(id -u)
     case "$agent_action" in
       add)  _agent_add "$@" ;;
       list) _agent_list "$@" ;;

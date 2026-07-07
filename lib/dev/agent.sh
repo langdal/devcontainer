@@ -181,7 +181,7 @@ _agent_copy_into_volume() {
   # shellcheck disable=SC2086  # intentional word-splitting of RUNTIME_ARGS
   tar -C "$staging" -cf - . \
     | $RUNTIME $RUNTIME_ARGS run --rm -i \
-        "${keepid_args[@]}" -u vscode \
+        ${keepid_args[@]+"${keepid_args[@]}"} -u vscode \
         -v "$HOME_VOLUME":/home/vscode \
         --entrypoint sh "$IMAGE_TAG" -c "$remote" \
     || rc=$?
