@@ -1,5 +1,35 @@
 # Changelog
 
+## [1.6.0](https://github.com/langdal/devcontainer/compare/v1.5.1...v1.6.0) (2026-07-07)
+
+
+### Features
+
+* add pind Dockerfile target with rootless podman ([d70274e](https://github.com/langdal/devcontainer/commit/d70274ec2a9606c3aad12cc017e869571c9c3933))
+* add podman-docker shim and docker-compose symlink to pind image ([9da15dd](https://github.com/langdal/devcontainer/commit/9da15dd33ced61c96270ef81866cc33c01ee02f8))
+* **agent:** add dev agent subcommand skeleton and router wiring ([fc6e333](https://github.com/langdal/devcontainer/commit/fc6e333d819684966d87eeecb7e033a7efcf7dd9))
+* **agent:** add manifests, source resolution, and add --dry-run ([2382ee8](https://github.com/langdal/devcontainer/commit/2382ee8aeda4e608b44073604c27931913058311))
+* **agent:** copy curated files into the home volume via keep-id helper ([f1b0e29](https://github.com/langdal/devcontainer/commit/f1b0e2945f57b0cff896e7123568d6636aabef93))
+* **agent:** implement dev agent list and rm ([4706f46](https://github.com/langdal/devcontainer/commit/4706f46fe2972f32e80d520656c1b8bd412fbdad))
+* apply apparmor and subid preflights to pind mode ([c650e18](https://github.com/langdal/devcontainer/commit/c650e182ab487d42da2f844d31f9b12de885cd08))
+* implement pind-init.sh podman engine setup ([31cd941](https://github.com/langdal/devcontainer/commit/31cd941d82bb805d245f3189ca854a30e3b583e8))
+* merge registry allowlist for pind mode ([1b6c071](https://github.com/langdal/devcontainer/commit/1b6c071ada0368141e13faba0f8406640b5cb7f4))
+* route pind mode in entrypoint ([37de7ea](https://github.com/langdal/devcontainer/commit/37de7eac7e6afae95564f3a5a0a2a6effe079607))
+* scaffold pind .devcontainer via dev scaffold --pind ([9532c3d](https://github.com/langdal/devcontainer/commit/9532c3dd47bb989ec0de8fd05a0273c8afd10767))
+* wire --pind flag, container, volume, and mutex into dev ([715a77f](https://github.com/langdal/devcontainer/commit/715a77f178c90ab2ad1856e52c2243b0ce04e8b4))
+
+
+### Bug Fixes
+
+* **agent:** apply --userns=keep-id to list/rm helpers ([8be6a57](https://github.com/langdal/devcontainer/commit/8be6a571ada8d7eacaa71fc52532820bcefb2e47))
+* **agent:** make home-volume creation idempotent on podman ([54f2c75](https://github.com/langdal/devcontainer/commit/54f2c7586dc0804b9c9ed73bc0b497087ee52c00))
+* **agent:** preflight base image and cover broken-symlink path ([bcc0a56](https://github.com/langdal/devcontainer/commit/bcc0a56bf745ab60f933ff5b8d2d6173d717ccb2))
+* **agent:** propagate _agent_expand exit through command substitution in rm ([5e4e4bc](https://github.com/langdal/devcontainer/commit/5e4e4bc909e8c11ae81d09d035aede49ffb16703))
+* **agent:** set HOST_UID in agent dispatch and guard empty keepid_args ([ddd4123](https://github.com/langdal/devcontainer/commit/ddd4123265f4d1a00218306f05ca5b196f706794))
+* enable slirp4netns allow_host_loopback so pind nested containers reach the proxy ([4ada939](https://github.com/langdal/devcontainer/commit/4ada9394260ee9083bb14eecbea433a457653a92))
+* symmetric pind mutex/reset/fw resolution and pind polish ([44d0960](https://github.com/langdal/devcontainer/commit/44d09600a9c8c71b5ff11ec895f13fd66b7a4729))
+* use default_rootless_network_cmd for slirp4netns pin in pind-init ([555599c](https://github.com/langdal/devcontainer/commit/555599c9f05b2daca29feab3a868e1307cc4a26e))
+
 ## [1.5.1](https://github.com/langdal/devcontainer/compare/v1.5.0...v1.5.1) (2026-07-04)
 
 
