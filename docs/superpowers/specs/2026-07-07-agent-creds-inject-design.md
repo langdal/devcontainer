@@ -1,7 +1,7 @@
 # `dev agent` — inject agent credentials & settings
 
 - **Date:** 2026-07-07
-- **Status:** Draft (pending user review)
+- **Status:** Approved — manifests confirmed against real installs
 - **Branch:** `feat/agent-creds-inject` (off `feat/podman-in-podman`)
 
 ## Summary
