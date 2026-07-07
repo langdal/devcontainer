@@ -51,10 +51,18 @@ EOF
 #    10.0.2.2) and inject the proxy env into every nested container so
 #    `podman build` RUN steps and `podman run` workloads reach tinyproxy.
 #    This is the podman analogue of dind's ~/.docker/config.json proxies
-#    block.
+#    block. network_cmd_options enables slirp4netns's allow_host_loopback
+#    (default false) — without it, nested containers get "Network
+#    unreachable" for 10.0.2.2 and have no proxied egress at all. The only
+#    loopback service exposed is tinyproxy, which still enforces the
+#    allowlist, and direct (non-proxy) egress is still dropped by this
+#    container's iptables — same posture as dind.
 cat > "$CFG_DIR/containers.conf" <<EOF
 [network]
 default_rootless_network_cmd = "slirp4netns"
+
+[engine]
+network_cmd_options = ["allow_host_loopback=true"]
 
 [containers]
 env = [
