@@ -170,10 +170,15 @@ _agent_copy_into_volume() {
 
   # Ensure the volume exists; under keep-id also make sure it is owned by the
   # host user before we write (reuses lifecycle.sh's one-time migration).
+  # Create only when missing: `docker volume create` is idempotent, but
+  # `podman volume create` errors ("volume already exists") on an existing
+  # volume, which under set -e would abort before the copy ever runs.
   local keepid
   keepid="$(_agent_keepid)"
-  # shellcheck disable=SC2086  # intentional word-splitting of RUNTIME_ARGS
-  $RUNTIME $RUNTIME_ARGS volume create "$HOME_VOLUME" >/dev/null
+  if ! _agent_volume_exists; then
+    # shellcheck disable=SC2086  # intentional word-splitting of RUNTIME_ARGS
+    $RUNTIME $RUNTIME_ARGS volume create "$HOME_VOLUME" >/dev/null
+  fi
   [[ "$keepid" == true ]] && migrate_volume_for_keepid "$HOME_VOLUME"
 
   # Remote command: extract, then tighten secret modes. Quote each dest.
