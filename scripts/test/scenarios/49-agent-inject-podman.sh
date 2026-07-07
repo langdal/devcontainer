@@ -98,18 +98,26 @@ else
     log_fail "dev agent add pi failed under podman (volume-create idempotency regression?)"
 fi
 
-vol_has ".pi/agent/auth.json" \
-    && log_pass "auth.json landed in the volume (podman keep-id copy)" \
-    || log_fail "auth.json missing from volume under podman"
-vol_has ".pi/agent/skills/demo.md" \
-    && log_pass "skills/ dir landed in the volume (podman)" \
-    || log_fail "skills/demo.md missing from volume under podman"
-[ "$(vol_mode .pi/agent/auth.json)" = "600" ] \
-    && log_pass "auth.json is mode 600 in the volume (podman)" \
-    || log_fail "auth.json mode is $(vol_mode .pi/agent/auth.json) under podman, want 600"
-[ "$(vol_mode .pi/agent/models.json)" = "600" ] \
-    && log_pass "models.json is mode 600 in the volume (podman)" \
-    || log_fail "models.json mode is $(vol_mode .pi/agent/models.json) under podman, want 600"
+if vol_has ".pi/agent/auth.json"; then
+    log_pass "auth.json landed in the volume (podman keep-id copy)"
+else
+    log_fail "auth.json missing from volume under podman"
+fi
+if vol_has ".pi/agent/skills/demo.md"; then
+    log_pass "skills/ dir landed in the volume (podman)"
+else
+    log_fail "skills/demo.md missing from volume under podman"
+fi
+if [ "$(vol_mode .pi/agent/auth.json)" = "600" ]; then
+    log_pass "auth.json is mode 600 in the volume (podman)"
+else
+    log_fail "auth.json mode is $(vol_mode .pi/agent/auth.json) under podman, want 600"
+fi
+if [ "$(vol_mode .pi/agent/models.json)" = "600" ]; then
+    log_pass "models.json is mode 600 in the volume (podman)"
+else
+    log_fail "models.json mode is $(vol_mode .pi/agent/models.json) under podman, want 600"
+fi
 if vol_has ".pi/agent/sessions" || vol_has ".pi/agent/trust.json"; then
     log_fail "an excluded pi path leaked into the volume under podman"
 else

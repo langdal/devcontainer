@@ -22,18 +22,22 @@ DEV="${ROOT}/dev"
 if out="$("$DEV" agent bogus 2>&1)"; then
     log_fail "dev agent bogus should exit non-zero"
 else
-    echo "$out" | grep -q "add|list|rm" \
-        && log_pass "dev agent bogus errors with the valid action list" \
-        || log_fail "dev agent bogus error text missing action list: $out"
+    if echo "$out" | grep -q "add|list|rm"; then
+        log_pass "dev agent bogus errors with the valid action list"
+    else
+        log_fail "dev agent bogus error text missing action list: $out"
+    fi
 fi
 
 # Unknown agent name errors and lists valid agents.
 if out="$("$DEV" agent add frobnicate --dry-run 2>&1)"; then
     log_fail "dev agent add frobnicate should exit non-zero"
 else
-    echo "$out" | grep -q "claude" \
-        && log_pass "dev agent add <bad-name> lists valid agents" \
-        || log_fail "dev agent add <bad-name> error missing agent list: $out"
+    if echo "$out" | grep -q "claude"; then
+        log_pass "dev agent add <bad-name> lists valid agents"
+    else
+        log_fail "dev agent add <bad-name> error missing agent list: $out"
+    fi
 fi
 
 # ---------- manifest / dry-run resolution (fake HOME, no runtime writes) ----------
@@ -56,17 +60,23 @@ printf 'log\n'       > "$FAKE_HOME/.claude/history.jsonl"
 
 dry="$(HOME="$FAKE_HOME" "$DEV" agent add claude --dry-run 2>&1)"
 
-echo "$dry" | grep -q ".claude/.credentials.json" \
-    && log_pass "dry-run includes .credentials.json" \
-    || log_fail "dry-run missing .credentials.json: $dry"
+if echo "$dry" | grep -q ".claude/.credentials.json"; then
+    log_pass "dry-run includes .credentials.json"
+else
+    log_fail "dry-run missing .credentials.json: $dry"
+fi
 
-echo "$dry" | grep -q "mode 0600" \
-    && log_pass "dry-run marks the credential file 0600" \
-    || log_fail "dry-run did not mark a 0600 secret: $dry"
+if echo "$dry" | grep -q "mode 0600"; then
+    log_pass "dry-run marks the credential file 0600"
+else
+    log_fail "dry-run did not mark a 0600 secret: $dry"
+fi
 
-echo "$dry" | grep -q ".claude/commands" \
-    && log_pass "dry-run includes commands/ dir" \
-    || log_fail "dry-run missing commands/: $dry"
+if echo "$dry" | grep -q ".claude/commands"; then
+    log_pass "dry-run includes commands/ dir"
+else
+    log_fail "dry-run missing commands/: $dry"
+fi
 
 if echo "$dry" | grep -Eq "\.claude\.json|projects|history\.jsonl"; then
     log_fail "dry-run leaked an excluded path: $dry"
@@ -105,22 +115,30 @@ vol_mode() {
         --entrypoint sh generic-devcontainer -c "stat -c %a /home/vscode/$1"
 }
 
-vol_has ".claude/.credentials.json" \
-    && log_pass "credentials.json landed in the volume" \
-    || log_fail "credentials.json missing from volume"
-vol_has ".claude/commands/x.md" \
-    && log_pass "commands/x.md landed in the volume" \
-    || log_fail "commands/x.md missing from volume"
-[ "$(vol_mode .claude/.credentials.json)" = "600" ] \
-    && log_pass "credentials.json is mode 600 in the volume" \
-    || log_fail "credentials.json mode is $(vol_mode .claude/.credentials.json), want 600"
+if vol_has ".claude/.credentials.json"; then
+    log_pass "credentials.json landed in the volume"
+else
+    log_fail "credentials.json missing from volume"
+fi
+if vol_has ".claude/commands/x.md"; then
+    log_pass "commands/x.md landed in the volume"
+else
+    log_fail "commands/x.md missing from volume"
+fi
+if [ "$(vol_mode .claude/.credentials.json)" = "600" ]; then
+    log_pass "credentials.json is mode 600 in the volume"
+else
+    log_fail "credentials.json mode is $(vol_mode .claude/.credentials.json), want 600"
+fi
 
 # Broken symlink inside commands/ must not abort the dir copy: the sibling
 # good file lands, and the broken link itself is skipped (not copied as a
 # dangling symlink).
-vol_has ".claude/commands/x.md" \
-    && log_pass "broken symlink did not abort commands/ dir copy (sibling x.md present)" \
-    || log_fail "commands/x.md missing — broken symlink may have aborted the dir copy"
+if vol_has ".claude/commands/x.md"; then
+    log_pass "broken symlink did not abort commands/ dir copy (sibling x.md present)"
+else
+    log_fail "commands/x.md missing — broken symlink may have aborted the dir copy"
+fi
 if vol_has ".claude/commands/broken.md"; then
     log_fail "broken symlink was copied into the volume (should have been skipped)"
 else
@@ -144,9 +162,11 @@ fi
 
 # ---------- list ----------
 listout="$( cd "$WORK" && HOME="$FAKE_HOME" "$DEV" agent list 2>&1 )"
-echo "$listout" | grep -E "claude.*yes.*yes" >/dev/null \
-    && log_pass "list shows claude present on host and injected" \
-    || log_fail "list output unexpected: $listout"
+if echo "$listout" | grep -E "claude.*yes.*yes" >/dev/null; then
+    log_pass "list shows claude present on host and injected"
+else
+    log_fail "list output unexpected: $listout"
+fi
 
 # ---------- rm ----------
 
@@ -158,9 +178,11 @@ else
     log_pass "dev agent rm bogus exits non-zero (no silent no-op)"
 fi
 # ...and claude is still injected (nothing was removed by the failed call)
-vol_has ".claude/.credentials.json" \
-    && log_pass "failed rm left claude files intact" \
-    || log_fail "failed rm removed files it should not have"
+if vol_has ".claude/.credentials.json"; then
+    log_pass "failed rm left claude files intact"
+else
+    log_fail "failed rm removed files it should not have"
+fi
 
 ( cd "$WORK" && HOME="$FAKE_HOME" DEV_ASSUME_YES=1 "$DEV" agent rm claude ) \
     || log_fail "dev agent rm claude exited non-zero"
@@ -170,9 +192,11 @@ if vol_has ".claude/.credentials.json"; then
 else
     log_pass "rm removed claude's injected files"
 fi
-vol_has ".claude/commands/x.md" \
-    && log_fail "rm did not remove commands/x.md" \
-    || log_pass "rm removed commands/x.md (non-secret dest)"
+if vol_has ".claude/commands/x.md"; then
+    log_fail "rm did not remove commands/x.md"
+else
+    log_pass "rm removed commands/x.md (non-secret dest)"
+fi
 
 listout2="$( cd "$WORK" && HOME="$FAKE_HOME" "$DEV" agent list 2>&1 )"
 if echo "$listout2" | grep -E "claude.*yes.*yes" >/dev/null; then
