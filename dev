@@ -204,6 +204,7 @@ FORCE_BUILD=false
 DEFAULT_PORTS=false
 MAINTENANCE=false
 DIND=false
+PIND=false
 FORCE=false
 EXTRA_PORTS=()
 HOST_PORTS=()
@@ -475,6 +476,7 @@ _resolve_workspace_names() {
   NORMAL_NAME="dev-${WORKSPACE_BASENAME}"
   MAINT_NAME="dev-${WORKSPACE_BASENAME}-maint"
   DIND_NAME="dev-${WORKSPACE_BASENAME}-dind"
+  PIND_NAME="dev-${WORKSPACE_BASENAME}-pind"
   _resolve_home_volume
 }
 
@@ -527,6 +529,7 @@ case "$subcmd" in
     while [[ $# -gt 0 ]]; do
       case $1 in
         --dind) DIND=true; shift ;;
+        --pind) PIND=true; shift ;;
         --force) FORCE=true; shift ;;
         *)
           echo "Error: dev scaffold: unknown option: $1" >&2
@@ -645,6 +648,10 @@ while [[ $# -gt 0 ]]; do
       DIND=true
       shift
       ;;
+    --pind)
+      PIND=true
+      shift
+      ;;
     --force)
       # shellcheck disable=SC2034  # accepted here for parser-surface parity with
       # the pre-router flags; only actually consumed by create_dev_container in
@@ -678,12 +685,21 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Restored mode-conflict guard: --dind and --maintenance are mutually
-# exclusive. Must run before detect_runtime/preflight_subid_grant below so
-# this error wins over the (also-fatal) --dind subid preflight when both
-# flags are given together.
+# Restored mode-conflict guard: --dind, --pind, and --maintenance are
+# mutually exclusive (four-way: normal / maintenance / dind / pind). Must
+# run before detect_runtime/preflight_subid_grant below so this error wins
+# over the (also-fatal) --dind subid preflight when both flags are given
+# together.
 if [[ "$DIND" == true && "$MAINTENANCE" == true ]]; then
   echo "Error: --dind and --maintenance are mutually exclusive." >&2
+  exit 1
+fi
+if [[ "$PIND" == true && "$MAINTENANCE" == true ]]; then
+  echo "Error: --pind and --maintenance are mutually exclusive." >&2
+  exit 1
+fi
+if [[ "$PIND" == true && "$DIND" == true ]]; then
+  echo "Error: --pind and --dind are mutually exclusive." >&2
   exit 1
 fi
 
@@ -737,6 +753,9 @@ DEV_GIT_EMAIL="$(git config --get user.email 2>/dev/null || true)"
 
 # In --dind mode, use the :dind image variant. RUNTIME_ARGS routes all
 # subsequent runtime commands at the dind storage (see DIND_RUNTIME_ARGS).
+# --pind reuses the same DIND_RUNTIME_ARGS/RUNTIME_ARGS routing below (its
+# own rootless-podman-in-podman path needs the same macOS rootful-connection
+# override).
 if [[ "$DIND" == true ]]; then
   IMAGE_TAG="${IMAGE_NAME}:dind"
   BUILD_TARGET="dind"
@@ -745,24 +764,38 @@ else
   IMAGE_TAG="$IMAGE_NAME"
   BUILD_TARGET="base"
 fi
+if [[ "$PIND" == true ]]; then
+  IMAGE_TAG="${IMAGE_NAME}:pind"
+  BUILD_TARGET="pind"
+  RUNTIME_ARGS="$DIND_RUNTIME_ARGS"
+fi
 
 WORKSPACE_BASENAME="$(basename "$(pwd)")"
 NORMAL_NAME="dev-${WORKSPACE_BASENAME}"
 MAINT_NAME="dev-${WORKSPACE_BASENAME}-maint"
 DIND_NAME="dev-${WORKSPACE_BASENAME}-dind"
+PIND_NAME="dev-${WORKSPACE_BASENAME}-pind"
 _resolve_home_volume
 
 if [[ "$DIND" == true ]]; then
   refuse_if_running "$NORMAL_NAME" "normal"
   refuse_if_running "$MAINT_NAME" "maintenance"
+  refuse_if_running "$PIND_NAME" "pind" "$DIND_RUNTIME_ARGS"
   CONTAINER_NAME="$DIND_NAME"
+elif [[ "$PIND" == true ]]; then
+  CONTAINER_NAME="$PIND_NAME"
+  refuse_if_running "$NORMAL_NAME" "normal"
+  refuse_if_running "$MAINT_NAME" "maintenance"
+  refuse_if_running "$DIND_NAME" "dind" "$DIND_RUNTIME_ARGS"
 elif [[ "$MAINTENANCE" == true ]]; then
   refuse_if_running "$NORMAL_NAME" "normal"
   refuse_if_running "$DIND_NAME" "dind" "$DIND_RUNTIME_ARGS"
+  refuse_if_running "$PIND_NAME" "pind" "$DIND_RUNTIME_ARGS"
   CONTAINER_NAME="$MAINT_NAME"
 else
   refuse_if_running "$MAINT_NAME" "maintenance"
   refuse_if_running "$DIND_NAME" "dind" "$DIND_RUNTIME_ARGS"
+  refuse_if_running "$PIND_NAME" "pind" "$DIND_RUNTIME_ARGS"
   # shellcheck disable=SC2034  # consumed by start_container in lib/dev/lifecycle.sh
   CONTAINER_NAME="$NORMAL_NAME"
 fi

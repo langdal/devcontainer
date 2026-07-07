@@ -353,7 +353,7 @@
 
   /* modes footer */
   .modes {
-    display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
     margin-top: 22px;
   }
   .mode {
@@ -418,7 +418,7 @@
           <li>Bakes your <span class="mono">UID/GID</span> into the image; auto-builds &amp; rebuilds</li>
           <li>Reuses / restarts the <span class="mono">dev-&lt;dir&gt;</span> container, else creates one</li>
           <li>Mounts volumes, forwards ports, passes <span class="mono">GITHUB_TOKEN</span> &amp; git identity</li>
-          <li>Merges allowlists; selects the mode (normal / maint / dind)</li>
+          <li>Merges allowlists; selects the mode (normal / maint / dind / pind)</li>
         </ul>
       </div>
       <div class="card">
@@ -504,6 +504,10 @@
             <span class="ic">🐳</span>
             <span class="txt"><span class="n">devcontainer-dind</span><span class="m">docker data · dind only</span></span>
           </div>
+          <div class="vol">
+            <span class="ic">🦭</span>
+            <span class="txt"><span class="n">devcontainer-pind</span><span class="m">podman data · pind only</span></span>
+          </div>
         </div>
         <div class="workspace-note">
           <span class="n">bind: ./ → /workspace</span><br>
@@ -529,7 +533,7 @@
 
   <div class="section-head">
     <span class="idx">03</span>
-    <h2>Same wiring, three modes</h2>
+    <h2>Same wiring, four modes</h2>
     <span class="rule"></span>
   </div>
 
@@ -545,6 +549,10 @@
     <div class="mode">
       <div class="k">./dev --dind</div>
       <div class="v">Adds rootless dockerd; nested pulls still routed through the proxy.</div>
+    </div>
+    <div class="mode">
+      <div class="k">./dev --pind</div>
+      <div class="v">Rootless podman (daemonless) + a Docker-API compat socket; nested egress still routed through the proxy. Mutually exclusive with --dind.</div>
     </div>
   </div>
 

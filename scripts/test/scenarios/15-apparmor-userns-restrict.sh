@@ -53,5 +53,34 @@ if expect_grep "$out" "kernel.apparmor_restrict_unprivileged_userns=1 on this ho
 fi
 
 "$RUNTIME" rm -f "dev-$(basename "$(pwd)")"-dind 2>/dev/null
-log_pass "apparmor_restrict_unprivileged_userns=1 produces a clean preflight failure with remediation"
+
+"$RUNTIME" rm -f "dev-$(basename "$(pwd)")"-pind 2>/dev/null
+
+# --pind shares the same preflight and should refuse fast (well under
+# 30s) with the same remediation message on stderr.
+out=$(timeout 30 ./dev --pind -- docker version 2>&1)
+rc=$?
+
+if [ "$rc" = 0 ]; then
+    log_fail "expected --pind to refuse with apparmor_restrict_unprivileged_userns=1 but it succeeded"
+    "$RUNTIME" rm -f "dev-$(basename "$(pwd)")"-pind 2>/dev/null
+    exit 1
+fi
+
+if ! expect_grep "$out" "apparmor_restrict_unprivileged_userns"; then
+    log_fail "expected diagnostic mentioning apparmor_restrict_unprivileged_userns; got: $out"
+    "$RUNTIME" rm -f "dev-$(basename "$(pwd)")"-pind 2>/dev/null
+    exit 1
+fi
+
+# Verify the bypass env var actually bypasses the preflight for --pind too.
+out=$(timeout 30 env DEV_SKIP_APPARMOR_CHECK=1 ./dev --pind -- docker version 2>&1)
+if expect_grep "$out" "kernel.apparmor_restrict_unprivileged_userns=1 on this host"; then
+    log_fail "DEV_SKIP_APPARMOR_CHECK=1 did not bypass the preflight for --pind"
+    "$RUNTIME" rm -f "dev-$(basename "$(pwd)")"-pind 2>/dev/null
+    exit 1
+fi
+
+"$RUNTIME" rm -f "dev-$(basename "$(pwd)")"-pind 2>/dev/null
+log_pass "apparmor_restrict_unprivileged_userns=1 produces a clean preflight failure with remediation for --dind and --pind"
 exit 0

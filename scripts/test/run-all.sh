@@ -105,7 +105,7 @@ if [ -z "${DEV_EXTRA_RUN_ARGS:-}" ] && [ -z "${SKIP_TEST_DNS_OVERRIDE:-}" ]; the
     export DEV_EXTRA_RUN_ARGS="--dns=8.8.8.8 --dns=1.1.1.1"
 fi
 
-# ---- Build both images up front so scenarios don't race the build ----
+# ---- Build the base, :dind, and :pind images up front so scenarios don't race the build ----
 echo "Building images..."
 if ! ./dev --build --dry-run >/dev/null 2>&1; then
     : # dry-run sanity probe is best-effort
@@ -120,6 +120,11 @@ if ! ./dev --build --dind -- true 2>&1 | tee -a "$LAST_LOG"; then
     exit 1
 fi
 "$RT" rm -f "dev-$(basename "$WORKSPACE")"-dind 2>/dev/null || true
+if ! ./dev --build --pind -- true 2>&1 | tee -a "$LAST_LOG"; then
+    echo "FATAL: failed to build :pind image" | tee -a "$LAST_LOG"
+    exit 1
+fi
+"$RT" rm -f "dev-$(basename "$WORKSPACE")"-pind 2>/dev/null || true
 
 # ---- Walk scenarios ----
 PASS=0; FAIL=0; SKIP=0

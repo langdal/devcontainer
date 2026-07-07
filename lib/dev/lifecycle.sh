@@ -72,9 +72,12 @@ reset_workspace() {
   if container_exists "$DIND_NAME" "$DIND_RUNTIME_ARGS"; then
     containers+=("$DIND_NAME"); containers_args+=("$DIND_RUNTIME_ARGS")
   fi
+  if container_exists "$PIND_NAME" "$DIND_RUNTIME_ARGS"; then
+    containers+=("$PIND_NAME"); containers_args+=("$DIND_RUNTIME_ARGS")
+  fi
 
-  # mise/home volumes live in default storage. The dind volume may live
-  # in the rootful podman connection on macOS+podman — probe with
+  # mise/home volumes live in default storage. The dind/pind volumes may
+  # live in the rootful podman connection on macOS+podman — probe with
   # DIND_RUNTIME_ARGS (empty on every other host, so the same lookup
   # works there too).
   local -a volumes=() volumes_args=()
@@ -87,6 +90,10 @@ reset_workspace() {
   # shellcheck disable=SC2086  # intentional word-splitting of DIND_RUNTIME_ARGS
   if $RUNTIME $DIND_RUNTIME_ARGS volume inspect devcontainer-dind >/dev/null 2>&1; then
     volumes+=("devcontainer-dind"); volumes_args+=("$DIND_RUNTIME_ARGS")
+  fi
+  # shellcheck disable=SC2086  # intentional word-splitting of DIND_RUNTIME_ARGS
+  if $RUNTIME $DIND_RUNTIME_ARGS volume inspect devcontainer-pind >/dev/null 2>&1; then
+    volumes+=("devcontainer-pind"); volumes_args+=("$DIND_RUNTIME_ARGS")
   fi
 
   if [[ ${#containers[@]} -eq 0 && ${#volumes[@]} -eq 0 ]]; then
@@ -126,12 +133,12 @@ reset_workspace() {
 }
 
 # Resolve which workspace container the management commands target. Sets:
-#   MANAGED_TARGET       = "normal" | "dind" | "maint" | ""   (empty = none running)
+#   MANAGED_TARGET       = "normal" | "dind" | "pind" | "maint" | ""   (empty = none running)
 #   MANAGED_NAME         = the container name (when MANAGED_TARGET is non-empty)
 #   MANAGED_RUNTIME_ARGS = runtime connection args for that container's storage
-# Each name is looked up in its own storage because on macOS+podman the dind
-# container lives in the rootful connection while normal/maint live in the
-# default rootless one — a single-storage probe would miss the dind container.
+# Each name is looked up in its own storage because on macOS+podman the dind/pind
+# containers live in the rootful connection while normal/maint live in the
+# default rootless one — a single-storage probe would miss the dind/pind container.
 # shellcheck disable=SC2034  # MANAGED_NAME/MANAGED_RUNTIME_ARGS consumed by dev's management-command dispatch blocks
 resolve_managed_container() {
   MANAGED_TARGET=""
@@ -142,6 +149,9 @@ resolve_managed_container() {
   fi
   if container_running "$DIND_NAME" "$DIND_RUNTIME_ARGS"; then
     MANAGED_TARGET="dind"; MANAGED_NAME="$DIND_NAME"; MANAGED_RUNTIME_ARGS="$DIND_RUNTIME_ARGS"; return
+  fi
+  if container_running "$PIND_NAME" "$DIND_RUNTIME_ARGS"; then
+    MANAGED_TARGET="pind"; MANAGED_NAME="$PIND_NAME"; MANAGED_RUNTIME_ARGS="$DIND_RUNTIME_ARGS"; return
   fi
   if container_running "$MAINT_NAME" ""; then
     MANAGED_TARGET="maint"; MANAGED_NAME="$MAINT_NAME"; MANAGED_RUNTIME_ARGS=""; return
@@ -156,7 +166,7 @@ require_workspace_firewall_container() {
   local op="$1"
   resolve_managed_container
   if [[ -z "$MANAGED_TARGET" ]]; then
-    echo "Error: no dev container is running for this workspace (looked for ${NORMAL_NAME}, ${DIND_NAME}, ${MAINT_NAME}). Start one with 'dev', 'dev --dind', or 'dev --maintenance' first." >&2
+    echo "Error: no dev container is running for this workspace (looked for ${NORMAL_NAME}, ${DIND_NAME}, ${PIND_NAME}, ${MAINT_NAME}). Start one with 'dev', 'dev --dind', 'dev --pind', or 'dev --maintenance' first." >&2
     exit 1
   fi
   if [[ "$MANAGED_TARGET" == "maint" ]]; then
@@ -323,7 +333,7 @@ start_container() {
   # binaries (notably newuidmap), which is exactly the path the rootlesskit
   # stack uses anyway. Without SYS_ADMIN, dockerd-rootless fails at start
   # with "newuidmap: write to uid_map failed: Operation not permitted".
-  if [[ "$DIND" == true ]]; then
+  if [[ "$DIND" == true || "$PIND" == true ]]; then
     DOCKER_CMD+=(--device=/dev/fuse)
     DOCKER_CMD+=(--device=/dev/net/tun)   # slirp4netns needs tun for nested-container networking
     DOCKER_CMD+=(--cap-add=SYS_ADMIN)
@@ -342,7 +352,11 @@ start_container() {
     # alone is not enough; SELinux denies the mount even after the proc
     # masks are removed. Silently ignored on hosts without SELinux.
     DOCKER_CMD+=(--security-opt label=disable)
-    DOCKER_CMD+=(-v devcontainer-dind:/home/vscode/.local/share/docker)
+    if [[ "$DIND" == true ]]; then
+      DOCKER_CMD+=(-v devcontainer-dind:/home/vscode/.local/share/docker)
+    else
+      DOCKER_CMD+=(-v devcontainer-pind:/home/vscode/.local/share/containers)
+    fi
   fi
 
   # Skip default ports if another dev-* container is already running (they'd collide).
@@ -411,6 +425,11 @@ start_container() {
   # DinD mode: tell entrypoint.sh to start dockerd-rootless.
   if [[ "$DIND" == true ]]; then
     DOCKER_CMD+=(-e DEVCONTAINER_DIND=1)
+  fi
+
+  # PinD mode: tell entrypoint.sh to start the rootless podman system service.
+  if [[ "$PIND" == true ]]; then
+    DOCKER_CMD+=(-e DEVCONTAINER_PIND=1)
   fi
 
   # --disable-firewall with no running container: bring the fresh container up
