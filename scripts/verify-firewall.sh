@@ -85,6 +85,20 @@ nested_pull_works() {
 nested_egress_blocked() {
     # Run a quick wget; expect non-zero exit.
     if [ "$(nested_engine)" = podman ]; then
+        # No --network bridge here (unlike the docker branch below): rootless
+        # podman's default network is pinned to slirp4netns via
+        # default_rootless_network_cmd in pind-init.sh, and its egress is
+        # meant to be NAT'd through the 10.0.2.2:8888 tinyproxy gateway. The
+        # default network is the intended firewalled path under test, so
+        # there is no docker-style "bridge" network to opt into.
+        # CAVEAT (verified 2026-07-07): with no extra network options,
+        # slirp4netns's host-loopback forwarding is off by default, so 10.0.2.2:8888
+        # is unreachable ("Network unreachable") regardless of the tinyproxy
+        # allowlist — this check currently passes on a network-layer
+        # rejection, not proven hostname filtering. `--network
+        # slirp4netns:allow_host_loopback=true` restores reachability and lets
+        # tinyproxy's own filter discriminate correctly (confirmed via raw
+        # CONNECT); see task-8-report.md for the full probe.
         ! podman run --rm alpine:3.20 \
             wget -T3 -q -O- https://example.com >/dev/null 2>&1
     else
