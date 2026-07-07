@@ -77,6 +77,19 @@ if [ -n "${DEVCONTAINER_DIND:-}" ]; then
     export XDG_RUNTIME_DIR=/home/vscode/.dind-run
 fi
 
+# --- PinD mode: launch rootless podman system service ---
+if [ -n "${DEVCONTAINER_PIND:-}" ]; then
+    if ! /usr/local/sbin/pind-init.sh; then
+        echo "FATAL: pind-init.sh failed; refusing to start container" >&2
+        exit 1
+    fi
+    # Export to entrypoint's env so non-login children (gosu vscode CMD) see
+    # DOCKER_HOST / XDG_RUNTIME_DIR. pind-init.sh also writes these to
+    # /etc/profile.d/pind.sh for login shells.
+    export DOCKER_HOST=unix:///home/vscode/.pind-run/podman.sock
+    export XDG_RUNTIME_DIR=/home/vscode/.pind-run
+fi
+
 # Run user-context startup tasks as vscode (preserves file ownership under
 # /home/vscode and /mise; ensures 'git config --global' lands in
 # /home/vscode/.gitconfig).
