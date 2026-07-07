@@ -228,6 +228,7 @@ usage() {
   cat <<EOF
 Usage: dev [OPTIONS] [-- COMMAND...]      # start/attach (default)
        dev fw {disable|enable|log|drops}
+       dev agent {add|list|rm} [name...]
        dev reset
        dev scaffold [--dind] [--force]
        dev update [--dry-run]
@@ -282,6 +283,15 @@ SUBCOMMANDS:
   fw drops        Stream packets dropped by iptables in the running workspace
                   container (tcpdump on NFLOG group 1). Targets normal or
                   dind. Does not start a container.
+  agent add NAME  Copy a curated set of an agent's credentials + settings
+                  (claude|opencode|pi, or 'all') from the host into this
+                  workspace's home volume. One-way snapshot — never a host
+                  mount, never baked into an image. Re-run to refresh.
+                  --dry-run        Preview the file list without copying.
+  agent list      Show, per agent, whether it is present on the host and
+                  whether it has been injected into this workspace.
+  agent rm NAME   Remove an agent's injected files from this workspace's
+                  home volume (confirms; DEV_ASSUME_YES=1 skips the prompt).
   reset           Remove the dev container(s) for the current workspace
                   (normal, dind, and maintenance variants if present)
                   and prompt individually for each existing named
@@ -450,7 +460,7 @@ _deprecated() { echo "Warning: '$1' is deprecated; use 'dev $2'." >&2; }
 
 subcmd=""
 case "${1:-}" in
-  fw|reset|scaffold|update|install) subcmd="$1"; shift ;;
+  fw|reset|scaffold|update|install|agent) subcmd="$1"; shift ;;
   --help)       usage; exit 0 ;;
   --version)    echo "dev $(resolve_dev_version)"; exit 0 ;;
   # Deprecated flag aliases -> subcommands. Note the ordering for the fw
@@ -598,6 +608,29 @@ case "$subcmd" in
         # with the firewall already disabled.
         ;;
     esac
+    ;;
+  agent)
+    agent_action="${1:-}"
+    case "$agent_action" in
+      add|list|rm) shift ;;
+      ''|-h|--help|help) _agent_usage; exit 0 ;;
+      *)
+        echo "Error: dev agent: expected an action (add|list|rm), got '${agent_action:-<none>}'" >&2
+        echo "Run 'dev --help' for usage information" >&2
+        exit 1
+        ;;
+    esac
+    detect_runtime
+    ensure_runtime_ready
+    _resolve_workspace_names
+    # shellcheck disable=SC2034  # IMAGE_TAG consumed by lib/dev/agent.sh helpers
+    IMAGE_TAG="$IMAGE_NAME"
+    case "$agent_action" in
+      add)  _agent_add "$@" ;;
+      list) _agent_list "$@" ;;
+      rm)   _agent_rm "$@" ;;
+    esac
+    exit 0
     ;;
 esac
 
