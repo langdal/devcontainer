@@ -45,6 +45,15 @@ if [ "$total" -ge 165535 ]; then
         log_fail "preflight blocked --dind despite a sufficient subuid grant ($total): $out"
         exit 1
     fi
+
+    # --pind shares the same preflight; a sufficient grant must not block it either.
+    out=$(timeout 60 ./dev --dry-run --pind -- docker version 2>&1)
+    rc=$?
+    if [ "$rc" != 0 ] || echo "$out" | grep -q "DEV_SKIP_SUBID_CHECK"; then
+        log_fail "preflight blocked --pind despite a sufficient subuid grant ($total): $out"
+        exit 1
+    fi
+
     log_pass "sufficient subuid grant ($total) passes the preflight"
     exit 0
 fi
@@ -79,5 +88,34 @@ if expect_grep "$out" "DEV_SKIP_SUBID_CHECK=1 to bypass"; then
 fi
 
 "$RUNTIME" rm -f "dev-$(basename "$(pwd)")"-dind 2>/dev/null
-log_pass "insufficient subuid grant ($total) produces a clean preflight refusal"
+
+"$RUNTIME" rm -f "dev-$(basename "$(pwd)")"-pind 2>/dev/null
+
+# Insufficient grant: --pind shares the same preflight and should refuse
+# fast (well under 30s), emitting the same remediation message on stderr.
+out=$(timeout 30 ./dev --pind -- docker version 2>&1)
+rc=$?
+
+if [ "$rc" = 0 ]; then
+    log_fail "expected --pind to refuse with a $total-id subuid grant but it succeeded"
+    "$RUNTIME" rm -f "dev-$(basename "$(pwd)")"-pind 2>/dev/null
+    exit 1
+fi
+
+if ! expect_grep "$out" "usermod --add-subuids"; then
+    log_fail "expected remediation mentioning usermod --add-subuids; got: $out"
+    "$RUNTIME" rm -f "dev-$(basename "$(pwd)")"-pind 2>/dev/null
+    exit 1
+fi
+
+# Verify the bypass env var actually bypasses the preflight for --pind too.
+out=$(timeout 60 env DEV_SKIP_SUBID_CHECK=1 ./dev --pind -- docker version 2>&1)
+if expect_grep "$out" "DEV_SKIP_SUBID_CHECK=1 to bypass"; then
+    log_fail "DEV_SKIP_SUBID_CHECK=1 did not bypass the preflight for --pind"
+    "$RUNTIME" rm -f "dev-$(basename "$(pwd)")"-pind 2>/dev/null
+    exit 1
+fi
+
+"$RUNTIME" rm -f "dev-$(basename "$(pwd)")"-pind 2>/dev/null
+log_pass "insufficient subuid grant ($total) produces a clean preflight refusal for --dind and --pind"
 exit 0

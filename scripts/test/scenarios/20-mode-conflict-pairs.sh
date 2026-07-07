@@ -12,8 +12,8 @@ trap restore_host EXIT
 
 cd "$(dirname "$0")/../../.." || exit 1
 WS=$(basename "$(pwd)")
-N="dev-${WS}"; M="dev-${WS}-maint"; D="dev-${WS}-dind"
-remember_container "$N"; remember_container "$M"; remember_container "$D"
+N="dev-${WS}"; M="dev-${WS}-maint"; D="dev-${WS}-dind"; P="dev-${WS}-pind"
+remember_container "$N"; remember_container "$M"; remember_container "$D"; remember_container "$P"
 
 run_bg() {
     nohup "$@" >/dev/null 2>&1 &
@@ -46,7 +46,7 @@ refuse_flag_due_to() {
 }
 
 # Pair 1: normal running -> --dind, --maintenance refused.
-"$RUNTIME" rm -f "$N" "$M" "$D" 2>/dev/null
+"$RUNTIME" rm -f "$N" "$M" "$D" "$P" 2>/dev/null
 run_bg ./dev -- sleep 60
 refuse_flag_due_to --dind "$N" || exit 1
 refuse_flag_due_to --maintenance "$N" || exit 1
@@ -67,7 +67,7 @@ refuse_flag_due_to --maintenance "$D" || exit 1
 
 # Pair 4: --dind and --maintenance together in the same invocation are
 # mutually exclusive, independent of any running container.
-"$RUNTIME" rm -f "$N" "$M" "$D" 2>/dev/null
+"$RUNTIME" rm -f "$N" "$M" "$D" "$P" 2>/dev/null
 if out=$(./dev --dind --maintenance -- true 2>&1); then
     log_fail "--dind --maintenance together should have been rejected"
     exit 1
@@ -75,5 +75,32 @@ fi
 expect_grep "$out" "mutually exclusive" \
     || { log_fail "expected mutual-exclusivity error; got: $out"; exit 1; }
 
-log_pass "three-way conflict guard and --dind/--maintenance mutex correct"
+# Pair 5: normal running -> --pind refused.
+"$RUNTIME" rm -f "$N" "$M" "$D" "$P" 2>/dev/null
+run_bg ./dev -- sleep 60
+refuse_flag_due_to --pind "$N" || exit 1
+"$RUNTIME" stop "$N" 2>/dev/null; "$RUNTIME" rm -f "$N" 2>/dev/null
+
+# Pair 6: --pind running -> normal, --dind, --maintenance refused.
+run_bg ./dev --pind -- sleep 60
+sleep 6   # podman service startup
+refuse_normal_due_to "$P" || exit 1
+refuse_flag_due_to --dind "$P" || exit 1
+refuse_flag_due_to --maintenance "$P" || exit 1
+"$RUNTIME" stop "$P" 2>/dev/null; "$RUNTIME" rm -f "$P" 2>/dev/null
+
+# Pair 7: --pind with --dind / --maintenance in one invocation are rejected.
+"$RUNTIME" rm -f "$N" "$M" "$D" "$P" 2>/dev/null
+if out=$(./dev --pind --dind -- true 2>&1); then
+    log_fail "--pind --dind together should have been rejected"; exit 1
+fi
+expect_grep "$out" "mutually exclusive" \
+    || { log_fail "expected mutual-exclusivity error; got: $out"; exit 1; }
+if out=$(./dev --pind --maintenance -- true 2>&1); then
+    log_fail "--pind --maintenance together should have been rejected"; exit 1
+fi
+expect_grep "$out" "mutually exclusive" \
+    || { log_fail "expected mutual-exclusivity error; got: $out"; exit 1; }
+
+log_pass "four-way conflict guard and --dind/--pind/--maintenance mutex correct"
 exit 0
