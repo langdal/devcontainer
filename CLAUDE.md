@@ -38,6 +38,12 @@ docker build -t generic-devcontainer .
 # Rootless Docker-in-Docker (separate :dind image, dev-<dir>-dind container).
 ./dev --dind
 
+# Rootless Podman-in-Podman (separate :pind image, dev-<dir>-pind container).
+# Daemonless engine; exposes a Docker-API compat socket (DOCKER_HOST) for
+# testcontainers / docker-compose. Mutually exclusive with --dind and
+# --maintenance.
+./dev --pind
+
 # Toggle the firewall on a running container without restarting. If no
 # container is running, fw disable starts a fresh one with the
 # firewall already off (same end state as start-then-disable).
@@ -67,8 +73,8 @@ Useful environment variables for `./dev`:
 
 - `DEV_RUNTIME=docker|podman` — force a runtime when both are installed (default: docker preferred on Linux; podman only on macOS).
 - `DEV_ASSUME_YES=1` — accept the rebuild prompts non-interactively. Covers the UID/GID mismatch prompt (which also wipes named volumes) and the dev-script version mismatch prompt (image rebuild only, volumes untouched). Also auto-approves `.devcontainer-allowlist` changes without the interactive diff/prompt, so setting it globally waives that review.
-- `DEV_SKIP_APPARMOR_CHECK=1` — bypass the `--dind` AppArmor preflight (only safe with a custom profile that grants `userns,`).
-- `DEV_SKIP_SUBID_CHECK=1` — bypass the `--dind` preflight that requires a rootless-runtime host to grant ≥165535 subuids/subgids (rootless dockerd must map the image's `vscode:100000:65536` range inside the container's user namespace; the typical 65536-id grant is too small).
+- `DEV_SKIP_APPARMOR_CHECK=1` — bypass the `--dind`/`--pind` AppArmor preflight (only safe with a custom profile that grants `userns,`).
+- `DEV_SKIP_SUBID_CHECK=1` — bypass the `--dind`/`--pind` preflight that requires a rootless-runtime host to grant ≥165535 subuids/subgids (rootless dockerd/podman must map the image's `vscode:100000:65536` range inside the container's user namespace; the typical 65536-id grant is too small).
 - `DEV_EXTRA_RUN_ARGS=...` — extra args passed to `docker run` (the test orchestrator uses this to inject `--dns=...` when in-container DNS is broken).
 - `DEV_SHARED_HOME=1` — use the legacy shared `devcontainer-home` volume for every workspace instead of the per-workspace default (`devcontainer-home-<dir>`).
 
@@ -97,11 +103,15 @@ at `scripts/test/last-run.log` and `scripts/test/last-summary.log`.
 In addition there are two in-container probes:
 
 - `scripts/verify-firewall.sh` — 12 checks. 7 cover the firewall posture;
-  checks 8–12 activate when `DEVCONTAINER_DIND=1` and verify the rootless
-  dockerd, registry pulls through the proxy, and that nested containers
-  can reach loopback ports but not the internet.
+  checks 8–12 activate when `DEVCONTAINER_DIND=1` or `DEVCONTAINER_PIND=1`
+  and verify the rootless nested engine, registry pulls through the proxy,
+  and that nested containers can reach loopback ports but not the internet.
 - `scripts/verify-dind.sh` — heavier checks (smoke build, postgres
   testcontainers smoke, self-build of this repo's Dockerfile).
+- `scripts/verify-pind.sh` — the `--pind` counterpart to `verify-dind.sh`.
+  There is no real Docker CLI in the pind image, so probes that would use
+  `docker -H "$DOCKER_HOST" ...` talk to the Docker-API compat socket
+  directly via curl instead.
 
 There is no linter or CI pipeline.
 
@@ -118,7 +128,7 @@ Three components, each with a distinct role:
 ## Key Design Decisions
 
 - **Mise data lives at `/mise/`**, not in the home directory. `MISE_DATA_DIR`, `MISE_CONFIG_DIR`, and `MISE_CACHE_DIR` all point there. This allows the mise volume (`devcontainer-mise`) and the home volume to be independent.
-- **Named Docker volumes** persist state: `devcontainer-mise:/mise` (tools/caches, shared across every workspace) and a home volume mounted at `/home/vscode` (shell history, git config, SSH keys). The home volume is **per-workspace by default** (`devcontainer-home-<dir>`, `<dir>` = basename of the directory `dev` was launched from) so one project's agent can't read another project's SSH keys/git creds/history out of a shared home; `DEV_SHARED_HOME=1` opts back into the legacy single `devcontainer-home` volume shared by every workspace. `--dind` adds a third, also shared, volume: `devcontainer-dind:/home/vscode/.local/share/docker`. `dev` seeds the container's git identity (`user.name`/`user.email`) from the host's `git config` the first time a home volume is created — entrypoint.sh only fills in an empty in-container identity, so it never clobbers one set later inside the container. SSH keys are never copied in; see README's "Pushing from inside a container" for push-from-inside options.
+- **Named Docker volumes** persist state: `devcontainer-mise:/mise` (tools/caches, shared across every workspace) and a home volume mounted at `/home/vscode` (shell history, git config, SSH keys). The home volume is **per-workspace by default** (`devcontainer-home-<dir>`, `<dir>` = basename of the directory `dev` was launched from) so one project's agent can't read another project's SSH keys/git creds/history out of a shared home; `DEV_SHARED_HOME=1` opts back into the legacy single `devcontainer-home` volume shared by every workspace. `--dind` adds a third, also shared, volume: `devcontainer-dind:/home/vscode/.local/share/docker`. `--pind` adds a sibling volume, `devcontainer-pind:/home/vscode/.local/share/containers` (mutually exclusive with `--dind`, so only one of the two is ever mounted). `dev` seeds the container's git identity (`user.name`/`user.email`) from the host's `git config` the first time a home volume is created — entrypoint.sh only fills in an empty in-container identity, so it never clobbers one set later inside the container. SSH keys are never copied in; see README's "Pushing from inside a container" for push-from-inside options.
 - **Container runs as user `vscode`** (UID 1000 by default, overridable via `USER_UID` build arg).
 - **On rootless podman, `dev` adds `--userns=keep-id`.** The image bakes the host UID/GID into `vscode` so it matches the bind-mounted workspace — true under Docker and rootful podman, which don't remap ids. Rootless podman remaps by default (container root → invoking host user, every other id including `vscode`'s → the subuid/subgid range), so without `keep-id` the workspace shows up root-owned to `vscode`. `keep-id` maps the invoking host user 1:1 onto `vscode`'s uid instead. Named volumes written before this fix are owned by the old mapping's subuid; `dev` detects that (raw owner ≠ `$HOST_UID`) and re-chowns each volume once via `podman unshare chown -R 0:0` (0:0 inside `podman unshare`'s own default mapping *is* the invoking host user).
 - **Containers are `--rm`** (ephemeral) but the `dev` script reuses a running/stopped container named `dev-<dirname>` before creating a new one.
@@ -131,11 +141,31 @@ Three components, each with a distinct role:
   `/dev/fuse` + `/dev/net/tun`, and uses a dedicated `devcontainer-dind`
   cache volume. Registry pulls flow through `tinyproxy` via the
   slirp4netns gateway (`HTTPS_PROXY=http://10.0.2.2:8888`). Mutually
-  exclusive with `--maintenance` (three-way conflict guard between
-  normal / maintenance / dind containers). On Ubuntu 23.10+/Linux 6.x
+  exclusive with `--maintenance` and `--pind` (four-way conflict guard
+  between normal / maintenance / dind / pind containers). On Ubuntu 23.10+/Linux 6.x
   hosts `./dev` preflights `kernel.apparmor_restrict_unprivileged_userns=0`
   and refuses to start with a remediation message if it is `1`. See
   README.md for details.
+- **Opt-in Podman-in-Podman** via `./dev --pind`. Builds a separate
+  `generic-devcontainer:pind` image (the `pind` target in the multi-stage
+  Dockerfile) that adds rootless `podman`, fuse-overlayfs, and
+  slirp4netns. The container is named `dev-<dir>-pind` and uses a
+  dedicated `devcontainer-pind` cache volume
+  (`/home/vscode/.local/share/containers`). Podman is daemonless: its own
+  image pulls route through the proxy at `127.0.0.1:8888` in the
+  container's main netns, while nested-container egress routes through
+  `10.0.2.2:8888` via slirp4netns — the backend is pinned
+  (`default_rootless_network_cmd = "slirp4netns"`,
+  `allow_host_loopback=true`) so nested containers can reach that gateway.
+  A `podman system service` unix socket at
+  `/home/vscode/.pind-run/podman.sock` gives Docker-API compatibility,
+  exported as `DOCKER_HOST` for testcontainers / docker-compose. Docker
+  CLI compatibility comes from the `podman-docker` shim
+  (`/usr/bin/docker` → podman) plus a `docker-compose` symlink to the
+  compose v2 plugin — not the real Docker CLI. Mutually exclusive with
+  `--dind` and `--maintenance` (four-way conflict guard: normal /
+  maintenance / dind / pind). Shares the same `kernel.apparmor_restrict_unprivileged_userns=0`
+  and subuid/subgid preflights as `--dind`. See README.md for details.
 
 ## Firewall (security boundary)
 
@@ -160,7 +190,9 @@ Two allowlist files merge at container startup (deduplicated):
 - `.devcontainer-allowlist` at the workspace root — optional, read at every
   container start. No image rebuild needed; restart the container.
 - `allowlist.dind` — additionally merged when DinD is active (Docker Hub,
-  MCR, Quay, GCR, etc.).
+  MCR, Quay, GCR, etc.). `--pind` reuses this same file (there is no
+  separate `allowlist.pind`) since both nested engines pull from the same
+  registries.
 
 Format: one entry per line, `#` comments. Bare hostname matches exactly;
 `*.example.com` matches any subdomain (list both if you need both).

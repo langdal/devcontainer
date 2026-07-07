@@ -73,17 +73,19 @@ Multiple terminals: just run `dev` again — it `exec`s into the running contain
 
 ## Container Modes
 
-Only one mode runs per workspace at a time. The script enforces this with a three-way conflict guard.
+Only one mode runs per workspace at a time. The script enforces this with a four-way conflict guard.
 
 | Mode             | When to use                                        | Container name      |
 | ---------------- | -------------------------------------------------- | ------------------- |
 | Normal (default) | Day-to-day work. Firewalled, no sudo.              | `dev-<dir>`         |
 | `--maintenance`  | Install system packages, fetch from blocked hosts. | `dev-<dir>-maint`   |
 | `--dind`         | Run nested Docker (testcontainers, builds).        | `dev-<dir>-dind`    |
+| `--pind`         | Run nested Podman (testcontainers, builds).        | `dev-<dir>-pind`    |
 
 ```bash
 dev --maintenance         # firewall off, sudo enabled
 dev --dind                # rootless dockerd inside the container
+dev --pind                # rootless podman inside the container
 ```
 
 ## Firewall
@@ -108,7 +110,7 @@ One entry per line, `#` for comments. Bare hostnames match exactly; `*.example.c
   needed). Note: the approval gate itself is enforced by the baked
   `firewall-init.sh`, so it only applies on an image built with this version
   of the tooling — on an older image, run `dev --build` once.
-- `allowlist.dind` — additionally merged in `--dind` mode (Docker Hub, MCR, Quay, GCR, …).
+- `allowlist.dind` — additionally merged in `--dind` mode (Docker Hub, MCR, Quay, GCR, …). `--pind` reuses this same file — there is no separate `allowlist.pind` — since both nested engines pull from the same registries.
 
 ### Firewall controls
 
@@ -157,6 +159,38 @@ dev --dind -- /workspace/scripts/verify-firewall.sh   # 12 checks
 dev --dind -- /workspace/scripts/verify-dind.sh       # heavier smoke tests
 ```
 
+## Podman-in-Podman
+
+Run rootless `podman` inside the container — for image builds, testcontainers, and `docker`/`docker compose`-shaped tooling — without `--privileged` and without breaking the firewall. Unlike `--dind`, podman is daemonless: there's no background process, just the `podman` binary and (optionally) a Docker-API compat socket.
+
+```bash
+dev --pind
+podman ps   # nested engine
+docker ps   # podman-docker shim; talks to the same engine
+```
+
+Docker CLI compatibility comes from the `podman-docker` package (`/usr/bin/docker` → `podman`) plus a `docker-compose` symlink to the compose v2 plugin — it is **not** the real Docker CLI, just enough of the surface for `docker`/`docker compose` invocations to work. For tooling that speaks the Docker API directly (testcontainers, `docker-compose` libraries), a `podman system service` unix socket at `/home/vscode/.pind-run/podman.sock` is exported as `DOCKER_HOST`.
+
+Registry pulls for podman's own images route through tinyproxy at `127.0.0.1:8888` in the container's main network namespace and are filtered against the same allowlist machinery (extended with `allowlist.dind` — there is no separate `allowlist.pind`, since both nested engines pull from the same registries). Nested containers get their own network namespace via slirp4netns, so their egress instead routes through the slirp4netns gateway at `10.0.2.2:8888`; the slirp4netns backend is pinned (podman 5.x's newer `pasta` default is not used) with `allow_host_loopback=true` so nested containers can reach that gateway. Non-allowlisted nested egress is blocked the same way as `--dind` (tinyproxy 403 + iptables) — same firewall/exfiltration bar.
+
+A separate `devcontainer-pind` named volume (`/home/vscode/.local/share/containers`) preserves the nested image cache across rebuilds.
+
+```bash
+dev --pind -- /workspace/scripts/verify-firewall.sh   # 12 checks
+dev --pind -- /workspace/scripts/verify-pind.sh       # heavier smoke tests
+```
+
+**Build tip:** `podman build`/`RUN` steps that need network access require the nested build to reach tinyproxy from inside the pind container's own netns. Pass `--network=host` plus **lowercase** proxy build args:
+
+```bash
+podman build --network=host \
+  --build-arg http_proxy=http://127.0.0.1:8888 \
+  --build-arg https_proxy=http://127.0.0.1:8888 \
+  .
+```
+
+buildah (podman's build backend) only auto-forwards uppercase `HTTP_PROXY`/`HTTPS_PROXY`, which `apt` ignores — so without the lowercase `--build-arg`s, `RUN apt-get update` and similar steps fail to reach the network even though the host is fine.
+
 ## Persistence
 
 Named volumes preserve state across container restarts and rebuilds:
@@ -171,6 +205,9 @@ Named volumes preserve state across container restarts and rebuilds:
   `devcontainer-home` volume shared by every workspace.
 - `devcontainer-dind` — nested image cache, added by `--dind`. Shared across
   every workspace, same as mise.
+- `devcontainer-pind` — nested image cache, added by `--pind`. Shared across
+  every workspace, same as mise. Mutually exclusive with `--dind`, so only
+  one of the two volumes is ever mounted for a given workspace.
 
 ```bash
 docker volume rm devcontainer-mise devcontainer-home-myproject
@@ -205,7 +242,7 @@ DEV_EXTRA_RUN_ARGS="-v $SSH_AUTH_SOCK:/ssh-agent -e SSH_AUTH_SOCK=/ssh-agent" ./
   podman machine start
   ```
 
-- **`--dind` on Ubuntu 23.10+ / Linux 6.x**: `dev` preflights `kernel.apparmor_restrict_unprivileged_userns`. If it's `1`:
+- **`--dind`/`--pind` on Ubuntu 23.10+ / Linux 6.x**: `dev` preflights `kernel.apparmor_restrict_unprivileged_userns`. If it's `1`:
 
   ```bash
   sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
@@ -215,7 +252,7 @@ DEV_EXTRA_RUN_ARGS="-v $SSH_AUTH_SOCK:/ssh-agent -e SSH_AUTH_SOCK=/ssh-agent" ./
 
   Set `DEV_SKIP_APPARMOR_CHECK=1` to bypass (e.g. with a custom AppArmor profile that grants `userns,`).
 
-- **`--dind` on a rootless runtime needs a subuid/subgid grant of at least 165535 ids** (rootless podman, the `podman-docker` shim, rootless docker). The dind container's user namespace only spans the ids granted in `/etc/subuid`/`/etc/subgid` — typically 65536 — but rootless dockerd inside the container must map container ids 100000–165535 (the image's baked `vscode` subuid range), so with the typical grant it dies with `newuidmap: write to uid_map failed: Operation not permitted`. `dev` preflights the grant and refuses fast with the remediation:
+- **`--dind`/`--pind` on a rootless runtime needs a subuid/subgid grant of at least 165535 ids** (rootless podman, the `podman-docker` shim, rootless docker). The dind/pind container's user namespace only spans the ids granted in `/etc/subuid`/`/etc/subgid` — typically 65536 — but the rootless nested engine inside the container must map container ids 100000–165535 (the image's baked `vscode` subuid range), so with the typical grant it dies with `newuidmap: write to uid_map failed: Operation not permitted`. `dev` preflights the grant and refuses fast with the remediation:
 
   ```bash
   sudo usermod --add-subuids 165536-365535 --add-subgids 165536-365535 $USER
@@ -226,7 +263,7 @@ DEV_EXTRA_RUN_ARGS="-v $SSH_AUTH_SOCK:/ssh-agent -e SSH_AUTH_SOCK=/ssh-agent" ./
 
 The script reads `id -u` / `id -g` and bakes them into the image. If your host UID/GID later changes, the next `dev` invocation detects the mismatch and prompts to rebuild + wipe volumes.
 
-- **On rootless podman, `dev` runs the container with `--userns=keep-id`.** Rootless podman's default user-namespace mapping puts container root at the invoking host user and shifts every other container id — including the baked `vscode` uid — into the subuid/subgid range, so the baked-uid-matches-host-uid assumption above doesn't hold by default: the bind-mounted workspace shows up root-owned to `vscode`, who can't write to it. `--userns=keep-id` maps the invoking host user 1:1 onto the matching container id instead, fixing that. It only applies when the runtime is actually rootless podman (including the `podman-docker` shim) — Docker and rootful podman don't remap ids and don't need it. The first run after upgrading re-chowns the named volumes (`devcontainer-mise`, the resolved home volume — `devcontainer-home-<dir>` by default or `devcontainer-home` under `DEV_SHARED_HOME=1`, `devcontainer-dind`), since their content was written under the old mapping; you'll see one `Migrating <volume> ownership for --userns=keep-id (one-time)...` line per volume, and nothing on subsequent runs.
+- **On rootless podman, `dev` runs the container with `--userns=keep-id`.** Rootless podman's default user-namespace mapping puts container root at the invoking host user and shifts every other container id — including the baked `vscode` uid — into the subuid/subgid range, so the baked-uid-matches-host-uid assumption above doesn't hold by default: the bind-mounted workspace shows up root-owned to `vscode`, who can't write to it. `--userns=keep-id` maps the invoking host user 1:1 onto the matching container id instead, fixing that. It only applies when the runtime is actually rootless podman (including the `podman-docker` shim) — Docker and rootful podman don't remap ids and don't need it. The first run after upgrading re-chowns the named volumes (`devcontainer-mise`, the resolved home volume — `devcontainer-home-<dir>` by default or `devcontainer-home` under `DEV_SHARED_HOME=1`, `devcontainer-dind`/`devcontainer-pind`), since their content was written under the old mapping; you'll see one `Migrating <volume> ownership for --userns=keep-id (one-time)...` line per volume, and nothing on subsequent runs.
 
 ## `dev` Flags
 
@@ -240,7 +277,7 @@ dev --help
 Highlights not covered above: `dev reset` removes this workspace's containers
 and prompts per named volume; `dev update` updates a git-checkout install
 to the latest tag; `dev scaffold` generates a `.devcontainer/` for
-VS Code.
+VS Code (`dev scaffold --pind` emits a pind-flavored one).
 
 Note: the old flag spellings (`--disable-firewall`, `--enable-firewall`,
 `--monitor`, `--monitor-fw`, `--reset`, `--self-update`,
@@ -254,8 +291,8 @@ warning to stderr and route to the subcommand above.
 - `DEV_SHARED_HOME=1` — use the legacy shared `devcontainer-home` volume for
   every workspace instead of the per-workspace default
   (`devcontainer-home-<dir>`). See [Persistence](#persistence).
-- `DEV_SKIP_APPARMOR_CHECK=1` — bypass the `--dind` AppArmor preflight.
-- `DEV_SKIP_SUBID_CHECK=1` — bypass the `--dind` preflight that requires a rootless-runtime host to grant ≥165535 subuids/subgids.
+- `DEV_SKIP_APPARMOR_CHECK=1` — bypass the `--dind`/`--pind` AppArmor preflight.
+- `DEV_SKIP_SUBID_CHECK=1` — bypass the `--dind`/`--pind` preflight that requires a rootless-runtime host to grant ≥165535 subuids/subgids.
 - `DEV_EXTRA_RUN_ARGS=...` — extra args appended to `docker run`.
 - `GITHUB_TOKEN` — passed through to the container if set on the host, and
   forwarded to image builds as a BuildKit secret. Its purpose is **rate-limit
@@ -272,7 +309,7 @@ warning to stderr and route to the subcommand above.
 
 Three components:
 
-- **Dockerfile** — Multi-stage build on `mcr.microsoft.com/devcontainers/base:ubuntu`. Bakes mise + base tools (node, ripgrep, eza, lazygit) into `/mise/`. The `dind` target adds rootless dockerd, fuse-overlayfs, slirp4netns.
+- **Dockerfile** — Multi-stage build on `mcr.microsoft.com/devcontainers/base:ubuntu`. Bakes mise + base tools (node, ripgrep, eza, lazygit) into `/mise/`. The `dind` target adds rootless dockerd, fuse-overlayfs, slirp4netns; the `pind` target adds rootless podman, fuse-overlayfs, slirp4netns instead.
 - **entrypoint.sh** — Runs on every container start. Sets up the firewall (or skips it in maintenance mode), runs `mise install` if a `mise.toml` is in `/workspace`, marks `/workspace` as a safe git directory, then `exec`s the shell.
 - **dev** — Host-side wrapper. Manages container lifecycle: image build, container reuse, volume mounts, port forwarding, mode selection, firewall toggling.
 
@@ -307,6 +344,7 @@ gate. A run flows from your terminal to a locked-down shell like this:
   |  persisted state:   devcontainer-mise -> /mise            (shared)                |
   |                     home-<dir>        -> /home/vscode      (per-project)          |
   |                     devcontainer-dind -> docker data       (dind only)            |
+  |                     devcontainer-pind -> podman data       (pind only)            |
   |                     bind mount        -> ./ = /workspace   (your live code)       |
   |                                                                                   |
   |  -- the only way out is the gate ------------------------------------------       |
@@ -315,10 +353,11 @@ gate. A run flows from your terminal to a locked-down shell like this:
   +===================================================================================+
 ```
 
-Same wiring, three modes: `./dev` (firewall on, no sudo — the default),
-`./dev --maintenance` (separate container, firewall off, sudo back on) and
+Same wiring, four modes: `./dev` (firewall on, no sudo — the default),
+`./dev --maintenance` (separate container, firewall off, sudo back on),
 `./dev --dind` (adds rootless dockerd; nested pulls still routed through the
-proxy).
+proxy), and `./dev --pind` (adds rootless podman instead; same routing,
+daemonless engine).
 
 A rendered version of this diagram lives at [`docs/architecture.html`](docs/architecture.html)
 (open it in a browser).
