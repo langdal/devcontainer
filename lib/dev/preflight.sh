@@ -61,17 +61,18 @@ ensure_runtime_ready() {
   fi
 }
 
-# --dind AppArmor userns preflight (Ubuntu 23.10+/Linux 6.x). No-op unless
-# DIND. Linux 6.x kernels gate unprivileged user namespace creation behind
-# an AppArmor check (Ubuntu 23.10+, Pop!_OS, current Debian testing). The
-# sysctl is on by default. dockerd-rootless inside --dind needs to
-# unshare(CLONE_NEWUSER); --security-opt apparmor=unconfined does NOT
-# bypass this — the kernel applies the restriction to "unconfined" tasks
-# too. Without this preflight the container starts, then rootlesskit
-# fails ~15s in with a confusing "fork/exec /proc/self/exe: operation
-# not permitted". Catch it here with a clear remediation instead.
+# --dind/--pind AppArmor userns preflight (Ubuntu 23.10+/Linux 6.x). No-op
+# unless DIND or PIND. Linux 6.x kernels gate unprivileged user namespace
+# creation behind an AppArmor check (Ubuntu 23.10+, Pop!_OS, current Debian
+# testing). The sysctl is on by default. Rootless dockerd/podman inside
+# --dind/--pind needs to unshare(CLONE_NEWUSER); --security-opt
+# apparmor=unconfined does NOT bypass this — the kernel applies the
+# restriction to "unconfined" tasks too. Without this preflight the
+# container starts, then rootlesskit fails ~15s in with a confusing
+# "fork/exec /proc/self/exe: operation not permitted". Catch it here with
+# a clear remediation instead.
 preflight_apparmor_userns() {
-  [[ "$DIND" == true && -z "${DEV_SKIP_APPARMOR_CHECK:-}" ]] || return 0
+  [[ ("$DIND" == true || "$PIND" == true) && -z "${DEV_SKIP_APPARMOR_CHECK:-}" ]] || return 0
   local _aa_sysfs=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
   if [[ -r "$_aa_sysfs" ]] && [[ "$(cat "$_aa_sysfs" 2>/dev/null)" == "1" ]]; then
     cat >&2 <<'EOF'
@@ -132,23 +133,23 @@ subid_total() {
   echo "$total"
 }
 
-# --dind rootless subuid/subgid grant preflight (Linux rootless runtimes).
-# Under a ROOTLESS runtime the dind container's user namespace only spans
-# as many IDs as the host grants this user in /etc/subuid + /etc/subgid
-# (typically 65536, so container ids 0-65536). rootless dockerd inside the
-# container must map the image's baked vscode subuid range — container ids
-# 100000-165535 — so the namespace has to span at least 165536 ids or
-# rootlesskit dies ~15s in with "newuidmap: write to uid_map failed:
-# Operation not permitted" (the kernel cannot map the extent down to a
-# real id). Rootful runtimes are unaffected: the container sits in the
-# initial user namespace where every id exists. Check the grant up front
-# and refuse with a remediation instead.
+# --dind/--pind rootless subuid/subgid grant preflight (Linux rootless
+# runtimes). Under a ROOTLESS runtime the dind/pind container's user
+# namespace only spans as many IDs as the host grants this user in
+# /etc/subuid + /etc/subgid (typically 65536, so container ids 0-65536).
+# rootless dockerd/podman inside the container must map the image's baked
+# vscode subuid range — container ids 100000-165535 — so the namespace has
+# to span at least 165536 ids or rootlesskit dies ~15s in with "newuidmap:
+# write to uid_map failed: Operation not permitted" (the kernel cannot map
+# the extent down to a real id). Rootful runtimes are unaffected: the
+# container sits in the initial user namespace where every id exists.
+# Check the grant up front and refuse with a remediation instead.
 #
 # The 165536 floor is the image contract: Dockerfile writes
 # "vscode:100000:65536" into the image's /etc/subuid, and 100000+65536
 # container ids must exist for rootless dockerd's two-line map.
 preflight_subid_grant() {
-  [[ "$DIND" == true && "$(uname -s)" == "Linux" && -z "${DEV_SKIP_SUBID_CHECK:-}" ]] || return 0
+  [[ ("$DIND" == true || "$PIND" == true) && "$(uname -s)" == "Linux" && -z "${DEV_SKIP_SUBID_CHECK:-}" ]] || return 0
   if runtime_is_rootless; then
     _uid_total=$(subid_total /etc/subuid)
     _gid_total=$(subid_total /etc/subgid)

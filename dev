@@ -753,6 +753,9 @@ DEV_GIT_EMAIL="$(git config --get user.email 2>/dev/null || true)"
 
 # In --dind mode, use the :dind image variant. RUNTIME_ARGS routes all
 # subsequent runtime commands at the dind storage (see DIND_RUNTIME_ARGS).
+# --pind reuses the same DIND_RUNTIME_ARGS/RUNTIME_ARGS routing below (its
+# own rootless-podman-in-podman path needs the same macOS rootful-connection
+# override).
 if [[ "$DIND" == true ]]; then
   IMAGE_TAG="${IMAGE_NAME}:dind"
   BUILD_TARGET="dind"
@@ -764,6 +767,7 @@ fi
 if [[ "$PIND" == true ]]; then
   IMAGE_TAG="${IMAGE_NAME}:pind"
   BUILD_TARGET="pind"
+  RUNTIME_ARGS="$DIND_RUNTIME_ARGS"
 fi
 
 WORKSPACE_BASENAME="$(basename "$(pwd)")"
