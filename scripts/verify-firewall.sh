@@ -91,14 +91,11 @@ nested_egress_blocked() {
         # meant to be NAT'd through the 10.0.2.2:8888 tinyproxy gateway. The
         # default network is the intended firewalled path under test, so
         # there is no docker-style "bridge" network to opt into.
-        # CAVEAT (verified 2026-07-07): with no extra network options,
-        # slirp4netns's host-loopback forwarding is off by default, so 10.0.2.2:8888
-        # is unreachable ("Network unreachable") regardless of the tinyproxy
-        # allowlist — this check currently passes on a network-layer
-        # rejection, not proven hostname filtering. `--network
-        # slirp4netns:allow_host_loopback=true` restores reachability and lets
-        # tinyproxy's own filter discriminate correctly (confirmed via raw
-        # CONNECT); see task-8-report.md for the full probe.
+        # Nested containers reach tinyproxy at 10.0.2.2:8888 because
+        # pind-init.sh enables slirp4netns allow_host_loopback=true globally.
+        # Non-allowlisted hosts are blocked by tinyproxy's hostname filter (403);
+        # direct egress is separately blocked by iptables. This check therefore
+        # exercises genuine firewall blocking, not a dead network path.
         ! podman run --rm alpine:3.20 \
             wget -T3 -q -O- https://example.com >/dev/null 2>&1
     else
