@@ -25,6 +25,13 @@ fi
 #    The named volume comes up empty on first mount.
 mkdir -p "$DATA_DIR"
 chown -R vscode:vscode "$DATA_DIR"
+# `mkdir -p` above created the ~/.local and ~/.local/share parents as root
+# (this runs as root). Hand them back to vscode — non-recursively, so the
+# dockerd storage subdir keeps its own ownership — so vscode-owned tooling
+# can create siblings there. Without this, `dev agent add opencode` (which
+# injects ~/.local/share/opencode into the home volume as vscode) fails with
+# "Cannot mkdir: Permission denied" on the root-owned parent.
+chown vscode:vscode /home/vscode/.local /home/vscode/.local/share
 
 # 3. Export DOCKER_HOST/XDG_RUNTIME_DIR for interactive shells.
 cat > /etc/profile.d/dind.sh <<EOF
