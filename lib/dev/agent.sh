@@ -194,9 +194,20 @@ _agent_copy_into_volume() {
   local -a keepid_args=()
   [[ "$keepid" == true ]] && keepid_args=(--userns=keep-id)
 
+  # On macOS the host tar is bsdtar, which stores each file's macOS xattrs
+  # (notably com.apple.provenance) as LIBARCHIVE.xattr.* extended headers plus
+  # an AppleDouble copy. GNU tar inside the container doesn't know that keyword
+  # and prints a warning per file ("Ignoring unknown extended header keyword
+  # ..."). Strip both at creation so the stream is clean; these flags are
+  # bsdtar-only (GNU tar lacks --no-mac-metadata and never emits these anyway).
+  local -a tar_args=()
+  if tar --version 2>/dev/null | grep -qi bsdtar; then
+    tar_args+=(--no-xattrs --no-mac-metadata)
+  fi
+
   local rc=0
   # shellcheck disable=SC2086  # intentional word-splitting of RUNTIME_ARGS
-  tar -C "$staging" -cf - . \
+  tar "${tar_args[@]+"${tar_args[@]}"}" -C "$staging" -cf - . \
     | $RUNTIME $RUNTIME_ARGS run --rm -i \
         ${keepid_args[@]+"${keepid_args[@]}"} -u vscode \
         -v "$HOME_VOLUME":/home/vscode \
