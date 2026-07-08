@@ -290,6 +290,17 @@ re-derives your account identity from the copied token on first run. (The
 one-time "trust this folder" prompt is a separate per-workspace safety check
 and is left intact.)
 
+**Claude credentials on macOS:** on a Mac, Claude Code stores its OAuth token
+in the login **Keychain** (a generic password under the service
+`Claude Code-credentials`), not in `~/.claude/.credentials.json` — so the file
+the manifest points at does not exist. `dev agent add claude` detects this and
+reads the token straight from the Keychain, writing it into the volume as
+`.claude/.credentials.json` (mode `0600`), which is exactly the file Claude
+reads inside the Linux container. `dev agent list` and `--dry-run` report it as
+present on-host too. On Linux the credential lives on disk and is copied as-is,
+so this fallback is inert there. (Reading the Keychain may raise a one-time
+macOS "allow access" prompt.)
+
 Copying **dereferences symlinks** found inside those customization dirs (a
 broken link is skipped with a warning, not fatal) — keep dirs like
 `.claude/skills/` free of links to sensitive host files, since those would

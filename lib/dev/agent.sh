@@ -8,6 +8,23 @@
 # _agent_expand; it is intentionally NOT in this list.
 AGENT_KNOWN=(claude opencode pi)
 
+# macOS stores Claude Code's OAuth token in the login Keychain (a generic
+# password under this service name) instead of ~/.claude/.credentials.json, so
+# the manifest's file source never exists on a Mac. _agent_resolve falls back
+# to this Keychain entry and emits AGENT_KEYCHAIN_CLAUDE_SRC as a sentinel SRC
+# (never a real path); the copy path materializes it into a real staged file.
+CLAUDE_KEYCHAIN_SERVICE='Claude Code-credentials'
+AGENT_KEYCHAIN_CLAUDE_SRC='keychain:claude-credentials'
+
+# _agent_macos_keychain_has_creds: 0 if Claude Code's OAuth token is present in
+# the macOS login Keychain. Non-macOS (no `security`) returns non-zero, so the
+# fallback is inert on Linux where the credential file exists on disk instead.
+_agent_macos_keychain_has_creds() {
+  [[ "$(uname -s)" == Darwin ]] || return 1
+  command -v security >/dev/null 2>&1 || return 1
+  security find-generic-password -s "$CLAUDE_KEYCHAIN_SERVICE" -w >/dev/null 2>&1
+}
+
 # _agent_is_known <name> -> 0 if name is a supported agent, else 1.
 _agent_is_known() {
   local n
@@ -78,6 +95,18 @@ _agent_resolve() {
     [[ -e "$src_abs" ]] || continue
     printf '%s\t%s\t%s\t%s\n' "$src_abs" "$dest_rel" "$kind" "$mode"
   done < <(_agent_manifest "$name")
+
+  # macOS fallback: Claude Code keeps its OAuth token in the login Keychain, not
+  # in ~/.claude/.credentials.json, so the manifest's file source above is
+  # skipped on a Mac. If that file is absent but the Keychain entry exists, emit
+  # a sentinel source (never a real path) that the copy path materializes into
+  # the dest — the Keychain payload is byte-for-byte the file Claude reads inside
+  # the Linux container. Guarded on file-absence so a real file always wins.
+  if [[ "$name" == claude && ! -e "$HOME/.claude/.credentials.json" ]] \
+     && _agent_macos_keychain_has_creds; then
+    printf '%s\t%s\t%s\t%s\n' \
+      "$AGENT_KEYCHAIN_CLAUDE_SRC" '.claude/.credentials.json' file 0600
+  fi
 }
 
 # _agent_expand <mode> <arg...>: resolve name arguments to a deduped list,
@@ -217,6 +246,27 @@ _stage_and_extract() {
   return $rc
 }
 
+# _agent_materialize_keychain <tmpdir>: read 4-field resolved TSV (SRC \t DEST
+# \t KIND \t MODE) on stdin; for each line whose SRC is the Keychain sentinel,
+# dump the Keychain payload to a file under <tmpdir> and rewrite SRC to that
+# path. All other lines pass through unchanged. Fails (non-zero) if a sentinel
+# line's payload can't be read, so the caller can abort before copying.
+_agent_materialize_keychain() {
+  local tmpdir="$1" src dest kind mode kc_out i=0
+  while IFS=$'\t' read -r src dest kind mode; do
+    [[ -n "$src" ]] || continue
+    if [[ "$src" == "$AGENT_KEYCHAIN_CLAUDE_SRC" ]]; then
+      kc_out="$tmpdir/cred_$i"; i=$((i + 1))
+      # -w prints just the password (the raw JSON). JSON.parse tolerates the
+      # trailing newline `security` appends, so no post-processing is needed.
+      security find-generic-password -s "$CLAUDE_KEYCHAIN_SERVICE" -w > "$kc_out" 2>/dev/null \
+        || return 1
+      src="$kc_out"
+    fi
+    printf '%s\t%s\t%s\t%s\n' "$src" "$dest" "$kind" "$mode"
+  done
+}
+
 # _agent_copy_into_volume <name>: resolve an agent's manifest to existing host
 # sources and inject them into the workspace home volume via _stage_and_extract,
 # then apply the claude-only onboarding-flag follow-up.
@@ -228,10 +278,24 @@ _agent_copy_into_volume() {
     return 0
   fi
 
+  # Materialize any Keychain-sourced entries (macOS Claude credentials) into a
+  # temp dir, rewriting their SRC to a real path so _stage_and_extract can cp
+  # them like any host file. Cleaned up once the copy has run.
+  local kc_dir=""
+  if [[ "$resolved" == *"${AGENT_KEYCHAIN_CLAUDE_SRC}"$'\t'* ]]; then
+    kc_dir="$(mktemp -d)"
+    if ! resolved="$(_agent_materialize_keychain "$kc_dir" <<< "$resolved")"; then
+      rm -rf "$kc_dir"
+      echo "  ${name}: failed to read credentials from the macOS Keychain." >&2
+      return 1
+    fi
+  fi
+
   local rc=0
   # _agent_resolve emits SRC_ABS \t DEST_REL \t KIND \t MODE; _stage_and_extract
   # takes SRC_ABS \t DEST_REL \t MODE (it detects dir vs file itself). Drop KIND.
   cut -f1,2,4 <<< "$resolved" | _stage_and_extract "  ${name}: " || rc=$?
+  [[ -n "$kc_dir" ]] && rm -rf "$kc_dir"
 
   # Claude gates its interactive onboarding wizard (theme picker + "Select
   # login method") on hasCompletedOnboarding in ~/.claude.json — a top-level
@@ -497,10 +561,12 @@ _agent_add() {
       fi
       while IFS=$'\t' read -r src dest kind mode; do
         [[ -n "$src" ]] || continue
+        local from=""
+        [[ "$src" == "$AGENT_KEYCHAIN_CLAUDE_SRC" ]] && from=" [from macOS Keychain]"
         if [[ "$mode" == 0600 ]]; then
-          echo "  ${name}: would copy ${dest} (mode 0600)"
+          echo "  ${name}: would copy ${dest} (mode 0600)${from}"
         else
-          echo "  ${name}: would copy ${dest}"
+          echo "  ${name}: would copy ${dest}${from}"
         fi
       done <<< "$resolved"
       if [[ "$name" == claude ]]; then

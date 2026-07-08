@@ -92,6 +92,84 @@ else
     log_fail "dry-run did not mention the onboarding flag: $dry"
 fi
 
+# ---------- macOS Keychain fallback for Claude credentials (mocked) ----------
+# On macOS Claude Code stores its OAuth token in the login Keychain, not in
+# ~/.claude/.credentials.json, so the manifest's file source is absent there.
+# _agent_resolve must fall back to the Keychain and emit a sentinel that the
+# copy path materializes. Exercise both on this Linux host by sourcing agent.sh
+# with `uname`/`security` shimmed on PATH and a HOME lacking the creds file.
+kc_shim="$(mktemp -d)"
+cat > "$kc_shim/uname" <<'EOF'
+#!/bin/sh
+[ "$1" = "-s" ] && { echo Darwin; exit 0; }
+exec /usr/bin/uname "$@"
+EOF
+cat > "$kc_shim/security" <<'EOF'
+#!/bin/sh
+# Mock only the `find-generic-password ... -w` read path used by agent.sh.
+printf '%s\n' '{"claudeAiOauth":{"accessToken":"tok-from-keychain"}}'
+EOF
+chmod +x "$kc_shim/uname" "$kc_shim/security"
+kc_home="$(mktemp -d)"
+mkdir -p "$kc_home/.claude"          # note: no .credentials.json on disk
+kc_stage="$(mktemp -d)"
+
+# Resolve under the shims: credentials line should appear with the sentinel SRC.
+kc_resolved="$(
+  PATH="$kc_shim:$PATH" HOME="$kc_home" bash -c '
+    set -u
+    . "'"$ROOT"'/lib/dev/agent.sh"
+    _agent_resolve claude
+    printf "%s\n" "$AGENT_KEYCHAIN_CLAUDE_SRC"   # last line = the sentinel value
+  '
+)"
+kc_sentinel="$(printf '%s\n' "$kc_resolved" | tail -n1)"
+kc_creds_line="$(printf '%s\n' "$kc_resolved" | grep -F '.claude/.credentials.json' || true)"
+if printf '%s' "$kc_creds_line" | grep -qF "$kc_sentinel"; then
+    log_pass "keychain fallback: resolve emits credentials from Keychain sentinel when file absent"
+else
+    log_fail "keychain fallback: resolve did not emit the Keychain sentinel: $kc_resolved"
+fi
+if printf '%s' "$kc_creds_line" | grep -q '0600'; then
+    log_pass "keychain fallback: credentials line marked 0600"
+else
+    log_fail "keychain fallback: credentials line not 0600: $kc_creds_line"
+fi
+
+# A real credentials file on disk must win over the Keychain (no sentinel).
+printf '{}\n' > "$kc_home/.claude/.credentials.json"
+kc_resolved_file="$(
+  PATH="$kc_shim:$PATH" HOME="$kc_home" bash -c '
+    set -u
+    . "'"$ROOT"'/lib/dev/agent.sh"
+    _agent_resolve claude
+  '
+)"
+if printf '%s' "$kc_resolved_file" | grep -q 'keychain:'; then
+    log_fail "keychain fallback: sentinel emitted even though the file exists: $kc_resolved_file"
+else
+    log_pass "keychain fallback: real credentials file wins over the Keychain"
+fi
+rm -f "$kc_home/.claude/.credentials.json"
+
+# Materialize: the sentinel line is rewritten to a real staged file holding the
+# Keychain payload; other lines pass through untouched.
+kc_mat="$(
+  PATH="$kc_shim:$PATH" bash -c '
+    set -u
+    . "'"$ROOT"'/lib/dev/agent.sh"
+    printf "%s\t%s\t%s\t%s\n" "$AGENT_KEYCHAIN_CLAUDE_SRC" .claude/.credentials.json file 0600 \
+      | _agent_materialize_keychain "'"$kc_stage"'"
+  '
+)"
+kc_mat_src="$(printf '%s' "$kc_mat" | cut -f1)"
+if [ -f "$kc_mat_src" ] && grep -q 'tok-from-keychain' "$kc_mat_src"; then
+    log_pass "keychain fallback: materialize writes the Keychain payload to a real staged file"
+else
+    log_fail "keychain fallback: materialized src missing/empty ($kc_mat_src): $kc_mat"
+fi
+rm -rf "$kc_shim" "$kc_home" "$kc_stage"
+
 # ---------- real copy into the home volume (needs runtime + base image) ----------
 
 WORK="$(mktemp -d)/proj-agent48"
