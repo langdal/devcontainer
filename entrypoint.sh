@@ -154,5 +154,16 @@ if [ -n "${DEV_GIT_EMAIL:-}" ] && [ -z "$(git config --global user.email || true
 fi
 INNER
 
+# --- Claude Code long-lived token (injected by 'dev agent add claude' with
+# the token auth method). Exported here, in the parent of every process the
+# container runs, so interactive shells and `dev -- cmd` children all inherit
+# it. An env var already set on the container (docker run -e) wins over the
+# file; the file is vscode-owned 0600 but readable here as root.
+if [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] \
+   && [ -f /home/vscode/.claude/.devcontainer-oauth-token ]; then
+    CLAUDE_CODE_OAUTH_TOKEN="$(cat /home/vscode/.claude/.devcontainer-oauth-token)"
+    export CLAUDE_CODE_OAUTH_TOKEN
+fi
+
 # Drop privileges to vscode for the actual command.
 exec gosu vscode "$@"

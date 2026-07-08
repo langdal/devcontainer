@@ -312,3 +312,90 @@ if echo "$listout2" | grep -E "claude.*yes.*yes" >/dev/null; then
 else
     log_pass "list shows claude no longer injected after rm"
 fi
+
+# ---------- token auth method (--auth token) ----------
+# Instead of snapshotting .credentials.json, inject a long-lived
+# `claude setup-token` token that entrypoint.sh exports as
+# CLAUDE_CODE_OAUTH_TOKEN (checked by Claude before the credentials file, so
+# refresh-token rotation elsewhere can't log the container out).
+
+TOKEN_DEST=".claude/.devcontainer-oauth-token"
+FAKE_TOKEN="sk-ant-oat01-SCENARIO48TESTTOKEN"
+
+# dry-run: token method previews the token dest and drops the creds snapshot.
+dry_tok="$(HOME="$FAKE_HOME" "$DEV" agent add claude --auth token --dry-run 2>&1)"
+if echo "$dry_tok" | grep -q "$TOKEN_DEST"; then
+    log_pass "token dry-run previews $TOKEN_DEST"
+else
+    log_fail "token dry-run missing $TOKEN_DEST: $dry_tok"
+fi
+if echo "$dry_tok" | grep -q "would copy .claude/.credentials.json"; then
+    log_fail "token dry-run still previews the credentials snapshot: $dry_tok"
+else
+    log_pass "token dry-run drops the credentials snapshot"
+fi
+
+# Arg surface: bad --auth value, --auth without claude, malformed token.
+if HOME="$FAKE_HOME" "$DEV" agent add claude --auth bogus --dry-run >/dev/null 2>&1; then
+    log_fail "--auth bogus should exit non-zero"
+else
+    log_pass "--auth bogus exits non-zero"
+fi
+if HOME="$FAKE_HOME" "$DEV" agent add opencode --auth token </dev/null >/dev/null 2>&1; then
+    log_fail "--auth token without claude targeted should exit non-zero"
+else
+    log_pass "--auth token without claude targeted exits non-zero"
+fi
+if printf 'not-a-token\n' | ( cd "$WORK" && HOME="$FAKE_HOME" "$DEV" agent add claude --auth token ) >/dev/null 2>&1; then
+    log_fail "malformed token should exit non-zero"
+else
+    log_pass "malformed token is rejected non-zero"
+fi
+
+# Real inject: non-tty --auth token reads the token from stdin.
+if printf '%s\n' "$FAKE_TOKEN" | ( cd "$WORK" && HOME="$FAKE_HOME" "$DEV" agent add claude --auth token ); then
+    log_pass "dev agent add claude --auth token (stdin) exited zero"
+else
+    log_fail "dev agent add claude --auth token (stdin) exited non-zero"
+fi
+if vol_has "$TOKEN_DEST"; then
+    log_pass "token file landed in the volume"
+else
+    log_fail "token file missing from volume"
+fi
+if [ "$(vol_mode "$TOKEN_DEST")" = "600" ]; then
+    log_pass "token file is mode 600 in the volume"
+else
+    log_fail "token file mode is $(vol_mode "$TOKEN_DEST"), want 600"
+fi
+if vol_has ".claude/.credentials.json"; then
+    log_fail "token method still copied .credentials.json into the volume"
+else
+    log_pass "token method skipped the credentials snapshot"
+fi
+
+# entrypoint.sh must export the token as CLAUDE_CODE_OAUTH_TOKEN for every
+# container process (needs the real entrypoint, hence NET_ADMIN for its
+# firewall init).
+env_tok="$("$RUNTIME" run --rm --cap-add=NET_ADMIN -v "$VOL":/home/vscode \
+    generic-devcontainer sh -c 'printf %s "$CLAUDE_CODE_OAUTH_TOKEN"' 2>/dev/null | tail -n1)"
+if [ "$env_tok" = "$FAKE_TOKEN" ]; then
+    log_pass "entrypoint exports CLAUDE_CODE_OAUTH_TOKEN from the injected file"
+else
+    log_fail "CLAUDE_CODE_OAUTH_TOKEN not exported (got '$env_tok')"
+fi
+
+# list counts the token as injected; rm removes it again.
+listout3="$( cd "$WORK" && HOME="$FAKE_HOME" "$DEV" agent list 2>&1 )"
+if echo "$listout3" | grep -E "claude.*yes.*yes" >/dev/null; then
+    log_pass "list shows claude injected via token method"
+else
+    log_fail "list does not count the token as injected: $listout3"
+fi
+( cd "$WORK" && HOME="$FAKE_HOME" DEV_ASSUME_YES=1 "$DEV" agent rm claude ) \
+    || log_fail "dev agent rm claude (token) exited non-zero"
+if vol_has "$TOKEN_DEST"; then
+    log_fail "rm did not remove the injected token file"
+else
+    log_pass "rm removed the injected token file"
+fi

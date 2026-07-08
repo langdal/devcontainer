@@ -16,6 +16,14 @@ AGENT_KNOWN=(claude opencode pi)
 CLAUDE_KEYCHAIN_SERVICE='Claude Code-credentials'
 AGENT_KEYCHAIN_CLAUDE_SRC='keychain:claude-credentials'
 
+# `dev agent add claude --auth token` injects a long-lived OAuth token (from
+# `claude setup-token`) at this dest instead of snapshotting the host's
+# .credentials.json. entrypoint.sh exports it as CLAUDE_CODE_OAUTH_TOKEN,
+# which Claude checks before the credentials file — so the token keeps
+# working even when refresh-token rotation invalidates a snapshot.
+CLAUDE_TOKEN_DEST='.claude/.devcontainer-oauth-token'
+CLAUDE_TOKEN_PREFIX='sk-ant-oat01-'
+
 # _agent_macos_keychain_has_creds: 0 if Claude Code's OAuth token is present in
 # the macOS login Keychain. Non-macOS (no `security`) returns non-zero, so the
 # fallback is inert on Linux where the credential file exists on disk instead.
@@ -267,12 +275,89 @@ _agent_materialize_keychain() {
   done
 }
 
-# _agent_copy_into_volume <name>: resolve an agent's manifest to existing host
-# sources and inject them into the workspace home volume via _stage_and_extract,
-# then apply the claude-only onboarding-flag follow-up.
+# _agent_claude_auth_prompt: interactively choose the claude auth method.
+# Prints "creds" or "token" on stdout; prompts on stderr so callers can
+# capture the choice. Only called when stdin is a tty and no --auth flag or
+# DEV_ASSUME_YES already decided.
+_agent_claude_auth_prompt() {
+  local reply
+  cat >&2 <<'EOF'
+claude: two ways to authenticate inside the container:
+  1) credentials snapshot — copy ~/.claude/.credentials.json from this host.
+     Quick, but OAuth refresh-token rotation can invalidate the copy whenever
+     another machine (or the host itself) refreshes first, forcing /login.
+  2) long-lived token — mint one with 'claude setup-token' (browser sign-in)
+     and inject it as CLAUDE_CODE_OAUTH_TOKEN. Stable across machines and
+     workspaces; unaffected by rotation.
+EOF
+  while true; do
+    read -r -p "Auth method for claude [1/2] (default 1): " reply
+    case "$reply" in
+      ''|1) echo creds; return 0 ;;
+      2)    echo token; return 0 ;;
+      *)    echo "Please answer 1 or 2." >&2 ;;
+    esac
+  done
+}
+
+# _agent_claude_token_acquire <out_file>: obtain a long-lived token and write
+# it (no trailing newline) to <out_file> with mode 0600. Interactive path
+# (tty): offer to run `claude setup-token` attached to the terminal, then
+# read the pasted token silently. Non-tty path (scripted `--auth token`):
+# read one line from stdin. Validates the sk-ant-oat01- prefix; returns 1 on
+# empty/malformed input.
+_agent_claude_token_acquire() {
+  local out_file="$1" tok="" reply
+  if [[ -t 0 ]]; then
+    if command -v claude >/dev/null 2>&1; then
+      read -r -p "Run 'claude setup-token' now to mint a token? [Y/n] " reply
+      case "$reply" in
+        n|N|no|NO) ;;
+        *) claude setup-token || {
+             echo "  claude: 'claude setup-token' failed; paste an existing token or retry." >&2
+           } ;;
+      esac
+    else
+      echo "  claude: no 'claude' CLI on this host — run 'claude setup-token' wherever" >&2
+      echo "  Claude Code is installed and paste the token it prints." >&2
+    fi
+    read -rs -p "Paste the token (input hidden): " tok
+    echo >&2
+  else
+    # Scripted: token arrives on stdin (e.g. printf '%s\n' "$TOK" | dev agent
+    # add claude --auth token).
+    IFS= read -r tok || true
+  fi
+  # Strip whitespace/CR the paste may carry; tokens themselves contain none.
+  tok="${tok//[$'\r\n\t ']/}"
+  if [[ -z "$tok" ]]; then
+    echo "Error: no token provided." >&2
+    return 1
+  fi
+  if [[ "$tok" != "$CLAUDE_TOKEN_PREFIX"* ]]; then
+    echo "Error: that does not look like a 'claude setup-token' token (expected" >&2
+    echo "       prefix ${CLAUDE_TOKEN_PREFIX}...). Not injecting it." >&2
+    return 1
+  fi
+  (umask 077 && printf '%s' "$tok" > "$out_file")
+}
+
+# _agent_copy_into_volume <name> [auth_method] [token_file]: resolve an
+# agent's manifest to existing host sources and inject them into the workspace
+# home volume via _stage_and_extract, then apply the claude-only
+# onboarding-flag follow-up. auth_method (claude only) is "creds" (default,
+# snapshot .credentials.json) or "token" (skip the credentials snapshot and
+# inject token_file at CLAUDE_TOKEN_DEST instead).
 _agent_copy_into_volume() {
-  local name="$1" resolved
+  local name="$1" auth_method="${2:-creds}" token_file="${3:-}" resolved
   resolved="$(_agent_resolve "$name")"
+  if [[ "$name" == claude && "$auth_method" == token ]]; then
+    # Drop the credentials snapshot (file or macOS Keychain sentinel — both
+    # carry DEST .claude/.credentials.json) and inject the token instead.
+    resolved="$(awk -F'\t' '$2 != ".claude/.credentials.json"' <<< "$resolved")"
+    resolved+="${resolved:+$'\n'}$(printf '%s\t%s\t%s\t%s' \
+      "$token_file" "$CLAUDE_TOKEN_DEST" file 0600)"
+  fi
   if [[ -z "$resolved" ]]; then
     echo "  ${name}: no source files found on host — nothing to copy." >&2
     return 0
@@ -360,12 +445,17 @@ _agent_volume_exists() {
 }
 
 # _agent_all_dests <name>: print every manifest DEST_REL for the agent
-# (independent of whether the source exists on the host).
+# (independent of whether the source exists on the host). For claude the
+# token-method dest is included too, so `list` counts it as injected and
+# `rm` removes it alongside the snapshot files.
 _agent_all_dests() {
   local src_rel dest_rel kind mode
   while IFS=$'\t' read -r src_rel dest_rel kind mode; do
     [[ -n "$dest_rel" ]] && printf '%s\n' "$dest_rel"
   done < <(_agent_manifest "$1")
+  if [[ "$1" == claude ]]; then
+    printf '%s\n' "$CLAUDE_TOKEN_DEST"
+  fi
 }
 
 # _agent_volume_present_dests: read candidate dest paths on stdin (one per
@@ -509,6 +599,17 @@ mount, never baked into an image). Re-run 'add' to refresh (tokens expire).
 Preview with 'dev agent add <name> --dry-run'. Remove with 'dev agent rm'
 or wipe the whole home volume with 'dev reset'.
 
+For claude, 'add' offers two auth methods (pick interactively or pass
+--auth creds|token):
+  creds   snapshot ~/.claude/.credentials.json (default; non-interactive
+          runs use this). Refresh-token rotation on another machine can
+          invalidate the copy, forcing /login inside the container.
+  token   inject a long-lived token from 'claude setup-token' as
+          CLAUDE_CODE_OAUTH_TOKEN (exported by the container entrypoint).
+          Stable across machines; needs a rebuilt image (dev --build) if
+          yours predates this feature. Scripted use: pipe the token on
+          stdin: printf '%s\n' "$TOK" | dev agent add claude --auth token
+
 For a container started with 'dev --dind' or 'dev --pind', pass the matching
 --dind/--pind flag (e.g. 'dev agent add claude --pind'). On macOS+podman the
 dind/pind container uses a separate storage backend, and without the flag the
@@ -523,16 +624,25 @@ EOF
 # previews host files only and never resolves storage (needs no runtime).
 _agent_add() {
   local want_dind="$1" want_pind="$2"; shift 2
-  local dry=false
+  local dry=false auth_flag=""
   local -a raw=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --dry-run) dry=true; shift ;;
+      --auth)
+        auth_flag="${2:-}"
+        [[ $# -ge 2 ]] || { echo "Error: dev agent add: --auth needs a value (creds|token)" >&2; exit 1; }
+        shift 2 ;;
+      --auth=*) auth_flag="${1#--auth=}"; shift ;;
       --) shift ;;
       -*) echo "Error: dev agent add: unknown option: $1" >&2; exit 1 ;;
       *) raw+=("$1"); shift ;;
     esac
   done
+  if [[ -n "$auth_flag" && "$auth_flag" != creds && "$auth_flag" != token ]]; then
+    echo "Error: dev agent add: --auth must be 'creds' or 'token', got '$auth_flag'" >&2
+    exit 1
+  fi
   [[ ${#raw[@]} -gt 0 ]] || {
     echo "Error: dev agent add: name required (${AGENT_KNOWN[*]}, or 'all')" >&2
     exit 1
@@ -549,13 +659,28 @@ _agent_add() {
   done <<< "$expanded"
   [[ ${#targets[@]} -gt 0 ]] || { echo "No matching agents found on host."; return 0; }
 
+  # --auth only changes the claude flow; reject it when claude is not among
+  # the targets so a typo'd invocation fails loudly instead of no-opping.
+  local claude_targeted=false name
+  for name in "${targets[@]}"; do
+    [[ "$name" == claude ]] && claude_targeted=true
+  done
+  if [[ -n "$auth_flag" && "$claude_targeted" == false ]]; then
+    echo "Error: dev agent add: --auth only applies to the claude agent." >&2
+    exit 1
+  fi
+
   # Dry-run previews host files only — no runtime/storage needed, so return
-  # before resolving storage (which would otherwise print the auto-detect hint).
+  # before resolving storage (which would otherwise print the auto-detect
+  # hint). Never prompts: without --auth it previews the creds default.
   if [[ "$dry" == true ]]; then
-    local name src dest kind mode resolved
+    local src dest kind mode resolved
     for name in "${targets[@]}"; do
       resolved="$(_agent_resolve "$name")"
-      if [[ -z "$resolved" ]]; then
+      if [[ "$name" == claude && "$auth_flag" == token ]]; then
+        resolved="$(awk -F'\t' '$2 != ".claude/.credentials.json"' <<< "$resolved")"
+        echo "  ${name}: would inject ${CLAUDE_TOKEN_DEST} (mode 0600) [long-lived token via 'claude setup-token']"
+      elif [[ -z "$resolved" ]]; then
         echo "  ${name}: no source files found on host."
         continue
       fi
@@ -576,12 +701,43 @@ _agent_add() {
     return 0
   fi
 
+  # Claude auth method: explicit flag wins; otherwise prompt on a tty.
+  # Non-interactive (DEV_ASSUME_YES / no tty) defaults to the credentials
+  # snapshot — the historical behavior, so scripts are unaffected.
+  local claude_auth="$auth_flag"
+  if [[ "$claude_targeted" == true && -z "$claude_auth" ]]; then
+    if [[ "${DEV_ASSUME_YES:-}" == 1 || ! -t 0 ]]; then
+      claude_auth=creds
+    else
+      claude_auth="$(_agent_claude_auth_prompt)"
+    fi
+  fi
+
+  # Token method: obtain the token up front so a failed/aborted paste stops
+  # everything before any storage is touched.
+  local token_tmp=""
+  if [[ "$claude_auth" == token ]]; then
+    token_tmp="$(mktemp)"
+    if ! _agent_claude_token_acquire "$token_tmp"; then
+      rm -f "$token_tmp"
+      exit 1
+    fi
+  fi
+
   # Args are valid — resolve the target storage (may print a hint) and inject.
   resolve_agent_storage "$want_dind" "$want_pind"
-  local name
+  local rc=0
   for name in "${targets[@]}"; do
-    _agent_copy_into_volume "$name"
+    if [[ "$name" == claude ]]; then
+      _agent_copy_into_volume claude "$claude_auth" "$token_tmp" || rc=$?
+    else
+      _agent_copy_into_volume "$name" || rc=$?
+    fi
   done
-  echo "Done. Injected into ${HOME_VOLUME}. Re-run 'dev agent add' to refresh;"
-  echo "'dev agent rm' or 'dev reset' to remove."
+  [[ -n "$token_tmp" ]] && rm -f "$token_tmp"
+  if [[ "$rc" -eq 0 ]]; then
+    echo "Done. Injected into ${HOME_VOLUME}. Re-run 'dev agent add' to refresh;"
+    echo "'dev agent rm' or 'dev reset' to remove."
+  fi
+  return $rc
 }

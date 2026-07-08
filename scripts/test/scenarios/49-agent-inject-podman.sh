@@ -146,4 +146,35 @@ else
     log_pass "rm removed pi's injected files under podman"
 fi
 
+# --- claude token method under rootless podman ---
+# `--auth token` needs no host manifest source (the token arrives on stdin),
+# so it runs with the real HOME intact — podman's storage stays visible.
+# Covers the keep-id copy of the token file and the entrypoint export.
+TOKEN_DEST=".claude/.devcontainer-oauth-token"
+FAKE_TOKEN="sk-ant-oat01-SCENARIO49TESTTOKEN"
+if printf '%s\n' "$FAKE_TOKEN" | ( cd "$WORK" && "$DEV" agent add claude --auth token ) >/dev/null 2>&1; then
+    log_pass "dev agent add claude --auth token succeeds under podman"
+else
+    log_fail "dev agent add claude --auth token failed under podman"
+fi
+if vol_has "$TOKEN_DEST" && [ "$(vol_mode "$TOKEN_DEST")" = "600" ]; then
+    log_pass "token file landed mode 600 in the volume (podman keep-id)"
+else
+    log_fail "token file missing or wrong mode in the volume under podman"
+fi
+# entrypoint (root) must read the keep-id-owned token file and export it.
+env_tok="$(podman run --rm --userns=keep-id --cap-add=NET_ADMIN -v "$VOL":/home/vscode \
+    generic-devcontainer sh -c 'printf %s "$CLAUDE_CODE_OAUTH_TOKEN"' 2>/dev/null | tail -n1)"
+if [ "$env_tok" = "$FAKE_TOKEN" ]; then
+    log_pass "entrypoint exports CLAUDE_CODE_OAUTH_TOKEN under podman keep-id"
+else
+    log_fail "CLAUDE_CODE_OAUTH_TOKEN not exported under podman (got '$env_tok')"
+fi
+if ( cd "$WORK" && DEV_ASSUME_YES=1 "$DEV" agent rm claude ) >/dev/null 2>&1 \
+   && ! vol_has "$TOKEN_DEST"; then
+    log_pass "rm removed the injected token file under podman"
+else
+    log_fail "rm did not remove the token file under podman"
+fi
+
 exit 0

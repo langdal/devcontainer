@@ -265,6 +265,7 @@ dev agent add claude opencode   # several at once
 dev agent add all               # every agent detected on the host
 dev agent add claude --dry-run  # preview the exact file list, copy nothing
 dev agent add claude --pind     # target a --pind container's storage (also --dind)
+dev agent add claude --auth token   # inject a long-lived 'claude setup-token' token
 dev agent list                  # per-agent: present on host? injected here?
 dev agent rm claude             # remove claude's injected files (confirms)
 ```
@@ -299,6 +300,29 @@ conversation, project, and session history; caches; and plugin-install
 machinery — so injecting an agent does not drag one project's history into
 another's sandbox. Files holding secrets (auth tokens, and any config with
 inline provider API keys) are forced to mode `0600` in the volume.
+
+**Claude auth methods (snapshot vs long-lived token):** for `claude`, `add`
+offers two ways to authenticate the container — chosen interactively, or with
+`--auth creds|token`:
+
+- `creds` (default; also what non-interactive runs get, so scripts keep the
+  historical behavior): snapshot `~/.claude/.credentials.json`. Quick, but the
+  copy shares its OAuth grant with the host — refresh-token rotation means
+  whichever copy refreshes first invalidates the others, so a container (or
+  the host) can find itself logged out and prompted for `/login`.
+- `token`: mint a long-lived token with `claude setup-token` (browser
+  sign-in; `dev` offers to run it for you and prompts for the token) and
+  inject it at `~/.claude/.devcontainer-oauth-token` (mode `0600`). The
+  container entrypoint exports it as `CLAUDE_CODE_OAUTH_TOKEN`, which Claude
+  checks **before** the credentials file — so it keeps working no matter what
+  rotation does to any snapshot, and one token can serve every workspace and
+  machine. Requires an image built from a `dev` version that ships this
+  export (rebuild once with `dev --build` if in doubt). Scripted use reads
+  the token from stdin: `printf '%s\n' "$TOK" | dev agent add claude --auth
+  token`.
+
+`dev agent rm claude` removes the injected token along with the snapshot
+files.
 
 **Claude onboarding:** Claude Code's account/onboarding state lives in
 `~/.claude.json` (a top-level file, *outside* `~/.claude/`) that also holds

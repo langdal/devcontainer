@@ -289,6 +289,9 @@ SUBCOMMANDS:
                   workspace's home volume. One-way snapshot — never a host
                   mount, never baked into an image. Re-run to refresh.
                   --dry-run        Preview the file list without copying.
+                  --auth creds|token  (claude) snapshot the credentials file,
+                                   or inject a long-lived 'claude setup-token'
+                                   token instead (prompted when omitted).
                   --dind|--pind    Target a dind/pind container's storage
                                    (required on macOS+podman).
   agent list      Show, per agent, whether it is present on the host and

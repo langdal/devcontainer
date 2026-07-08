@@ -60,7 +60,11 @@ docker build -t generic-devcontainer .
 # Inject a curated snapshot of an AI agent's host credentials + settings
 # into this workspace's home volume (claude/opencode/pi). One-way copy,
 # not a mount; re-run to refresh. `list` shows status; `rm` removes.
+# For claude, --auth token injects a long-lived 'claude setup-token' token
+# (exported as CLAUDE_CODE_OAUTH_TOKEN by the entrypoint) instead of
+# snapshotting ~/.claude/.credentials.json; interactive runs are prompted.
 ./dev agent add claude
+./dev agent add claude --auth token
 ./dev agent list
 ./dev agent rm claude
 
@@ -199,7 +203,16 @@ Three components, each with a distinct role:
   password `Claude Code-credentials`) rather than `~/.claude/.credentials.json`,
   so `_agent_resolve` falls back to reading the Keychain when that file is
   absent and materializes the payload into the volume as `.credentials.json`
-  (byte-for-byte what Claude reads on Linux). Refresh by re-running `add`;
+  (byte-for-byte what Claude reads on Linux). For `claude` there is a second
+  auth method, `--auth token` (interactive runs are prompted to pick): instead
+  of snapshotting the credentials file — whose OAuth grant is shared with the
+  host, so refresh-token rotation elsewhere can invalidate the copy and force
+  `/login` — it injects a long-lived `claude setup-token` token
+  (`sk-ant-oat01-…`, validated) at `~/.claude/.devcontainer-oauth-token`
+  (0600), which `entrypoint.sh` exports as `CLAUDE_CODE_OAUTH_TOKEN`. Claude
+  checks that env var before the credentials file. Non-interactive `--auth
+  token` reads the token from stdin; non-interactive runs without `--auth`
+  default to the credentials snapshot. Refresh by re-running `add`;
   remove with `dev agent rm` or `dev reset`. See README.md.
 
 ## Firewall (security boundary)
