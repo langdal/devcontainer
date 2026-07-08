@@ -76,10 +76,12 @@ reset_workspace() {
     containers+=("$PIND_NAME"); containers_args+=("$DIND_RUNTIME_ARGS")
   fi
 
-  # mise/home volumes live in default storage. The dind/pind volumes may
-  # live in the rootful podman connection on macOS+podman — probe with
-  # DIND_RUNTIME_ARGS (empty on every other host, so the same lookup
-  # works there too).
+  # mise/home volumes live in the default (rootless) storage for normal/maint.
+  # On macOS+podman a --dind/--pind run mounts them from the *rootful*
+  # connection instead, so a separate copy of both exists there too; reset
+  # must clean both or a dind/pind home volume (with injected creds) survives.
+  # DIND_RUNTIME_ARGS is empty on every other host, so the extra probe is
+  # skipped there and the volume is never listed twice.
   local -a volumes=() volumes_args=()
   local v
   for v in devcontainer-mise "$HOME_VOLUME"; do
@@ -87,6 +89,14 @@ reset_workspace() {
       volumes+=("$v"); volumes_args+=("")
     fi
   done
+  if [[ -n "$DIND_RUNTIME_ARGS" ]]; then
+    for v in devcontainer-mise "$HOME_VOLUME"; do
+      # shellcheck disable=SC2086  # intentional word-splitting of DIND_RUNTIME_ARGS
+      if $RUNTIME $DIND_RUNTIME_ARGS volume inspect "$v" >/dev/null 2>&1; then
+        volumes+=("$v"); volumes_args+=("$DIND_RUNTIME_ARGS")
+      fi
+    done
+  fi
   # shellcheck disable=SC2086  # intentional word-splitting of DIND_RUNTIME_ARGS
   if $RUNTIME $DIND_RUNTIME_ARGS volume inspect devcontainer-dind >/dev/null 2>&1; then
     volumes+=("devcontainer-dind"); volumes_args+=("$DIND_RUNTIME_ARGS")
@@ -109,24 +119,29 @@ reset_workspace() {
   local assume_yes="${DEV_ASSUME_YES:-0}"
   local interactive=true
   [[ -t 0 ]] || interactive=false
-  local name args reply
+  local name args reply label
   for i in "${!volumes[@]}"; do
     name="${volumes[$i]}"; args="${volumes_args[$i]}"
+    # On macOS+podman the same volume name can exist in both the rootless and
+    # rootful connections; label the rootful one so the two prompts are
+    # distinguishable (args is empty for rootless / on every non-macOS host).
+    label="$name"
+    [[ -n "$args" ]] && label="$name [rootful/dind-pind storage]"
     if [[ "$assume_yes" == "1" ]]; then
       reply=y
-      echo "DEV_ASSUME_YES set — removing volume ${name}." >&2
+      echo "DEV_ASSUME_YES set — removing volume ${label}." >&2
     elif [[ "$interactive" != true ]]; then
-      echo "Skipping volume ${name} (non-interactive; set DEV_ASSUME_YES=1 to remove)." >&2
+      echo "Skipping volume ${label} (non-interactive; set DEV_ASSUME_YES=1 to remove)." >&2
       continue
     else
-      read -r -p "Remove volume ${name}? [y/N] " reply
+      read -r -p "Remove volume ${label}? [y/N] " reply
     fi
     case "$reply" in
       y|Y|yes|YES)
         remove_volume_if_exists "$name" "$args"
         ;;
       *)
-        echo "Kept volume ${name}." >&2
+        echo "Kept volume ${label}." >&2
         ;;
     esac
   done

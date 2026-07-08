@@ -2,6 +2,28 @@
 
 A portable, editor-agnostic dev environment. One Dockerfile, one bash wrapper, per-project tools via [`mise`](https://mise.jdx.dev/). No `devcontainer.json`, no `docker-compose`, no editor lock-in.
 
+## What you get
+
+- **A real dev container in one command.** Run `dev` from any project folder and you land in a shell with your code mounted at `/workspace`. No per-project config files to write or maintain.
+- **Per-project tool versions, no clutter.** Drop a `mise.toml` in your repo to pin node/go/python/etc. Tools install on start and cache in a shared volume — not in your home directory.
+- **A network firewall built for AI agents.** Outbound traffic is default-deny and filtered to a curated allowlist. The design goal: an agent working inside the container **can freely read and edit your files, but cannot send your code to arbitrary hosts.**
+- **State that stays isolated.** Shell history, git config, and dotfiles live in a per-project home volume, so one project's agent can't read another project's SSH keys or credentials.
+- **Escape hatches when you need them.** A maintenance mode (sudo, firewall off), nested Docker or Podman for testcontainers and builds, and scoped access to host services — each opt-in and clearly named.
+
+## How it stays safe
+
+The container runs as an unprivileged user (`vscode`) with **no sudo**. The kernel drops all outbound traffic except through a local proxy that only permits connections to allowlisted hostnames. Because the agent can't become root, it has no way to turn the firewall off from the inside. That's the whole security boundary — see [Firewall](#firewall) for specifics, or [`docs/architecture.html`](docs/architecture.html) for a picture.
+
+## How it works
+
+Three files, nothing hidden:
+
+- **`dev`** — the host-side wrapper you run. Builds the image, starts/reuses the container, mounts volumes, forwards ports, picks the mode.
+- **Dockerfile** — the image recipe. Ubuntu base + `mise` and a few baked-in tools; separate targets add nested Docker/Podman.
+- **entrypoint.sh** — runs on every start: brings up the firewall, installs project tools, then drops to your shell as `vscode`.
+
+Jump to [Architecture](#architecture) for the full diagram.
+
 ## Getting Started
 
 You need Docker (Linux) or Podman (macOS/Linux). See [Host requirements](#host-requirements).
@@ -242,11 +264,27 @@ dev agent add claude            # copy claude's creds+settings into this workspa
 dev agent add claude opencode   # several at once
 dev agent add all               # every agent detected on the host
 dev agent add claude --dry-run  # preview the exact file list, copy nothing
+dev agent add claude --pind     # target a --pind container's storage (also --dind)
 dev agent list                  # per-agent: present on host? injected here?
 dev agent rm claude             # remove claude's injected files (confirms)
 ```
 
 Supported agents: `claude`, `opencode`, `pi`.
+
+**Match the storage to the container you run (macOS+podman).** The dind/pind
+container lives in a separate rootful podman connection with its **own** home
+volume; writing into the default rootless volume it never mounts means the
+credentials silently never appear inside. `dev agent` handles this for you:
+
+- If a `dev --dind`/`--pind` container is **running**, `dev agent` auto-detects
+  it and targets that storage — no flag needed.
+- Otherwise pass the matching flag explicitly (`dev agent add claude --pind`),
+  which also works for `list`/`rm` (`dev agent list --pind`) and always wins
+  over auto-detection. If a workspace has dind/pind storage but no container is
+  running, `dev agent` prints a reminder to pass the flag.
+
+On Linux and Docker there is a single storage backend, so the flag is a
+harmless no-op there.
 
 **It is a one-way snapshot, not a mount.** Files are *copied* into the
 per-workspace home volume (`devcontainer-home-<dir>`). The host's live
@@ -274,6 +312,17 @@ re-derives your account identity from the copied token on first run. (The
 one-time "trust this folder" prompt is a separate per-workspace safety check
 and is left intact.)
 
+**Claude credentials on macOS:** on a Mac, Claude Code stores its OAuth token
+in the login **Keychain** (a generic password under the service
+`Claude Code-credentials`), not in `~/.claude/.credentials.json` — so the file
+the manifest points at does not exist. `dev agent add claude` detects this and
+reads the token straight from the Keychain, writing it into the volume as
+`.claude/.credentials.json` (mode `0600`), which is exactly the file Claude
+reads inside the Linux container. `dev agent list` and `--dry-run` report it as
+present on-host too. On Linux the credential lives on disk and is copied as-is,
+so this fallback is inert there. (Reading the Keychain may raise a one-time
+macOS "allow access" prompt.)
+
 Copying **dereferences symlinks** found inside those customization dirs (a
 broken link is skipped with a warning, not fatal) — keep dirs like
 `.claude/skills/` free of links to sensitive host files, since those would
@@ -287,6 +336,32 @@ host-side server (e.g. a local LLM at `http://127.0.0.1:PORT`), that address
 means the container itself inside the sandbox. Start with
 `dev --host-port PORT` and edit the in-volume config to use
 `host.docker.internal:PORT` instead.
+
+## Injecting dotfiles
+
+`dev dotfile` is the generic counterpart to `dev agent`: it copies an
+**arbitrary** host file or directory into this workspace's home volume,
+mirroring its path relative to `$HOME`.
+
+```bash
+dev dotfile add ~/.config/nvim          # -> ~/.config/nvim in the container
+dev dotfile add ~/.tmux.conf ~/.gitconfig   # several at once
+dev dotfile add ~/.config/gh --secret   # chmod 600 the copied paths
+dev dotfile rm  ~/.config/nvim          # remove it again (confirms)
+```
+
+Same mechanics as agent injection: a **one-way snapshot** into the
+per-workspace home volume (`devcontainer-home-<dir>`) — never a host mount,
+never baked into an image. Re-run `add` to refresh. **Symlinks are
+dereferenced** — a linked config dir is copied as real files, so the container
+never depends on a host path. The source path must live under `$HOME` (the
+dest is computed relative to it); paths elsewhere, or ones resolving to unsafe
+locations, are rejected. `--secret` forces the copied paths to mode `0600`.
+
+Storage routing matches `dev agent` exactly: on macOS+podman a running
+`dev --dind`/`--pind` container's storage is auto-detected, and `--dind`/`--pind`
+target it explicitly. Remove with `dev dotfile rm <path>` or wipe the whole
+home volume with `dev reset`.
 
 ## Host Requirements
 

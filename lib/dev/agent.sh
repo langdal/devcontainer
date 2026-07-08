@@ -8,6 +8,23 @@
 # _agent_expand; it is intentionally NOT in this list.
 AGENT_KNOWN=(claude opencode pi)
 
+# macOS stores Claude Code's OAuth token in the login Keychain (a generic
+# password under this service name) instead of ~/.claude/.credentials.json, so
+# the manifest's file source never exists on a Mac. _agent_resolve falls back
+# to this Keychain entry and emits AGENT_KEYCHAIN_CLAUDE_SRC as a sentinel SRC
+# (never a real path); the copy path materializes it into a real staged file.
+CLAUDE_KEYCHAIN_SERVICE='Claude Code-credentials'
+AGENT_KEYCHAIN_CLAUDE_SRC='keychain:claude-credentials'
+
+# _agent_macos_keychain_has_creds: 0 if Claude Code's OAuth token is present in
+# the macOS login Keychain. Non-macOS (no `security`) returns non-zero, so the
+# fallback is inert on Linux where the credential file exists on disk instead.
+_agent_macos_keychain_has_creds() {
+  [[ "$(uname -s)" == Darwin ]] || return 1
+  command -v security >/dev/null 2>&1 || return 1
+  security find-generic-password -s "$CLAUDE_KEYCHAIN_SERVICE" -w >/dev/null 2>&1
+}
+
 # _agent_is_known <name> -> 0 if name is a supported agent, else 1.
 _agent_is_known() {
   local n
@@ -78,6 +95,18 @@ _agent_resolve() {
     [[ -e "$src_abs" ]] || continue
     printf '%s\t%s\t%s\t%s\n' "$src_abs" "$dest_rel" "$kind" "$mode"
   done < <(_agent_manifest "$name")
+
+  # macOS fallback: Claude Code keeps its OAuth token in the login Keychain, not
+  # in ~/.claude/.credentials.json, so the manifest's file source above is
+  # skipped on a Mac. If that file is absent but the Keychain entry exists, emit
+  # a sentinel source (never a real path) that the copy path materializes into
+  # the dest — the Keychain payload is byte-for-byte the file Claude reads inside
+  # the Linux container. Guarded on file-absence so a real file always wins.
+  if [[ "$name" == claude && ! -e "$HOME/.claude/.credentials.json" ]] \
+     && _agent_macos_keychain_has_creds; then
+    printf '%s\t%s\t%s\t%s\n' \
+      "$AGENT_KEYCHAIN_CLAUDE_SRC" '.claude/.credentials.json' file 0600
+  fi
 }
 
 # _agent_expand <mode> <arg...>: resolve name arguments to a deduped list,
@@ -130,43 +159,43 @@ _agent_require_image() {
   fi
 }
 
-# _agent_copy_into_volume <name>: stage the resolved sources into a temp dir
-# (dereferencing symlinks) and extract them into the workspace home volume
-# through a short-lived helper container running as vscode with the same
-# --userns=keep-id args the real container uses, so ownership is correct on
-# Docker, rootful podman, and rootless podman alike.
-_agent_copy_into_volume() {
-  local name="$1" resolved
+# _stage_and_extract <label_prefix>: read TSV lines (SRC_ABS \t DEST_REL \t
+# MODE) on stdin, stage them into a temp dir (dereferencing symlinks, so links
+# pointing outside the copied tree become real files), then extract them into
+# the workspace home volume through a short-lived helper container running as
+# vscode with the same --userns=keep-id args the real container uses — so
+# ownership is correct on Docker, rootful podman, and rootless podman alike.
+# MODE "0600" tightens that dest to 600 after extraction (secrets); any other
+# value preserves the staged perms. Prints "<prefix>+ <dest>" per copied entry
+# (and warnings on broken symlinks). Returns the helper's exit code. Shared by
+# `dev agent add` (via _agent_copy_into_volume) and `dev dotfile add`.
+_stage_and_extract() {
+  local prefix="$1"
   _agent_require_image
-  resolved="$(_agent_resolve "$name")"
-  if [[ -z "$resolved" ]]; then
-    echo "  ${name}: no source files found on host — nothing to copy." >&2
-    return 0
-  fi
 
   local staging
   staging="$(mktemp -d)"
   local -a secret_dests=()
-  local src dest kind mode
-  while IFS=$'\t' read -r src dest kind mode; do
+  local src dest mode
+  while IFS=$'\t' read -r src dest mode; do
     [[ -n "$src" ]] || continue
     mkdir -p "$staging/$(dirname "$dest")"
-    if [[ "$kind" == dir ]]; then
+    if [[ -d "$src" ]]; then
       mkdir -p "$staging/$dest"
       # -R recurse, -L dereference: links pointing outside the copied tree
       # become real files. Broken links make cp non-zero; warn, don't abort.
       if ! cp -RL "$src/." "$staging/$dest/" 2>/dev/null; then
-        echo "  ${name}: warning: some entries under ${dest} were skipped (broken symlinks?)" >&2
+        echo "${prefix}warning: some entries under ${dest} were skipped (broken symlinks?)" >&2
       fi
     else
       if ! cp -L "$src" "$staging/$dest" 2>/dev/null; then
-        echo "  ${name}: warning: skipped ${dest} (broken symlink?)" >&2
+        echo "${prefix}warning: skipped ${dest} (broken symlink?)" >&2
         continue
       fi
     fi
-    echo "  ${name}: + ${dest}"
+    echo "${prefix}+ ${dest}"
     [[ "$mode" == 0600 ]] && secret_dests+=("$dest")
-  done <<< "$resolved"
+  done
 
   # Ensure the volume exists; under keep-id also make sure it is owned by the
   # host user before we write (reuses lifecycle.sh's one-time migration).
@@ -194,15 +223,79 @@ _agent_copy_into_volume() {
   local -a keepid_args=()
   [[ "$keepid" == true ]] && keepid_args=(--userns=keep-id)
 
+  # On macOS the host tar is bsdtar, which stores each file's macOS xattrs
+  # (notably com.apple.provenance) as LIBARCHIVE.xattr.* extended headers plus
+  # an AppleDouble copy. GNU tar inside the container doesn't know that keyword
+  # and prints a warning per file ("Ignoring unknown extended header keyword
+  # ..."). Strip both at creation so the stream is clean; these flags are
+  # bsdtar-only (GNU tar lacks --no-mac-metadata and never emits these anyway).
+  local -a tar_args=()
+  if tar --version 2>/dev/null | grep -qi bsdtar; then
+    tar_args+=(--no-xattrs --no-mac-metadata)
+  fi
+
   local rc=0
   # shellcheck disable=SC2086  # intentional word-splitting of RUNTIME_ARGS
-  tar -C "$staging" -cf - . \
+  tar "${tar_args[@]+"${tar_args[@]}"}" -C "$staging" -cf - . \
     | $RUNTIME $RUNTIME_ARGS run --rm -i \
         ${keepid_args[@]+"${keepid_args[@]}"} -u vscode \
         -v "$HOME_VOLUME":/home/vscode \
         --entrypoint sh "$IMAGE_TAG" -c "$remote" \
     || rc=$?
   rm -rf "$staging"
+  return $rc
+}
+
+# _agent_materialize_keychain <tmpdir>: read 4-field resolved TSV (SRC \t DEST
+# \t KIND \t MODE) on stdin; for each line whose SRC is the Keychain sentinel,
+# dump the Keychain payload to a file under <tmpdir> and rewrite SRC to that
+# path. All other lines pass through unchanged. Fails (non-zero) if a sentinel
+# line's payload can't be read, so the caller can abort before copying.
+_agent_materialize_keychain() {
+  local tmpdir="$1" src dest kind mode kc_out i=0
+  while IFS=$'\t' read -r src dest kind mode; do
+    [[ -n "$src" ]] || continue
+    if [[ "$src" == "$AGENT_KEYCHAIN_CLAUDE_SRC" ]]; then
+      kc_out="$tmpdir/cred_$i"; i=$((i + 1))
+      # -w prints just the password (the raw JSON). JSON.parse tolerates the
+      # trailing newline `security` appends, so no post-processing is needed.
+      security find-generic-password -s "$CLAUDE_KEYCHAIN_SERVICE" -w > "$kc_out" 2>/dev/null \
+        || return 1
+      src="$kc_out"
+    fi
+    printf '%s\t%s\t%s\t%s\n' "$src" "$dest" "$kind" "$mode"
+  done
+}
+
+# _agent_copy_into_volume <name>: resolve an agent's manifest to existing host
+# sources and inject them into the workspace home volume via _stage_and_extract,
+# then apply the claude-only onboarding-flag follow-up.
+_agent_copy_into_volume() {
+  local name="$1" resolved
+  resolved="$(_agent_resolve "$name")"
+  if [[ -z "$resolved" ]]; then
+    echo "  ${name}: no source files found on host — nothing to copy." >&2
+    return 0
+  fi
+
+  # Materialize any Keychain-sourced entries (macOS Claude credentials) into a
+  # temp dir, rewriting their SRC to a real path so _stage_and_extract can cp
+  # them like any host file. Cleaned up once the copy has run.
+  local kc_dir=""
+  if [[ "$resolved" == *"${AGENT_KEYCHAIN_CLAUDE_SRC}"$'\t'* ]]; then
+    kc_dir="$(mktemp -d)"
+    if ! resolved="$(_agent_materialize_keychain "$kc_dir" <<< "$resolved")"; then
+      rm -rf "$kc_dir"
+      echo "  ${name}: failed to read credentials from the macOS Keychain." >&2
+      return 1
+    fi
+  fi
+
+  local rc=0
+  # _agent_resolve emits SRC_ABS \t DEST_REL \t KIND \t MODE; _stage_and_extract
+  # takes SRC_ABS \t DEST_REL \t MODE (it detects dir vs file itself). Drop KIND.
+  cut -f1,2,4 <<< "$resolved" | _stage_and_extract "  ${name}: " || rc=$?
+  [[ -n "$kc_dir" ]] && rm -rf "$kc_dir"
 
   # Claude gates its interactive onboarding wizard (theme picker + "Select
   # login method") on hasCompletedOnboarding in ~/.claude.json — a top-level
@@ -211,6 +304,8 @@ _agent_copy_into_volume() {
   # only .credentials.json authenticates the API but leaves that flag unset,
   # so the login prompt reappears in every fresh workspace. Set the one flag.
   if [[ "$rc" -eq 0 && "$name" == claude ]]; then
+    local -a keepid_args=()
+    [[ "$(_agent_keepid)" == true ]] && keepid_args=(--userns=keep-id)
     # shellcheck disable=SC2086  # forward keepid_args verbatim (empty -> no arg)
     _agent_mark_claude_onboarded ${keepid_args[@]+"${keepid_args[@]}"} || rc=$?
   fi
@@ -297,9 +392,13 @@ _agent_volume_present_dests() {
     'cd /home/vscode && while IFS= read -r p; do [ -e "$p" ] && printf "%s\n" "$p"; done; :'
 }
 
-# _agent_list: per-agent table of host-present? / injected-here?
+# _agent_list <want_dind> <want_pind>: per-agent table of host-present? /
+# injected-here? Resolves storage after the arg check (needs runtime to probe
+# the volume).
 _agent_list() {
+  local want_dind="$1" want_pind="$2"; shift 2
   [[ $# -eq 0 ]] || { echo "Error: dev agent list takes no arguments: $*" >&2; exit 1; }
+  resolve_agent_storage "$want_dind" "$want_pind"
 
   # One helper call to learn which manifest dests currently exist in the volume.
   local present=""
@@ -325,8 +424,11 @@ _agent_list() {
   done
 }
 
-# _agent_rm <name>... | all: delete an agent's injected files from the volume.
+# _agent_rm <want_dind> <want_pind> <name>... | all: delete an agent's injected
+# files from the volume. Validates names before resolving storage, so an unknown
+# name fails without the storage auto-detection hint.
 _agent_rm() {
+  local want_dind="$1" want_pind="$2"; shift 2
   local -a raw=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -340,6 +442,19 @@ _agent_rm() {
     exit 1
   }
 
+  local -a targets=()
+  local line expanded
+  # Capture via command substitution (not process substitution): _agent_expand
+  # calls `exit` on an unknown name, and that exit code only propagates
+  # through $? of a command substitution, not through a `< <(...)` pipeline.
+  expanded="$(_agent_expand known "${raw[@]}")" || exit 1
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && targets+=("$line")
+  done <<< "$expanded"
+
+  # Args are valid — resolve storage (may print a hint), then remove.
+  resolve_agent_storage "$want_dind" "$want_pind"
+
   if ! _agent_volume_exists; then
     echo "No home volume (${HOME_VOLUME}) for this workspace — nothing to remove."
     return 0
@@ -350,16 +465,6 @@ _agent_rm() {
   # removal helper's vscode can traverse and delete under /home/vscode.
   local -a keepid_args=()
   [[ "$(_agent_keepid)" == true ]] && keepid_args=(--userns=keep-id)
-
-  local -a targets=()
-  local line expanded
-  # Capture via command substitution (not process substitution): _agent_expand
-  # calls `exit` on an unknown name, and that exit code only propagates
-  # through $? of a command substitution, not through a `< <(...)` pipeline.
-  expanded="$(_agent_expand known "${raw[@]}")" || exit 1
-  while IFS= read -r line; do
-    [[ -n "$line" ]] && targets+=("$line")
-  done <<< "$expanded"
 
   local name dest reply
   local -a dests
@@ -403,11 +508,21 @@ Agents: claude, opencode, pi
 mount, never baked into an image). Re-run 'add' to refresh (tokens expire).
 Preview with 'dev agent add <name> --dry-run'. Remove with 'dev agent rm'
 or wipe the whole home volume with 'dev reset'.
+
+For a container started with 'dev --dind' or 'dev --pind', pass the matching
+--dind/--pind flag (e.g. 'dev agent add claude --pind'). On macOS+podman the
+dind/pind container uses a separate storage backend, and without the flag the
+credentials land in a home volume that container never mounts.
 EOF
 }
 
-# _agent_add [--dry-run] <name>... | all
+# _agent_add <want_dind> <want_pind> [--dry-run] <name>... | all
+# want_dind/want_pind are the storage flags parsed by the dispatch; they are
+# forwarded to resolve_agent_storage only AFTER argument validation, so bad
+# input fails cleanly without the storage auto-detection hint. --dry-run
+# previews host files only and never resolves storage (needs no runtime).
 _agent_add() {
+  local want_dind="$1" want_pind="$2"; shift 2
   local dry=false
   local -a raw=()
   while [[ $# -gt 0 ]]; do
@@ -434,9 +549,11 @@ _agent_add() {
   done <<< "$expanded"
   [[ ${#targets[@]} -gt 0 ]] || { echo "No matching agents found on host."; return 0; }
 
-  local name src dest kind mode resolved
-  for name in "${targets[@]}"; do
-    if [[ "$dry" == true ]]; then
+  # Dry-run previews host files only — no runtime/storage needed, so return
+  # before resolving storage (which would otherwise print the auto-detect hint).
+  if [[ "$dry" == true ]]; then
+    local name src dest kind mode resolved
+    for name in "${targets[@]}"; do
       resolved="$(_agent_resolve "$name")"
       if [[ -z "$resolved" ]]; then
         echo "  ${name}: no source files found on host."
@@ -444,22 +561,27 @@ _agent_add() {
       fi
       while IFS=$'\t' read -r src dest kind mode; do
         [[ -n "$src" ]] || continue
+        local from=""
+        [[ "$src" == "$AGENT_KEYCHAIN_CLAUDE_SRC" ]] && from=" [from macOS Keychain]"
         if [[ "$mode" == 0600 ]]; then
-          echo "  ${name}: would copy ${dest} (mode 0600)"
+          echo "  ${name}: would copy ${dest} (mode 0600)${from}"
         else
-          echo "  ${name}: would copy ${dest}"
+          echo "  ${name}: would copy ${dest}${from}"
         fi
       done <<< "$resolved"
       if [[ "$name" == claude ]]; then
         echo "  ${name}: would set hasCompletedOnboarding in ~/.claude.json (skips login wizard)"
       fi
-    else
-      _agent_copy_into_volume "$name"
-    fi
-  done
-
-  if [[ "$dry" == false ]]; then
-    echo "Done. Injected into ${HOME_VOLUME}. Re-run 'dev agent add' to refresh;"
-    echo "'dev agent rm' or 'dev reset' to remove."
+    done
+    return 0
   fi
+
+  # Args are valid — resolve the target storage (may print a hint) and inject.
+  resolve_agent_storage "$want_dind" "$want_pind"
+  local name
+  for name in "${targets[@]}"; do
+    _agent_copy_into_volume "$name"
+  done
+  echo "Done. Injected into ${HOME_VOLUME}. Re-run 'dev agent add' to refresh;"
+  echo "'dev agent rm' or 'dev reset' to remove."
 }

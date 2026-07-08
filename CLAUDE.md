@@ -64,6 +64,12 @@ docker build -t generic-devcontainer .
 ./dev agent list
 ./dev agent rm claude
 
+# Inject an arbitrary dotfile/dir into this workspace's home volume, mirroring
+# its path under $HOME (symlinks dereferenced). Generic counterpart to `agent`;
+# same one-way-snapshot + dind/pind storage routing. --secret forces mode 0600.
+./dev dotfile add ~/.config/nvim
+./dev dotfile rm ~/.config/nvim
+
 # Scaffold a self-contained .devcontainer/ for VS Code's "Reopen in Container".
 ./dev scaffold
 
@@ -189,8 +195,12 @@ Three components, each with a distinct role:
   project history), but without the flag Claude's interactive onboarding/login
   wizard reappears in every fresh workspace despite valid copied credentials.
   The merge preserves any existing state and leaves a corrupt file untouched.
-  Refresh by re-running `add`; remove with `dev agent rm` or `dev reset`. See
-  README.md.
+  On macOS, Claude Code stores its OAuth token in the login Keychain (generic
+  password `Claude Code-credentials`) rather than `~/.claude/.credentials.json`,
+  so `_agent_resolve` falls back to reading the Keychain when that file is
+  absent and materializes the payload into the volume as `.credentials.json`
+  (byte-for-byte what Claude reads on Linux). Refresh by re-running `add`;
+  remove with `dev agent rm` or `dev reset`. See README.md.
 
 ## Firewall (security boundary)
 

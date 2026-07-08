@@ -34,6 +34,13 @@ fi
 #    volume (containers storage) comes up empty on first mount.
 mkdir -p "$DATA_DIR" "$CFG_DIR"
 chown -R vscode:vscode "$DATA_DIR" "$CFG_DIR"
+# `mkdir -p` above created the ~/.local and ~/.local/share parents as root
+# (this runs as root). Hand them back to vscode — non-recursively, so the
+# nested-engine storage subdir keeps its own ownership — so vscode-owned
+# tooling can create siblings there. Without this, `dev agent add opencode`
+# (which injects ~/.local/share/opencode into the home volume as vscode)
+# fails with "Cannot mkdir: Permission denied" on the root-owned parent.
+chown vscode:vscode /home/vscode/.local /home/vscode/.local/share
 
 # 3. storage.conf: rootless overlay via fuse-overlayfs.
 cat > "$CFG_DIR/storage.conf" <<EOF

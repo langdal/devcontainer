@@ -229,6 +229,7 @@ usage() {
 Usage: dev [OPTIONS] [-- COMMAND...]      # start/attach (default)
        dev fw {disable|enable|log|drops}
        dev agent {add|list|rm} [name...]
+       dev dotfile {add|rm} [--secret] <path>...
        dev reset
        dev scaffold [--dind] [--force]
        dev update [--dry-run]
@@ -288,10 +289,20 @@ SUBCOMMANDS:
                   workspace's home volume. One-way snapshot — never a host
                   mount, never baked into an image. Re-run to refresh.
                   --dry-run        Preview the file list without copying.
+                  --dind|--pind    Target a dind/pind container's storage
+                                   (required on macOS+podman).
   agent list      Show, per agent, whether it is present on the host and
                   whether it has been injected into this workspace.
   agent rm NAME   Remove an agent's injected files from this workspace's
                   home volume (confirms; DEV_ASSUME_YES=1 skips the prompt).
+  dotfile add PATH  Copy an arbitrary host file/dir into this workspace's home
+                  volume, mirroring its path under \$HOME (e.g. ~/.config/nvim).
+                  Symlinks are dereferenced. One-way snapshot, same as 'agent'.
+                  --secret         chmod 600 the copied paths (tokens/keys).
+                  --dind|--pind    Target a dind/pind container's storage
+                                   (auto-detected from a running container).
+  dotfile rm PATH   Remove a previously copied path from the home volume
+                  (confirms; DEV_ASSUME_YES=1 skips the prompt).
   reset           Remove the dev container(s) for the current workspace
                   (normal, dind, and maintenance variants if present)
                   and prompt individually for each existing named
@@ -460,7 +471,7 @@ _deprecated() { echo "Warning: '$1' is deprecated; use 'dev $2'." >&2; }
 
 subcmd=""
 case "${1:-}" in
-  fw|reset|scaffold|update|install|agent) subcmd="$1"; shift ;;
+  fw|reset|scaffold|update|install|agent|dotfile|dotfiles) subcmd="$1"; shift ;;
   --help)       usage; exit 0 ;;
   --version)    echo "dev $(resolve_dev_version)"; exit 0 ;;
   # Deprecated flag aliases -> subcommands. Note the ordering for the fw
@@ -504,6 +515,53 @@ _resolve_home_volume() {
     # shellcheck disable=SC2034  # consumed by start_container/reset_workspace/cleanup_for_rebuild in lib/dev/*.sh
     HOME_VOLUME="devcontainer-home-${WORKSPACE_BASENAME}"
   fi
+}
+
+# resolve_agent_storage <want_dind> <want_pind>: shared storage routing for the
+# `dev agent` and `dev dotfile` subcommands, both of which inject host files
+# into the workspace home volume via a helper container. Runs runtime detection
+# + workspace-name resolution, then selects IMAGE_TAG + RUNTIME_ARGS for the
+# target home-volume storage and sets HOST_UID. On macOS+podman, where a
+# dind/pind container's home volume lives in a *separate* rootful podman
+# connection, it auto-detects a running dind/pind container when neither flag
+# was given (an explicit flag always wins) and, when nothing is running, warns
+# if the workspace has rootful storage so files don't land where the container
+# can't see them. Elsewhere DIND_RUNTIME_ARGS is empty and the split is a no-op.
+resolve_agent_storage() {
+  local want_dind="$1" want_pind="$2"
+  detect_runtime
+  ensure_runtime_ready
+  _resolve_workspace_names
+  if [[ "$want_dind" != true && "$want_pind" != true && -n "$DIND_RUNTIME_ARGS" ]]; then
+    resolve_managed_container
+    case "$MANAGED_TARGET" in
+      dind) want_dind=true
+            echo "Detected running ${DIND_NAME}; targeting its (dind) storage." >&2 ;;
+      pind) want_pind=true
+            echo "Detected running ${PIND_NAME}; targeting its (pind) storage." >&2 ;;
+      *)    # Nothing dind/pind running: default to rootless storage. If this
+            # workspace nonetheless has a rootful home volume, it has been used
+            # in dind/pind mode — warn so files don't silently miss it.
+            # shellcheck disable=SC2086  # intentional word-splitting of DIND_RUNTIME_ARGS
+            if [[ -z "$MANAGED_TARGET" ]] \
+               && $RUNTIME $DIND_RUNTIME_ARGS volume inspect "$HOME_VOLUME" >/dev/null 2>&1; then
+              echo "Note: this workspace also has dind/pind storage (separate rootful connection)." >&2
+              echo "      For a 'dev --dind'/'--pind' container, re-run with the matching flag so" >&2
+              echo "      the files reach that container's home volume." >&2
+            fi ;;
+    esac
+  fi
+  # Select the image variant + runtime connection the target container uses.
+  # shellcheck disable=SC2034  # IMAGE_TAG/RUNTIME_ARGS consumed by lib/dev/{agent,dotfile}.sh helpers
+  if [[ "$want_dind" == true ]]; then
+    IMAGE_TAG="${IMAGE_NAME}:dind"; RUNTIME_ARGS="$DIND_RUNTIME_ARGS"
+  elif [[ "$want_pind" == true ]]; then
+    IMAGE_TAG="${IMAGE_NAME}:pind"; RUNTIME_ARGS="$DIND_RUNTIME_ARGS"
+  else
+    IMAGE_TAG="$IMAGE_NAME"
+  fi
+  # shellcheck disable=SC2034  # consumed by migrate_volume_for_keepid in lib/dev/lifecycle.sh
+  HOST_UID=$(id -u)
 }
 
 case "$subcmd" in
@@ -620,17 +678,74 @@ case "$subcmd" in
         exit 1
         ;;
     esac
-    detect_runtime
-    ensure_runtime_ready
-    _resolve_workspace_names
-    # shellcheck disable=SC2034  # IMAGE_TAG consumed by lib/dev/agent.sh helpers
-    IMAGE_TAG="$IMAGE_NAME"
-    # shellcheck disable=SC2034  # consumed by migrate_volume_for_keepid in lib/dev/lifecycle.sh
-    HOST_UID=$(id -u)
+    # --dind/--pind route the helper containers at the storage the target
+    # container actually uses. On macOS+podman the dind/pind container and its
+    # home volume live in a *separate* rootful podman connection; without this
+    # routing, `agent add` writes into the default rootless home volume that the
+    # dind/pind container never mounts (creds silently never appear inside).
+    # Extract the flags here so they apply uniformly to add/list/rm, then pass
+    # the remaining args (agent names, --dry-run) through untouched.
+    AGENT_DIND=false
+    AGENT_PIND=false
+    agent_args=()
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --dind) AGENT_DIND=true; shift ;;
+        --pind) AGENT_PIND=true; shift ;;
+        *) agent_args+=("$1"); shift ;;
+      esac
+    done
+    if [[ "$AGENT_DIND" == true && "$AGENT_PIND" == true ]]; then
+      echo "Error: dev agent: --dind and --pind are mutually exclusive." >&2
+      exit 1
+    fi
+    # The handlers validate their args before calling resolve_agent_storage
+    # themselves (and skip it entirely for `add --dry-run`, which needs no
+    # runtime), so bad input fails without the storage-detection hint. Pass the
+    # storage flags through for that deferred resolution.
+    set -- ${agent_args[@]+"${agent_args[@]}"}
     case "$agent_action" in
-      add)  _agent_add "$@" ;;
-      list) _agent_list "$@" ;;
-      rm)   _agent_rm "$@" ;;
+      add)  _agent_add  "$AGENT_DIND" "$AGENT_PIND" "$@" ;;
+      list) _agent_list "$AGENT_DIND" "$AGENT_PIND" "$@" ;;
+      rm)   _agent_rm   "$AGENT_DIND" "$AGENT_PIND" "$@" ;;
+    esac
+    exit 0
+    ;;
+  dotfile|dotfiles)
+    dotfile_action="${1:-}"
+    case "$dotfile_action" in
+      add|rm) shift ;;
+      ''|-h|--help|help) _dotfile_usage; exit 0 ;;
+      *)
+        echo "Error: dev dotfile: expected an action (add|rm), got '${dotfile_action:-<none>}'" >&2
+        echo "Run 'dev --help' for usage information" >&2
+        exit 1
+        ;;
+    esac
+    # Pull out --dind/--pind (storage routing, same semantics as `dev agent`)
+    # so they apply regardless of position; leave everything else (paths and
+    # add's --secret) for the action handler.
+    DOTFILE_DIND=false
+    DOTFILE_PIND=false
+    dotfile_args=()
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --dind) DOTFILE_DIND=true; shift ;;
+        --pind) DOTFILE_PIND=true; shift ;;
+        *) dotfile_args+=("$1"); shift ;;
+      esac
+    done
+    if [[ "$DOTFILE_DIND" == true && "$DOTFILE_PIND" == true ]]; then
+      echo "Error: dev dotfile: --dind and --pind are mutually exclusive." >&2
+      exit 1
+    fi
+    # The handlers validate their path args before calling resolve_agent_storage
+    # themselves, so a bad path fails without the storage-detection hint. Pass
+    # the storage flags through for that deferred resolution.
+    set -- ${dotfile_args[@]+"${dotfile_args[@]}"}
+    case "$dotfile_action" in
+      add) _dotfile_add "$DOTFILE_DIND" "$DOTFILE_PIND" "$@" ;;
+      rm)  _dotfile_rm  "$DOTFILE_DIND" "$DOTFILE_PIND" "$@" ;;
     esac
     exit 0
     ;;
