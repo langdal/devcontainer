@@ -2,6 +2,28 @@
 
 A portable, editor-agnostic dev environment. One Dockerfile, one bash wrapper, per-project tools via [`mise`](https://mise.jdx.dev/). No `devcontainer.json`, no `docker-compose`, no editor lock-in.
 
+## What you get
+
+- **A real dev container in one command.** Run `dev` from any project folder and you land in a shell with your code mounted at `/workspace`. No per-project config files to write or maintain.
+- **Per-project tool versions, no clutter.** Drop a `mise.toml` in your repo to pin node/go/python/etc. Tools install on start and cache in a shared volume — not in your home directory.
+- **A network firewall built for AI agents.** Outbound traffic is default-deny and filtered to a curated allowlist. The design goal: an agent working inside the container **can freely read and edit your files, but cannot send your code to arbitrary hosts.**
+- **State that stays isolated.** Shell history, git config, and dotfiles live in a per-project home volume, so one project's agent can't read another project's SSH keys or credentials.
+- **Escape hatches when you need them.** A maintenance mode (sudo, firewall off), nested Docker or Podman for testcontainers and builds, and scoped access to host services — each opt-in and clearly named.
+
+## How it stays safe
+
+The container runs as an unprivileged user (`vscode`) with **no sudo**. The kernel drops all outbound traffic except through a local proxy that only permits connections to allowlisted hostnames. Because the agent can't become root, it has no way to turn the firewall off from the inside. That's the whole security boundary — see [Firewall](#firewall) for specifics, or [`docs/architecture.html`](docs/architecture.html) for a picture.
+
+## How it works
+
+Three files, nothing hidden:
+
+- **`dev`** — the host-side wrapper you run. Builds the image, starts/reuses the container, mounts volumes, forwards ports, picks the mode.
+- **Dockerfile** — the image recipe. Ubuntu base + `mise` and a few baked-in tools; separate targets add nested Docker/Podman.
+- **entrypoint.sh** — runs on every start: brings up the firewall, installs project tools, then drops to your shell as `vscode`.
+
+Jump to [Architecture](#architecture) for the full diagram.
+
 ## Getting Started
 
 You need Docker (Linux) or Podman (macOS/Linux). See [Host requirements](#host-requirements).
