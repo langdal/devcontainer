@@ -414,6 +414,11 @@ Agents: claude, opencode, pi
 mount, never baked into an image). Re-run 'add' to refresh (tokens expire).
 Preview with 'dev agent add <name> --dry-run'. Remove with 'dev agent rm'
 or wipe the whole home volume with 'dev reset'.
+
+For a container started with 'dev --dind' or 'dev --pind', pass the matching
+--dind/--pind flag (e.g. 'dev agent add claude --pind'). On macOS+podman the
+dind/pind container uses a separate storage backend, and without the flag the
+credentials land in a home volume that container never mounts.
 EOF
 }
 

@@ -288,6 +288,8 @@ SUBCOMMANDS:
                   workspace's home volume. One-way snapshot — never a host
                   mount, never baked into an image. Re-run to refresh.
                   --dry-run        Preview the file list without copying.
+                  --dind|--pind    Target a dind/pind container's storage
+                                   (required on macOS+podman).
   agent list      Show, per agent, whether it is present on the host and
                   whether it has been injected into this workspace.
   agent rm NAME   Remove an agent's injected files from this workspace's
@@ -620,13 +622,44 @@ case "$subcmd" in
         exit 1
         ;;
     esac
+    # --dind/--pind route the helper containers at the storage the target
+    # container actually uses. On macOS+podman the dind/pind container and its
+    # home volume live in a *separate* rootful podman connection; without this
+    # routing, `agent add` writes into the default rootless home volume that the
+    # dind/pind container never mounts (creds silently never appear inside).
+    # Extract the flags here so they apply uniformly to add/list/rm, then pass
+    # the remaining args (agent names, --dry-run) through untouched.
+    AGENT_DIND=false
+    AGENT_PIND=false
+    agent_args=()
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --dind) AGENT_DIND=true; shift ;;
+        --pind) AGENT_PIND=true; shift ;;
+        *) agent_args+=("$1"); shift ;;
+      esac
+    done
+    if [[ "$AGENT_DIND" == true && "$AGENT_PIND" == true ]]; then
+      echo "Error: dev agent: --dind and --pind are mutually exclusive." >&2
+      exit 1
+    fi
     detect_runtime
     ensure_runtime_ready
     _resolve_workspace_names
-    # shellcheck disable=SC2034  # IMAGE_TAG consumed by lib/dev/agent.sh helpers
-    IMAGE_TAG="$IMAGE_NAME"
+    # Select the image variant + runtime connection the target container uses.
+    # _resolve_workspace_names has already set DIND_RUNTIME_ARGS for the
+    # macOS+podman rootful override (empty everywhere else).
+    # shellcheck disable=SC2034  # IMAGE_TAG/RUNTIME_ARGS consumed by lib/dev/agent.sh helpers
+    if [[ "$AGENT_DIND" == true ]]; then
+      IMAGE_TAG="${IMAGE_NAME}:dind"; RUNTIME_ARGS="$DIND_RUNTIME_ARGS"
+    elif [[ "$AGENT_PIND" == true ]]; then
+      IMAGE_TAG="${IMAGE_NAME}:pind"; RUNTIME_ARGS="$DIND_RUNTIME_ARGS"
+    else
+      IMAGE_TAG="$IMAGE_NAME"
+    fi
     # shellcheck disable=SC2034  # consumed by migrate_volume_for_keepid in lib/dev/lifecycle.sh
     HOST_UID=$(id -u)
+    set -- ${agent_args[@]+"${agent_args[@]}"}
     case "$agent_action" in
       add)  _agent_add "$@" ;;
       list) _agent_list "$@" ;;

@@ -242,11 +242,21 @@ dev agent add claude            # copy claude's creds+settings into this workspa
 dev agent add claude opencode   # several at once
 dev agent add all               # every agent detected on the host
 dev agent add claude --dry-run  # preview the exact file list, copy nothing
+dev agent add claude --pind     # target a --pind container's storage (also --dind)
 dev agent list                  # per-agent: present on host? injected here?
 dev agent rm claude             # remove claude's injected files (confirms)
 ```
 
 Supported agents: `claude`, `opencode`, `pi`.
+
+**Match the flag to the container you run.** If you start the container with
+`dev --dind` or `dev --pind`, pass the same flag to `dev agent`
+(`dev agent add claude --pind`). On macOS+podman the dind/pind container lives
+in a separate rootful podman connection with its **own** home volume; without
+the flag `dev agent` writes into the default rootless volume that the dind/pind
+container never mounts, so the credentials silently never appear inside. The
+flag also applies to `list`/`rm` (`dev agent list --pind`). On Linux and Docker
+there is a single storage backend, so the flag is a harmless no-op there.
 
 **It is a one-way snapshot, not a mount.** Files are *copied* into the
 per-workspace home volume (`devcontainer-home-<dir>`). The host's live
