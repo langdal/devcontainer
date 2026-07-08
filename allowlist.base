@@ -43,6 +43,7 @@ deb.debian.org
 security.debian.org
 archive.ubuntu.com
 security.ubuntu.com
+ports.ubuntu.com   # arm64/aarch64 Ubuntu mirror (Apple Silicon, etc.)
 
 # Docker static binaries (used by the :dind image build)
 download.docker.com
