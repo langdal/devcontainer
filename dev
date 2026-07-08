@@ -646,6 +646,31 @@ case "$subcmd" in
     detect_runtime
     ensure_runtime_ready
     _resolve_workspace_names
+    # Auto-route on macOS+podman, where dind/pind storage is a separate rootful
+    # connection. If the user didn't pass --dind/--pind but a dind/pind
+    # container for this workspace is running, target its storage so creds land
+    # where that container reads them. Explicit flags always win. Elsewhere
+    # (Linux/Docker, single backend) DIND_RUNTIME_ARGS is empty and this whole
+    # block is a no-op.
+    if [[ "$AGENT_DIND" != true && "$AGENT_PIND" != true && -n "$DIND_RUNTIME_ARGS" ]]; then
+      resolve_managed_container
+      case "$MANAGED_TARGET" in
+        dind) AGENT_DIND=true
+              echo "Detected running ${DIND_NAME}; targeting its (dind) storage." >&2 ;;
+        pind) AGENT_PIND=true
+              echo "Detected running ${PIND_NAME}; targeting its (pind) storage." >&2 ;;
+        *)    # Nothing dind/pind running: default to rootless storage. If this
+              # workspace nonetheless has a rootful home volume, it has been
+              # used in dind/pind mode — warn so creds don't silently miss it.
+              # shellcheck disable=SC2086  # intentional word-splitting of DIND_RUNTIME_ARGS
+              if [[ -z "$MANAGED_TARGET" ]] \
+                 && $RUNTIME $DIND_RUNTIME_ARGS volume inspect "$HOME_VOLUME" >/dev/null 2>&1; then
+                echo "Note: this workspace also has dind/pind storage (separate rootful connection)." >&2
+                echo "      For a 'dev --dind'/'--pind' container, re-run with the matching flag so" >&2
+                echo "      credentials reach that container's home volume." >&2
+              fi ;;
+      esac
+    fi
     # Select the image variant + runtime connection the target container uses.
     # _resolve_workspace_names has already set DIND_RUNTIME_ARGS for the
     # macOS+podman rootful override (empty everywhere else).
