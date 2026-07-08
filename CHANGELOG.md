@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.1](https://github.com/langdal/devcontainer/compare/v1.6.0...v1.6.1) (2026-07-08)
+
+
+### Bug Fixes
+
+* **agent:** skip initialization of claude ([246b13f](https://github.com/langdal/devcontainer/commit/246b13f26eeed010e3bb9c173c4478786c06e585))
+* **agent:** skip initialization of claude ([88bcf47](https://github.com/langdal/devcontainer/commit/88bcf47f6a948c2b1fbfd430a42f206d6db68d55))
+
 ## [1.6.0](https://github.com/langdal/devcontainer/compare/v1.5.1...v1.6.0) (2026-07-07)
 
 
