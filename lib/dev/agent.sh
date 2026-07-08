@@ -328,9 +328,13 @@ _agent_volume_present_dests() {
     'cd /home/vscode && while IFS= read -r p; do [ -e "$p" ] && printf "%s\n" "$p"; done; :'
 }
 
-# _agent_list: per-agent table of host-present? / injected-here?
+# _agent_list <want_dind> <want_pind>: per-agent table of host-present? /
+# injected-here? Resolves storage after the arg check (needs runtime to probe
+# the volume).
 _agent_list() {
+  local want_dind="$1" want_pind="$2"; shift 2
   [[ $# -eq 0 ]] || { echo "Error: dev agent list takes no arguments: $*" >&2; exit 1; }
+  resolve_agent_storage "$want_dind" "$want_pind"
 
   # One helper call to learn which manifest dests currently exist in the volume.
   local present=""
@@ -356,8 +360,11 @@ _agent_list() {
   done
 }
 
-# _agent_rm <name>... | all: delete an agent's injected files from the volume.
+# _agent_rm <want_dind> <want_pind> <name>... | all: delete an agent's injected
+# files from the volume. Validates names before resolving storage, so an unknown
+# name fails without the storage auto-detection hint.
 _agent_rm() {
+  local want_dind="$1" want_pind="$2"; shift 2
   local -a raw=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -371,6 +378,19 @@ _agent_rm() {
     exit 1
   }
 
+  local -a targets=()
+  local line expanded
+  # Capture via command substitution (not process substitution): _agent_expand
+  # calls `exit` on an unknown name, and that exit code only propagates
+  # through $? of a command substitution, not through a `< <(...)` pipeline.
+  expanded="$(_agent_expand known "${raw[@]}")" || exit 1
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && targets+=("$line")
+  done <<< "$expanded"
+
+  # Args are valid — resolve storage (may print a hint), then remove.
+  resolve_agent_storage "$want_dind" "$want_pind"
+
   if ! _agent_volume_exists; then
     echo "No home volume (${HOME_VOLUME}) for this workspace — nothing to remove."
     return 0
@@ -381,16 +401,6 @@ _agent_rm() {
   # removal helper's vscode can traverse and delete under /home/vscode.
   local -a keepid_args=()
   [[ "$(_agent_keepid)" == true ]] && keepid_args=(--userns=keep-id)
-
-  local -a targets=()
-  local line expanded
-  # Capture via command substitution (not process substitution): _agent_expand
-  # calls `exit` on an unknown name, and that exit code only propagates
-  # through $? of a command substitution, not through a `< <(...)` pipeline.
-  expanded="$(_agent_expand known "${raw[@]}")" || exit 1
-  while IFS= read -r line; do
-    [[ -n "$line" ]] && targets+=("$line")
-  done <<< "$expanded"
 
   local name dest reply
   local -a dests
@@ -442,8 +452,13 @@ credentials land in a home volume that container never mounts.
 EOF
 }
 
-# _agent_add [--dry-run] <name>... | all
+# _agent_add <want_dind> <want_pind> [--dry-run] <name>... | all
+# want_dind/want_pind are the storage flags parsed by the dispatch; they are
+# forwarded to resolve_agent_storage only AFTER argument validation, so bad
+# input fails cleanly without the storage auto-detection hint. --dry-run
+# previews host files only and never resolves storage (needs no runtime).
 _agent_add() {
+  local want_dind="$1" want_pind="$2"; shift 2
   local dry=false
   local -a raw=()
   while [[ $# -gt 0 ]]; do
@@ -470,9 +485,11 @@ _agent_add() {
   done <<< "$expanded"
   [[ ${#targets[@]} -gt 0 ]] || { echo "No matching agents found on host."; return 0; }
 
-  local name src dest kind mode resolved
-  for name in "${targets[@]}"; do
-    if [[ "$dry" == true ]]; then
+  # Dry-run previews host files only — no runtime/storage needed, so return
+  # before resolving storage (which would otherwise print the auto-detect hint).
+  if [[ "$dry" == true ]]; then
+    local name src dest kind mode resolved
+    for name in "${targets[@]}"; do
       resolved="$(_agent_resolve "$name")"
       if [[ -z "$resolved" ]]; then
         echo "  ${name}: no source files found on host."
@@ -489,13 +506,16 @@ _agent_add() {
       if [[ "$name" == claude ]]; then
         echo "  ${name}: would set hasCompletedOnboarding in ~/.claude.json (skips login wizard)"
       fi
-    else
-      _agent_copy_into_volume "$name"
-    fi
-  done
-
-  if [[ "$dry" == false ]]; then
-    echo "Done. Injected into ${HOME_VOLUME}. Re-run 'dev agent add' to refresh;"
-    echo "'dev agent rm' or 'dev reset' to remove."
+    done
+    return 0
   fi
+
+  # Args are valid — resolve the target storage (may print a hint) and inject.
+  resolve_agent_storage "$want_dind" "$want_pind"
+  local name
+  for name in "${targets[@]}"; do
+    _agent_copy_into_volume "$name"
+  done
+  echo "Done. Injected into ${HOME_VOLUME}. Re-run 'dev agent add' to refresh;"
+  echo "'dev agent rm' or 'dev reset' to remove."
 }

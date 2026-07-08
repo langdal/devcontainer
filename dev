@@ -699,12 +699,15 @@ case "$subcmd" in
       echo "Error: dev agent: --dind and --pind are mutually exclusive." >&2
       exit 1
     fi
-    resolve_agent_storage "$AGENT_DIND" "$AGENT_PIND"
+    # The handlers validate their args before calling resolve_agent_storage
+    # themselves (and skip it entirely for `add --dry-run`, which needs no
+    # runtime), so bad input fails without the storage-detection hint. Pass the
+    # storage flags through for that deferred resolution.
     set -- ${agent_args[@]+"${agent_args[@]}"}
     case "$agent_action" in
-      add)  _agent_add "$@" ;;
-      list) _agent_list "$@" ;;
-      rm)   _agent_rm "$@" ;;
+      add)  _agent_add  "$AGENT_DIND" "$AGENT_PIND" "$@" ;;
+      list) _agent_list "$AGENT_DIND" "$AGENT_PIND" "$@" ;;
+      rm)   _agent_rm   "$AGENT_DIND" "$AGENT_PIND" "$@" ;;
     esac
     exit 0
     ;;
