@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.2](https://github.com/langdal/devcontainer/compare/v1.6.1...v1.6.2) (2026-07-08)
+
+
+### Bug Fixes
+
+* **pind:** add amd to allow list ([d289fec](https://github.com/langdal/devcontainer/commit/d289fecae2ab1dee1552a2478ec258b9309252c6))
+* **pind:** add amd to allow list ([9c8bc08](https://github.com/langdal/devcontainer/commit/9c8bc0897a41faf82d1666dd1fa5847027426dc6))
+
 ## [1.6.1](https://github.com/langdal/devcontainer/compare/v1.6.0...v1.6.1) (2026-07-08)
 
 
