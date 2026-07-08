@@ -78,10 +78,18 @@ else
     log_fail "dry-run missing commands/: $dry"
 fi
 
-if echo "$dry" | grep -Eq "\.claude\.json|projects|history\.jsonl"; then
-    log_fail "dry-run leaked an excluded path: $dry"
+if echo "$dry" | grep -Eq "projects|history\.jsonl"; then
+    log_fail "dry-run leaked an excluded host path: $dry"
 else
-    log_pass "dry-run excludes .claude.json / projects/ / history.jsonl"
+    log_pass "dry-run excludes projects/ / history.jsonl"
+fi
+
+# The onboarding flag is synthesized (only hasCompletedOnboarding), never
+# copied from the host's ~/.claude.json — the dry-run should announce it.
+if echo "$dry" | grep -q "hasCompletedOnboarding"; then
+    log_pass "dry-run announces the ~/.claude.json onboarding flag"
+else
+    log_fail "dry-run did not mention the onboarding flag: $dry"
 fi
 
 # ---------- real copy into the home volume (needs runtime + base image) ----------
@@ -153,11 +161,33 @@ else
     log_fail "symlinked skill not dereferenced (missing or still a symlink)"
 fi
 
-# Exclusions never made it in.
-if vol_has ".claude.json" || vol_has ".claude/projects" || vol_has ".claude/history.jsonl"; then
-    log_fail "an excluded path leaked into the volume"
+# Host-side project/history state must still never leak into the volume.
+if vol_has ".claude/projects" || vol_has ".claude/history.jsonl"; then
+    log_fail "an excluded host path leaked into the volume"
 else
-    log_pass "excluded paths absent from the volume"
+    log_pass "excluded host paths absent from the volume"
+fi
+
+# ~/.claude.json is synthesized in the volume with ONLY the onboarding flag so
+# Claude Code skips its login wizard in a fresh workspace. It must exist, be
+# valid JSON with hasCompletedOnboarding=true, and must NOT carry the host
+# file's content (the host had a bare "x" that must never be copied).
+if vol_has ".claude.json"; then
+    log_pass "onboarding file ~/.claude.json created in the volume"
+else
+    log_fail "onboarding file ~/.claude.json missing from the volume (login wizard would reappear)"
+fi
+onboard="$("$RUNTIME" run --rm -u vscode -v "$VOL":/home/vscode --entrypoint sh \
+    generic-devcontainer -c 'cat /home/vscode/.claude.json 2>/dev/null')"
+if echo "$onboard" | grep -q '"hasCompletedOnboarding": true'; then
+    log_pass "onboarding file has hasCompletedOnboarding=true"
+else
+    log_fail "onboarding file missing hasCompletedOnboarding=true: $onboard"
+fi
+if echo "$onboard" | grep -qx "x"; then
+    log_fail "host ~/.claude.json content leaked into the volume: $onboard"
+else
+    log_pass "synthesized ~/.claude.json does not carry host content"
 fi
 
 # ---------- list ----------

@@ -203,7 +203,59 @@ _agent_copy_into_volume() {
         --entrypoint sh "$IMAGE_TAG" -c "$remote" \
     || rc=$?
   rm -rf "$staging"
+
+  # Claude gates its interactive onboarding wizard (theme picker + "Select
+  # login method") on hasCompletedOnboarding in ~/.claude.json — a top-level
+  # file that lives *outside* ~/.claude/ and is never in the manifest (it also
+  # holds cross-workspace project history we deliberately exclude). Copying
+  # only .credentials.json authenticates the API but leaves that flag unset,
+  # so the login prompt reappears in every fresh workspace. Set the one flag.
+  if [[ "$rc" -eq 0 && "$name" == claude ]]; then
+    # shellcheck disable=SC2086  # forward keepid_args verbatim (empty -> no arg)
+    _agent_mark_claude_onboarded ${keepid_args[@]+"${keepid_args[@]}"} || rc=$?
+  fi
   return $rc
+}
+
+# _agent_mark_claude_onboarded [keepid-arg...]: ensure ~/.claude.json in the
+# workspace home volume has hasCompletedOnboarding=true so Claude Code's
+# interactive onboarding/login wizard does not run. Merges into an existing
+# file (never clobbers accumulated state), creates a minimal one if absent,
+# and leaves a corrupt / non-object file untouched. Runs node (baked on the
+# image PATH via /mise/shims) in a short-lived helper under the same
+# --userns=keep-id mapping the volume was written with. Args are the caller's
+# keepid_args, forwarded verbatim.
+_agent_mark_claude_onboarded() {
+  local js='
+const fs = require("fs");
+const p = "/home/vscode/.claude.json";
+let d = {};
+if (fs.existsSync(p)) {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(p, "utf8"));
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      d = parsed;
+    } else {
+      console.error("  claude: ~/.claude.json is not a JSON object; left as-is");
+      process.exit(0);
+    }
+  } catch (e) {
+    console.error("  claude: ~/.claude.json is not valid JSON; left as-is");
+    process.exit(0);
+  }
+}
+if (d.hasCompletedOnboarding !== true) {
+  d.hasCompletedOnboarding = true;
+  fs.writeFileSync(p, JSON.stringify(d, null, 2) + "\n");
+  fs.chmodSync(p, 0o600);
+  console.log("  claude: + ~/.claude.json (hasCompletedOnboarding — skips login wizard)");
+}
+'
+  # shellcheck disable=SC2086  # intentional word-splitting of RUNTIME_ARGS
+  printf '%s' "$js" | $RUNTIME $RUNTIME_ARGS run --rm -i \
+    "$@" -u vscode \
+    -v "$HOME_VOLUME":/home/vscode \
+    --entrypoint sh "$IMAGE_TAG" -c 'node'
 }
 
 # _agent_volume_exists: 0 if the workspace home volume exists.
@@ -398,6 +450,9 @@ _agent_add() {
           echo "  ${name}: would copy ${dest}"
         fi
       done <<< "$resolved"
+      if [[ "$name" == claude ]]; then
+        echo "  ${name}: would set hasCompletedOnboarding in ~/.claude.json (skips login wizard)"
+      fi
     else
       _agent_copy_into_volume "$name"
     fi
