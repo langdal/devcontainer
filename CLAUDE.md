@@ -64,6 +64,12 @@ docker build -t generic-devcontainer .
 ./dev agent list
 ./dev agent rm claude
 
+# Inject an arbitrary dotfile/dir into this workspace's home volume, mirroring
+# its path under $HOME (symlinks dereferenced). Generic counterpart to `agent`;
+# same one-way-snapshot + dind/pind storage routing. --secret forces mode 0600.
+./dev dotfile add ~/.config/nvim
+./dev dotfile rm ~/.config/nvim
+
 # Scaffold a self-contained .devcontainer/ for VS Code's "Reopen in Container".
 ./dev scaffold
 

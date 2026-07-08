@@ -130,43 +130,43 @@ _agent_require_image() {
   fi
 }
 
-# _agent_copy_into_volume <name>: stage the resolved sources into a temp dir
-# (dereferencing symlinks) and extract them into the workspace home volume
-# through a short-lived helper container running as vscode with the same
-# --userns=keep-id args the real container uses, so ownership is correct on
-# Docker, rootful podman, and rootless podman alike.
-_agent_copy_into_volume() {
-  local name="$1" resolved
+# _stage_and_extract <label_prefix>: read TSV lines (SRC_ABS \t DEST_REL \t
+# MODE) on stdin, stage them into a temp dir (dereferencing symlinks, so links
+# pointing outside the copied tree become real files), then extract them into
+# the workspace home volume through a short-lived helper container running as
+# vscode with the same --userns=keep-id args the real container uses — so
+# ownership is correct on Docker, rootful podman, and rootless podman alike.
+# MODE "0600" tightens that dest to 600 after extraction (secrets); any other
+# value preserves the staged perms. Prints "<prefix>+ <dest>" per copied entry
+# (and warnings on broken symlinks). Returns the helper's exit code. Shared by
+# `dev agent add` (via _agent_copy_into_volume) and `dev dotfile add`.
+_stage_and_extract() {
+  local prefix="$1"
   _agent_require_image
-  resolved="$(_agent_resolve "$name")"
-  if [[ -z "$resolved" ]]; then
-    echo "  ${name}: no source files found on host — nothing to copy." >&2
-    return 0
-  fi
 
   local staging
   staging="$(mktemp -d)"
   local -a secret_dests=()
-  local src dest kind mode
-  while IFS=$'\t' read -r src dest kind mode; do
+  local src dest mode
+  while IFS=$'\t' read -r src dest mode; do
     [[ -n "$src" ]] || continue
     mkdir -p "$staging/$(dirname "$dest")"
-    if [[ "$kind" == dir ]]; then
+    if [[ -d "$src" ]]; then
       mkdir -p "$staging/$dest"
       # -R recurse, -L dereference: links pointing outside the copied tree
       # become real files. Broken links make cp non-zero; warn, don't abort.
       if ! cp -RL "$src/." "$staging/$dest/" 2>/dev/null; then
-        echo "  ${name}: warning: some entries under ${dest} were skipped (broken symlinks?)" >&2
+        echo "${prefix}warning: some entries under ${dest} were skipped (broken symlinks?)" >&2
       fi
     else
       if ! cp -L "$src" "$staging/$dest" 2>/dev/null; then
-        echo "  ${name}: warning: skipped ${dest} (broken symlink?)" >&2
+        echo "${prefix}warning: skipped ${dest} (broken symlink?)" >&2
         continue
       fi
     fi
-    echo "  ${name}: + ${dest}"
+    echo "${prefix}+ ${dest}"
     [[ "$mode" == 0600 ]] && secret_dests+=("$dest")
-  done <<< "$resolved"
+  done
 
   # Ensure the volume exists; under keep-id also make sure it is owned by the
   # host user before we write (reuses lifecycle.sh's one-time migration).
@@ -214,6 +214,24 @@ _agent_copy_into_volume() {
         --entrypoint sh "$IMAGE_TAG" -c "$remote" \
     || rc=$?
   rm -rf "$staging"
+  return $rc
+}
+
+# _agent_copy_into_volume <name>: resolve an agent's manifest to existing host
+# sources and inject them into the workspace home volume via _stage_and_extract,
+# then apply the claude-only onboarding-flag follow-up.
+_agent_copy_into_volume() {
+  local name="$1" resolved
+  resolved="$(_agent_resolve "$name")"
+  if [[ -z "$resolved" ]]; then
+    echo "  ${name}: no source files found on host — nothing to copy." >&2
+    return 0
+  fi
+
+  local rc=0
+  # _agent_resolve emits SRC_ABS \t DEST_REL \t KIND \t MODE; _stage_and_extract
+  # takes SRC_ABS \t DEST_REL \t MODE (it detects dir vs file itself). Drop KIND.
+  cut -f1,2,4 <<< "$resolved" | _stage_and_extract "  ${name}: " || rc=$?
 
   # Claude gates its interactive onboarding wizard (theme picker + "Select
   # login method") on hasCompletedOnboarding in ~/.claude.json — a top-level
@@ -222,6 +240,8 @@ _agent_copy_into_volume() {
   # only .credentials.json authenticates the API but leaves that flag unset,
   # so the login prompt reappears in every fresh workspace. Set the one flag.
   if [[ "$rc" -eq 0 && "$name" == claude ]]; then
+    local -a keepid_args=()
+    [[ "$(_agent_keepid)" == true ]] && keepid_args=(--userns=keep-id)
     # shellcheck disable=SC2086  # forward keepid_args verbatim (empty -> no arg)
     _agent_mark_claude_onboarded ${keepid_args[@]+"${keepid_args[@]}"} || rc=$?
   fi

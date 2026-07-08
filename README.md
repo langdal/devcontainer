@@ -304,6 +304,32 @@ means the container itself inside the sandbox. Start with
 `dev --host-port PORT` and edit the in-volume config to use
 `host.docker.internal:PORT` instead.
 
+## Injecting dotfiles
+
+`dev dotfile` is the generic counterpart to `dev agent`: it copies an
+**arbitrary** host file or directory into this workspace's home volume,
+mirroring its path relative to `$HOME`.
+
+```bash
+dev dotfile add ~/.config/nvim          # -> ~/.config/nvim in the container
+dev dotfile add ~/.tmux.conf ~/.gitconfig   # several at once
+dev dotfile add ~/.config/gh --secret   # chmod 600 the copied paths
+dev dotfile rm  ~/.config/nvim          # remove it again (confirms)
+```
+
+Same mechanics as agent injection: a **one-way snapshot** into the
+per-workspace home volume (`devcontainer-home-<dir>`) — never a host mount,
+never baked into an image. Re-run `add` to refresh. **Symlinks are
+dereferenced** — a linked config dir is copied as real files, so the container
+never depends on a host path. The source path must live under `$HOME` (the
+dest is computed relative to it); paths elsewhere, or ones resolving to unsafe
+locations, are rejected. `--secret` forces the copied paths to mode `0600`.
+
+Storage routing matches `dev agent` exactly: on macOS+podman a running
+`dev --dind`/`--pind` container's storage is auto-detected, and `--dind`/`--pind`
+target it explicitly. Remove with `dev dotfile rm <path>` or wipe the whole
+home volume with `dev reset`.
+
 ## Host Requirements
 
 - **Linux**: `docker` or `podman`. Docker is preferred when both are installed. Override with `DEV_RUNTIME=docker` or `DEV_RUNTIME=podman`.
