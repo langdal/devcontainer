@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.7.0](https://github.com/langdal/devcontainer/compare/v1.6.2...v1.7.0) (2026-07-08)
+
+
+### Features
+
+* **agent:** auto-detect running dind/pind container's storage ([ee7affe](https://github.com/langdal/devcontainer/commit/ee7affe5f2c2fbde35ced0f40df56b719d57a55c))
+* **dotfile:** add `dev dotfile add/rm` for arbitrary host files ([5056400](https://github.com/langdal/devcontainer/commit/5056400eab26b039b1b236d47656b88152113234))
+
+
+### Bug Fixes
+
+* **agent:** read Claude credentials from macOS Keychain when file absent ([a7b73e1](https://github.com/langdal/devcontainer/commit/a7b73e1a9453463e6035e74b207c52e05f67e48b))
+* **agent:** route dev agent at dind/pind storage ([5b44659](https://github.com/langdal/devcontainer/commit/5b44659b08f1810a7b6dca0efc32075d13303a58))
+* **agent:** strip macOS xattrs when taring host creds ([2ccd731](https://github.com/langdal/devcontainer/commit/2ccd7317ca18a7aef674683cbd8a3149bab7e4e5))
+* **agent:** validate args before resolving storage ([0f5303a](https://github.com/langdal/devcontainer/commit/0f5303acb186d638506300fd939dbfd5ff229b5b))
+* **dind,pind:** chown ~/.local/share to vscode so agent injection can write ([6c54fe3](https://github.com/langdal/devcontainer/commit/6c54fe341e6f30258b95107c1ade70a0d9d7255c))
+* **reset:** clean rootful dind/pind home+mise volumes on macOS+podman ([9d8a4dd](https://github.com/langdal/devcontainer/commit/9d8a4dd65319b951df20077a35dfdac6bf19449a))
+
 ## [1.6.2](https://github.com/langdal/devcontainer/compare/v1.6.1...v1.6.2) (2026-07-08)
 
 
