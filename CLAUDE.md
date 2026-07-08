@@ -182,8 +182,15 @@ Three components, each with a distinct role:
   isolation. Secret files are forced to `0600`. Copy runs through a
   short-lived helper container executing `tar -x` as `vscode` under the same
   `--userns=keep-id` mapping as the real container, so ownership is correct
-  across Docker, rootful podman, and rootless podman. Refresh by re-running
-  `add`; remove with `dev agent rm` or `dev reset`. See README.md.
+  across Docker, rootful podman, and rootless podman. For `claude`
+  specifically, a follow-up helper (node, baked on the image PATH) merges a
+  single `hasCompletedOnboarding: true` flag into the volume's `~/.claude.json`
+  — that top-level file is never copied wholesale (it holds cross-workspace
+  project history), but without the flag Claude's interactive onboarding/login
+  wizard reappears in every fresh workspace despite valid copied credentials.
+  The merge preserves any existing state and leaves a corrupt file untouched.
+  Refresh by re-running `add`; remove with `dev agent rm` or `dev reset`. See
+  README.md.
 
 ## Firewall (security boundary)
 

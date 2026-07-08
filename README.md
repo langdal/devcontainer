@@ -262,6 +262,18 @@ machinery — so injecting an agent does not drag one project's history into
 another's sandbox. Files holding secrets (auth tokens, and any config with
 inline provider API keys) are forced to mode `0600` in the volume.
 
+**Claude onboarding:** Claude Code's account/onboarding state lives in
+`~/.claude.json` (a top-level file, *outside* `~/.claude/`) that also holds
+cross-workspace project history, so it is never copied. Copying only the
+credential file authenticates the API but leaves Claude's interactive
+onboarding wizard (theme picker → *Select login method*) to reappear in every
+fresh workspace. To avoid that, `dev agent add claude` synthesizes a single
+`hasCompletedOnboarding: true` flag into the volume's `~/.claude.json` —
+merged into any existing file, never overwriting accumulated state. Claude
+re-derives your account identity from the copied token on first run. (The
+one-time "trust this folder" prompt is a separate per-workspace safety check
+and is left intact.)
+
 Copying **dereferences symlinks** found inside those customization dirs (a
 broken link is skipped with a warning, not fatal) — keep dirs like
 `.claude/skills/` free of links to sensitive host files, since those would
