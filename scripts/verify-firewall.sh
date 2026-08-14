@@ -2,8 +2,8 @@
 # scripts/verify-firewall.sh
 #
 # Run inside the dev container to probe firewall posture.
-# In normal mode: all 7 checks should pass.
-# In maintenance mode: checks 1, 3, 4, 6, 7 are skipped; 2 and 5 should pass.
+# In normal mode: posture checks 1-7 and 13 should pass.
+# In maintenance mode: checks 1, 3, 4, 6, 7, 13 are skipped; 2 and 5 should pass.
 set -u
 
 PASS=0; FAIL=0; SKIP=0
@@ -54,6 +54,16 @@ sudo_blocked() {
 }
 iptables_flush_blocked() {
     ! sudo -n iptables -F 2>/dev/null
+}
+ipv6_direct_blocked() {
+    # A runtime that gives the container a global v6 route (podman 5's pasta)
+    # would otherwise expose an unfiltered egress path: iptables only covers
+    # IPv4. firewall-init.sh mirrors the DROP policy in ip6tables; this probes
+    # it with a literal v6 address (DNS is no help: the entrypoint sets
+    # no-aaaa) against Cloudflare's well-known resolver IP. -k because the
+    # cert won't match the bare IP — TLS completing at all means egress leaked.
+    # Vacuously passes on hosts with no v6 route at all (connect fails either way).
+    ! curl -g -6 -ksS -o /dev/null -m 5 --noproxy '*' 'https://[2606:4700:4700::1111]/' 2>/dev/null
 }
 
 # Nested-runtime-aware helpers (used only when DEVCONTAINER_DIND or
@@ -146,6 +156,7 @@ SKIP_IN_MAINT=1 run_check "4. raw socket bypass blocked"         raw_socket_bloc
                 run_check "5. DNS works"                         dns_works
 SKIP_IN_MAINT=1 run_check "6. sudo blocked"                      sudo_blocked
 SKIP_IN_MAINT=1 run_check "7. iptables flush blocked"            iptables_flush_blocked
+SKIP_IN_MAINT=1 run_check "13. direct IPv6 bypass blocked"       ipv6_direct_blocked
 
 SKIP_UNLESS_NESTED=1 run_check "8. nested engine reachable"         dockerd_reachable
 SKIP_UNLESS_NESTED=1 run_check "9. nested engine rootless"          dockerd_rootless

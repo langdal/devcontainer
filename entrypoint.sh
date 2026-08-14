@@ -1,16 +1,22 @@
 #!/bin/bash
 set -u
 
-# --- Suppress AAAA lookups when the container has no IPv6 connectivity ---
-# Docker's default bridge is IPv4-only, so AAAA results can't be used anyway.
-# Some upstream resolvers (typical home routers, also systemd-resolved when it
-# forwards to one) silently drop AAAA queries, which makes glibc's parallel
-# A+AAAA getaddrinfo() intermittently return EAI_AGAIN. Tinyproxy surfaces
-# this as "Temporary failure in name resolution" for the majority of requests.
-# `getent`-style callers escape this via AI_ADDRCONFIG; tinyproxy and many
-# others do not. The fix is identical to what AI_ADDRCONFIG would do: skip
-# AAAA when there's no IPv6 default route.
-if [ -z "$(ip -6 route show default 2>/dev/null)" ] \
+# --- Suppress AAAA lookups ---
+# Two reasons, either sufficient:
+# 1. Firewalled mode: firewall-init.sh default-DROPs IPv6 OUTPUT, so AAAA
+#    results are unusable for direct clients — and worse, actively harmful
+#    for tinyproxy: a runtime that installs a v6 default route (podman 5's
+#    pasta) makes getaddrinfo return AAAA first, and tinyproxy then hangs
+#    ~20s per request trying unreachable v6 upstreams before any fallback.
+# 2. No v6 default route (docker's default bridge): AAAA can't be used, and
+#    some upstream resolvers (home routers, systemd-resolved forwarding to
+#    one) silently drop AAAA queries, making glibc's parallel A+AAAA
+#    getaddrinfo() intermittently return EAI_AGAIN ("Temporary failure in
+#    name resolution" from tinyproxy). `getent`-style callers escape via
+#    AI_ADDRCONFIG; tinyproxy and many others do not.
+# Net: always skip AAAA except in maintenance mode on a host with a real v6
+# route (the one case where v6 may genuinely work end-to-end).
+if { [ -z "${DEVCONTAINER_MAINTENANCE:-}" ] || [ -z "$(ip -6 route show default 2>/dev/null)" ]; } \
    && [ -w /etc/resolv.conf ] \
    && ! grep -qE '^options[^#]*\bno-aaaa\b' /etc/resolv.conf; then
     echo 'options no-aaaa' >> /etc/resolv.conf
@@ -138,6 +144,47 @@ if [[ -f /workspace/mise.toml ]] || [[ -f /workspace/.mise.toml ]]; then
             echo "         on the host: run 'dev' interactively and accept the prompt (or set" >&2
             echo "         DEV_ASSUME_YES=1), then restart the container so mise install retries." >&2
         fi
+    fi
+fi
+
+# Seed Maven/Gradle proxy config. JVM tools ignore HTTP(S)_PROXY env vars, so
+# without these files their downloads bypass tinyproxy, the kernel silently
+# drops the packets, and the user sees "could not be resolved" with no network
+# hint. Seed-only: never overwrite a file the user already customised (same
+# contract as the git identity seeding below).
+if [ -n "${HTTPS_PROXY:-}" ]; then
+    if [ ! -f /home/vscode/.m2/settings.xml ]; then
+        mkdir -p /home/vscode/.m2
+        cat > /home/vscode/.m2/settings.xml <<'M2EOF'
+<!-- Seeded by the devcontainer entrypoint: JVM tools do not honour the
+     HTTPS_PROXY env var, so Maven needs the firewall proxy configured here.
+     Safe to edit; the entrypoint never overwrites an existing file. -->
+<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0">
+  <proxies>
+    <proxy>
+      <id>devcontainer-firewall</id>
+      <active>true</active>
+      <protocol>http</protocol>
+      <host>127.0.0.1</host>
+      <port>8888</port>
+      <nonProxyHosts>localhost|127.0.0.1|host.docker.internal</nonProxyHosts>
+    </proxy>
+  </proxies>
+</settings>
+M2EOF
+    fi
+    if [ ! -f /home/vscode/.gradle/gradle.properties ]; then
+        mkdir -p /home/vscode/.gradle
+        cat > /home/vscode/.gradle/gradle.properties <<'GRADLEEOF'
+# Seeded by the devcontainer entrypoint: JVM tools do not honour the
+# HTTPS_PROXY env var, so Gradle needs the firewall proxy configured here.
+# Safe to edit; the entrypoint never overwrites an existing file.
+systemProp.http.proxyHost=127.0.0.1
+systemProp.http.proxyPort=8888
+systemProp.https.proxyHost=127.0.0.1
+systemProp.https.proxyPort=8888
+systemProp.http.nonProxyHosts=localhost|127.0.0.1|host.docker.internal
+GRADLEEOF
     fi
 fi
 

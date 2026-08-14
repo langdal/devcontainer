@@ -81,10 +81,12 @@ if tinyproxy_listening; then
     if [ -f /run/tinyproxy.pid ]; then
         kill -HUP "$(cat /run/tinyproxy.pid)"
     else
-        pkill -HUP -x tinyproxy
+        pkill -HUP -x dc-tinyproxy
     fi
 else
-    if ! tinyproxy -c "$CONF"; then
+    # dc-tinyproxy is a copy of the tinyproxy binary at a path no host
+    # AppArmor profile attaches to (see Dockerfile).
+    if ! dc-tinyproxy -c "$CONF"; then
         echo "firewall-init: tinyproxy failed to start" >&2
         exit 1
     fi
@@ -143,6 +145,36 @@ fi
 # flood the netlink buffer. Read with `tcpdump -i nflog:1` (see `dev --monitor-fw`).
 iptables -A OUTPUT -m limit --limit 60/min --limit-burst 20 \
                   -j NFLOG --nflog-group 1 --nflog-prefix "FW-DROP"
+
+# --- Mirror the egress policy for IPv6 ---
+# iptables above only filters IPv4. Some runtimes give the container a global
+# IPv6 default route (podman 5's pasta does by default), and with ip6tables
+# left at ACCEPT that route is a complete firewall bypass. Same rules, same
+# fail-closed posture. (The host-port holes are IPv4-only by construction:
+# host.docker.internal resolves to the v4 host gateway.)
+if ip6tables -w -F OUTPUT 2>/dev/null; then
+    ip6tables -w -P OUTPUT DROP
+    ip6tables -w -P FORWARD DROP
+    ip6tables -w -P INPUT ACCEPT
+
+    ip6tables -w -A OUTPUT -o lo -j ACCEPT
+    ip6tables -w -A OUTPUT -p udp --dport 53 -j ACCEPT
+    ip6tables -w -A OUTPUT -p tcp --dport 53 -j ACCEPT
+    ip6tables -w -A OUTPUT -m owner --uid-owner "$PROXY_UID" \
+                      -p tcp -m multiport --dports 80,443 -j ACCEPT
+    ip6tables -w -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+    ip6tables -w -A OUTPUT -m limit --limit 60/min --limit-burst 20 \
+                      -j NFLOG --nflog-group 1 --nflog-prefix "FW-DROP6"
+else
+    # Kernel without ip6table_filter. That is only safe when the container
+    # has no routable IPv6 at all; otherwise refuse rather than leave an
+    # unfiltered egress path open.
+    if ip -6 addr show scope global 2>/dev/null | grep -q inet6; then
+        echo "firewall-init: cannot program ip6tables but a global IPv6 address is present — refusing to start with an unfiltered IPv6 egress path" >&2
+        exit 1
+    fi
+    echo "firewall-init: ip6tables unavailable; no global IPv6 present, continuing IPv4-only" >&2
+fi
 
 # Clear the firewall-disabled banner if a previous toggle left one.
 rm -f /etc/profile.d/zz-fw-disabled-banner.sh

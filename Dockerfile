@@ -52,6 +52,16 @@ RUN apt-get update && \
         tcpdump && \
     rm -rf /var/lib/apt/lists/*
 
+# Run tinyproxy from a copied path. AppArmor attaches profiles by binary path
+# and that attachment crosses the container boundary under rootless runtimes
+# (container processes run unconfined, so a host /etc/apparmor.d/tinyproxy
+# profile confines the CONTAINER's tinyproxy too — it then cannot read
+# /etc/tinyproxy/filter or write its pidfile and the firewall fails closed at
+# startup). A name no host profile attaches to sidesteps that entirely. Short
+# name on purpose: it must survive the kernel's 15-char comm truncation so
+# `pkill -x dc-tinyproxy` still matches (see firewall-init.sh).
+RUN cp "$(command -v tinyproxy)" /usr/local/sbin/dc-tinyproxy
+
 # Strip vscode's passwordless sudo. vscode is the agent-facing user; if it
 # can sudo, it can flush iptables and defeat the firewall. Maintenance mode
 # re-creates a sudoers fragment at container runtime.

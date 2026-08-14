@@ -280,12 +280,35 @@ start_container() {
       fi
     fi
     if [[ "$attach" == true ]]; then
+      # `exec` bypasses the entrypoint, so the attached process inherits
+      # neither the proxy env nor the nested-engine env that the container's
+      # original process tree got (and /etc/profile.d only covers login
+      # shells — a plain `dev -- npm install` is not one). Without this a
+      # command in an attached session connects directly, the kernel silently
+      # drops the packets, and the tool appears to hang. Mirror the
+      # entrypoint's exports here; values must stay in sync with entrypoint.sh.
+      EXEC_ENV=()
+      if [[ "$CONTAINER_NAME" != "$MAINT_NAME" ]]; then
+        # shellcheck disable=SC2054  # commas are part of the NO_PROXY value, not element separators
+        EXEC_ENV+=(-e HTTPS_PROXY=http://127.0.0.1:8888
+                   -e HTTP_PROXY=http://127.0.0.1:8888
+                   -e NO_PROXY=localhost,127.0.0.1,host.docker.internal)
+      fi
+      if [[ "$CONTAINER_NAME" == "$DIND_NAME" ]]; then
+        EXEC_ENV+=(-e DOCKER_HOST=unix:///home/vscode/.dind-run/docker.sock
+                   -e XDG_RUNTIME_DIR=/home/vscode/.dind-run)
+      elif [[ "$CONTAINER_NAME" == "$PIND_NAME" ]]; then
+        EXEC_ENV+=(-e DOCKER_HOST=unix:///home/vscode/.pind-run/podman.sock
+                   -e XDG_RUNTIME_DIR=/home/vscode/.pind-run)
+      fi
+      # ${arr[@]+...} guards the empty-array case (maintenance mode) against
+      # set -u on bash 3.2 (macOS).
       if [[ ${#CMD_ARGS[@]} -gt 0 ]]; then
         # shellcheck disable=SC2086  # intentional word-splitting of RUNTIME_ARGS
-        exec $RUNTIME $RUNTIME_ARGS exec --user vscode "${TTY_FLAGS[@]}" "$CONTAINER_NAME" "${CMD_ARGS[@]}"
+        exec $RUNTIME $RUNTIME_ARGS exec --user vscode ${EXEC_ENV[@]+"${EXEC_ENV[@]}"} "${TTY_FLAGS[@]}" "$CONTAINER_NAME" "${CMD_ARGS[@]}"
       else
         # shellcheck disable=SC2086  # intentional word-splitting of RUNTIME_ARGS
-        exec $RUNTIME $RUNTIME_ARGS exec --user vscode "${TTY_FLAGS[@]}" "$CONTAINER_NAME" zsh
+        exec $RUNTIME $RUNTIME_ARGS exec --user vscode ${EXEC_ENV[@]+"${EXEC_ENV[@]}"} "${TTY_FLAGS[@]}" "$CONTAINER_NAME" zsh
       fi
     fi
   fi

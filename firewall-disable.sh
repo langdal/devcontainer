@@ -15,9 +15,13 @@
 # direct / --noproxy traffic. This requires tinyproxy to already be running.
 set -eu
 
-# Open the kernel egress.
+# Open the kernel egress (both families; ip6tables tolerated missing on
+# kernels without ip6table_filter — nothing was programmed there either).
 iptables -F OUTPUT
 iptables -P OUTPUT ACCEPT
+if ip6tables -w -F OUTPUT 2>/dev/null; then
+    ip6tables -w -P OUTPUT ACCEPT
+fi
 
 # Switch tinyproxy to an allow-all filter and reload it in place.
 # The HUP must not abort the script (set -e): a stale pidfile or an
@@ -25,7 +29,7 @@ iptables -P OUTPUT ACCEPT
 # start the container. Fall back to pkill, and tolerate "not running".
 printf '%s\n' '^.*$' > /etc/tinyproxy/filter
 if ! { [ -f /run/tinyproxy.pid ] && kill -HUP "$(cat /run/tinyproxy.pid)" 2>/dev/null; }; then
-    pkill -HUP -x tinyproxy 2>/dev/null || true
+    pkill -HUP -x dc-tinyproxy 2>/dev/null || true
 fi
 
 # Visible signal for new shells: toggling the firewall does not change the

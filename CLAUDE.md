@@ -115,7 +115,8 @@ at `scripts/test/last-run.log` and `scripts/test/last-summary.log`.
 
 In addition there are two in-container probes:
 
-- `scripts/verify-firewall.sh` — 12 checks. 7 cover the firewall posture;
+- `scripts/verify-firewall.sh` — 13 checks. 8 cover the firewall posture
+  (including the direct-IPv6-bypass probe);
   checks 8–12 activate when `DEVCONTAINER_DIND=1` or `DEVCONTAINER_PIND=1`
   and verify the rootless nested engine, registry pulls through the proxy,
   and that nested containers can reach loopback ports but not the internet.
