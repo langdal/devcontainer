@@ -20,7 +20,7 @@ cd "$(dirname "$0")/../../.." || exit 1
 "$RUNTIME" rm -f "dev-$(basename "$(pwd)")"-dind 2>/dev/null
 
 # We pass --security-opt apparmor=unconfined; this should work in enforcing mode.
-if ! ./dev --dind -- docker version >/dev/null 2>&1; then
+if ! ./dev exec --dind -- docker version >/dev/null 2>&1; then
     log_fail "AppArmor enforcing host: --dind failed"
     exit 1
 fi

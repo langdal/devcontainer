@@ -3,7 +3,7 @@
 # platform: linux
 #
 # A running container backed by a mismatched image must be removed by
-# the rebuild path. After DEV_ASSUME_YES=1 ./dev …, the image tag must
+# the rebuild path. After DEV_ASSUME_YES=1 ./dev exec …, the image tag must
 # point at a different image ID and the labels must match host.
 set -u
 LIB="$(dirname "$0")/../lib"
@@ -56,16 +56,16 @@ OLD_IMAGE_ID=$("$RUNTIME" images -q generic-devcontainer)
 #    race. Cleanup is still guaranteed by remember_container + restore trap.
 docker run -d --name "$CN" --entrypoint sleep generic-devcontainer 3600 >/dev/null
 
-if ! DEV_ASSUME_YES=1 ./dev -- true >/dev/null 2>&1; then
+if ! DEV_ASSUME_YES=1 ./dev exec -- true >/dev/null 2>&1; then
     log_fail "dev failed during rebuild path"
-    ./dev --build -- true >/dev/null 2>&1 || true
+    ./dev exec --build -- true >/dev/null 2>&1 || true
     exit 1
 fi
 
 NEW_IMAGE_ID=$("$RUNTIME" images -q generic-devcontainer)
 if [ "$OLD_IMAGE_ID" = "$NEW_IMAGE_ID" ]; then
     log_fail "image was not rebuilt (id unchanged: $OLD_IMAGE_ID)"
-    ./dev --build -- true >/dev/null 2>&1 || true
+    ./dev exec --build -- true >/dev/null 2>&1 || true
     exit 1
 fi
 
@@ -73,7 +73,7 @@ img_uid=$(docker image inspect generic-devcontainer \
     --format '{{ index .Config.Labels "dev.uid" }}' 2>/dev/null)
 if [ "$img_uid" != "$HOST_UID" ]; then
     log_fail "labels still mismatched after rebuild: $img_uid"
-    ./dev --build -- true >/dev/null 2>&1 || true
+    ./dev exec --build -- true >/dev/null 2>&1 || true
     exit 1
 fi
 
@@ -81,7 +81,7 @@ fi
 if "$RUNTIME" ps --format '{{.Names}}' | grep -qx "$CN"; then
     log_fail "stale container $CN is still running"
     "$RUNTIME" rm -f "$CN" >/dev/null 2>&1
-    ./dev --build -- true >/dev/null 2>&1 || true
+    ./dev exec --build -- true >/dev/null 2>&1 || true
     exit 1
 fi
 

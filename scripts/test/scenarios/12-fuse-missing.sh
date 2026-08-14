@@ -32,7 +32,7 @@ cd "$(dirname "$0")/../../.." || exit 1
 # Fail only if dockerd starts AND is actually using fuse-overlayfs — that
 # would mean we somehow reached fuse despite chmod 000, which shouldn't
 # happen.
-out=$(timeout 30 ./dev --dind -- docker info -f '{{.Driver}}' 2>&1)
+out=$(timeout 30 ./dev exec --dind -- docker info -f '{{.Driver}}' 2>&1)
 rc=$?
 "$RUNTIME" rm -f "dev-$(basename "$(pwd)")"-dind 2>/dev/null
 

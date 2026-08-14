@@ -21,7 +21,7 @@ apt_install_remember podman || { log_skip "could not install podman"; exit 0; }
 remember_pkg_install podman
 
 cd "$(dirname "$0")/../../.." || exit 1
-out=$(./dev --dry-run 2>&1) || { log_fail "dev --dry-run failed: $out"; exit 1; }
+out=$(./dev up --dry-run 2>&1) || { log_fail "dev up --dry-run failed: $out"; exit 1; }
 if expect_grep "$out" '^docker run '; then
     log_pass "both runtimes installed: dev prefers docker"
     exit 0

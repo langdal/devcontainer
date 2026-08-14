@@ -33,7 +33,7 @@ if command -v docker >/dev/null 2>&1 && docker --version >/dev/null 2>&1; then
 fi
 
 cd "$(dirname "$0")/../../.." || exit 1
-out=$(./dev --dry-run 2>&1) || { log_fail "dev --dry-run failed: $out"; exit 1; }
+out=$(./dev up --dry-run 2>&1) || { log_fail "dev up --dry-run failed: $out"; exit 1; }
 if expect_grep "$out" '^podman run '; then
     log_pass "podman-only host: dev uses podman"
     exit 0

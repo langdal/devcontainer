@@ -40,12 +40,12 @@ docker run --rm -v devcontainer-home:/h busybox \
 # DEV_ASSUME_YES=1 bypasses the prompt. The command runs inside the
 # rebuilt container; the marker should be gone (volume was removed and
 # repopulated from the image's empty /home/vscode).
-out=$(DEV_ASSUME_YES=1 ./dev -- test -e /home/vscode/marker 2>&1)
+out=$(DEV_ASSUME_YES=1 ./dev exec -- test -e /home/vscode/marker 2>&1)
 rc=$?
 # `test -e` returns 1 when missing → expected outcome here.
 if [ "$rc" -eq 0 ]; then
     log_fail "marker still present after rebuild — volume not wiped (out: $out)"
-    ./dev --build -- true >/dev/null 2>&1 || true
+    ./dev exec --build -- true >/dev/null 2>&1 || true
     exit 1
 fi
 
@@ -54,7 +54,7 @@ img_uid=$(docker image inspect generic-devcontainer \
     --format '{{ index .Config.Labels "dev.uid" }}' 2>/dev/null)
 if [ "$img_uid" != "$HOST_UID" ]; then
     log_fail "image not rebuilt to host UID; labels=$img_uid"
-    ./dev --build -- true >/dev/null 2>&1 || true
+    ./dev exec --build -- true >/dev/null 2>&1 || true
     exit 1
 fi
 

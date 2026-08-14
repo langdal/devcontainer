@@ -34,7 +34,7 @@ if ! command -v podman >/dev/null 2>&1; then
 fi
 
 cd "$(dirname "$0")/../../.." || exit 1
-out=$(./dev --dry-run 2>&1) || { log_fail "dev --dry-run failed: $out"; exit 1; }
+out=$(./dev up --dry-run 2>&1) || { log_fail "dev up --dry-run failed: $out"; exit 1; }
 # detect_runtime prefers docker — even when docker is the podman shim. That's
 # correct: dev does not (and should not) try to inspect what 'docker' really is.
 if expect_grep "$out" '^docker run '; then

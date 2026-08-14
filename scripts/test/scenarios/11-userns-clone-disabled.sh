@@ -25,7 +25,7 @@ cd "$(dirname "$0")/../../.." || exit 1
 
 # We expect dev --dind to either fail to start or to start but have dockerd
 # fail. Either way, 'docker version' inside should not succeed within 30s.
-if timeout 30 ./dev --dind -- docker version >/dev/null 2>&1; then
+if timeout 30 ./dev exec --dind -- docker version >/dev/null 2>&1; then
     log_fail "expected --dind to fail with userns_clone=0 but it succeeded"
     "$RUNTIME" rm -f "dev-$(basename "$(pwd)")"-dind 2>/dev/null
     exit 1

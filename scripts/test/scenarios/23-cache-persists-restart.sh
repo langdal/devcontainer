@@ -17,13 +17,13 @@ remember_container "$D"
 "$RUNTIME" rm -f "$D" 2>/dev/null
 
 # Step A: pull alpine in --dind.
-./dev --dind -- docker pull alpine:3.20 >/dev/null || { log_fail "initial pull failed"; exit 1; }
+./dev exec --dind -- docker pull alpine:3.20 >/dev/null || { log_fail "initial pull failed"; exit 1; }
 
 # Step B: stop + start the same container (NOT --rm). 'dev' uses --rm by
 # default, so we instead exit, recreate via dev, and check the volume retained
 # the image. The named volume devcontainer-dind is the persistence boundary.
 "$RUNTIME" rm -f "$D" 2>/dev/null
-out=$(./dev --dind -- docker images alpine --format '{{.Repository}}:{{.Tag}}' 2>&1)
+out=$(./dev exec --dind -- docker images alpine --format '{{.Repository}}:{{.Tag}}' 2>&1)
 if expect_grep "$out" '^alpine:3.20$'; then
     log_pass "image cache survives container destroy+recreate"
     exit 0

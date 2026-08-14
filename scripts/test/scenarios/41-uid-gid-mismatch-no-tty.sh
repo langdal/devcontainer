@@ -27,22 +27,22 @@ HOST_UID=$(id -u)
 build_image_with_uid_gid 4242 4242 || exit 1
 
 # Closed stdin → non-interactive. dev should exit non-zero.
-out=$(./dev -- true </dev/null 2>&1)
+out=$(./dev exec -- true </dev/null 2>&1)
 rc=$?
 if [ "$rc" -eq 0 ]; then
     log_fail "expected dev to refuse attach with mismatched labels; got rc=0 output: $out"
     # Restore image before exit so subsequent scenarios are clean.
-    ./dev --build -- true >/dev/null 2>&1 || true
+    ./dev exec --build -- true >/dev/null 2>&1 || true
     exit 1
 fi
 if ! echo "$out" | grep -qE "${HOST_UID}|UID"; then
     log_fail "expected diagnostic mentioning host UID; got: $out"
-    ./dev --build -- true >/dev/null 2>&1 || true
+    ./dev exec --build -- true >/dev/null 2>&1 || true
     exit 1
 fi
 if ! echo "$out" | grep -q "dev --build"; then
     log_fail "expected '--build' hint in diagnostic; got: $out"
-    ./dev --build -- true >/dev/null 2>&1 || true
+    ./dev exec --build -- true >/dev/null 2>&1 || true
     exit 1
 fi
 
@@ -51,12 +51,12 @@ img_uid=$(docker image inspect generic-devcontainer \
     --format '{{ index .Config.Labels "dev.uid" }}' 2>/dev/null)
 if [ "$img_uid" != "4242" ]; then
     log_fail "image was rebuilt without consent: labels=$img_uid"
-    ./dev --build -- true >/dev/null 2>&1 || true
+    ./dev exec --build -- true >/dev/null 2>&1 || true
     exit 1
 fi
 
 # Restore image to host UID/GID for subsequent scenarios.
-./dev --build -- true >/dev/null 2>&1 || true
+./dev exec --build -- true >/dev/null 2>&1 || true
 
 log_pass "non-interactive mismatch refuses attach with diagnostic"
 exit 0

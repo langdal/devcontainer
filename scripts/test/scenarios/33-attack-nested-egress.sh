@@ -16,9 +16,9 @@ D="dev-${WS}-dind"
 remember_container "$D"
 "$RUNTIME" rm -f "$D" 2>/dev/null
 
-./dev --dind -- docker pull alpine:3.20 >/dev/null 2>&1 || true
+./dev exec --dind -- docker pull alpine:3.20 >/dev/null 2>&1 || true
 
-out=$(./dev --dind -- docker run --rm alpine:3.20 \
+out=$(./dev exec --dind -- docker run --rm alpine:3.20 \
     wget -T3 -q -O- https://example.com 2>&1 || echo BLOCKED)
 if expect_grep "$out" "BLOCKED"; then
     log_pass "nested container blocked from reaching example.com"

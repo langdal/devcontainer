@@ -41,7 +41,7 @@ trap 'cleanup_extra; restore_host' EXIT
 echo "$SENTINEL" >> "$ALLOWLIST"
 rm -f "${XDG_STATE_HOME:-$HOME/.local/state}/devcontainer/${WS}"-*/allowlist.approved
 
-filter=$(./dev -- cat /etc/tinyproxy/filter </dev/null 2>&1) \
+filter=$(./dev exec -- cat /etc/tinyproxy/filter </dev/null 2>&1) \
     || { log_fail "could not read filter (unapproved run)"; exit 1; }
 escaped="${SENTINEL//./\\\\.}"
 if echo "$filter" | grep -Eq "^\\^${escaped}\\\$$"; then
@@ -51,7 +51,7 @@ fi
 "$RUNTIME" rm -f "$N" 2>/dev/null
 
 # Same entry, approved -> merged.
-filter=$(DEV_ASSUME_YES=1 ./dev -- cat /etc/tinyproxy/filter 2>&1) \
+filter=$(DEV_ASSUME_YES=1 ./dev exec -- cat /etc/tinyproxy/filter 2>&1) \
     || { log_fail "could not read filter (approved run)"; exit 1; }
 if ! echo "$filter" | grep -Eq "^\\^${escaped}\\\$$"; then
     log_fail "approved allowlist entry missing from filter"

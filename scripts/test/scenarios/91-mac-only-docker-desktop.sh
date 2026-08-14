@@ -18,7 +18,7 @@ mask_and_prepend podman
 
 cd "$(dirname "$0")/../../.." || exit 1
 
-if out=$(./dev --dind -- true 2>&1); then
+if out=$(./dev exec --dind -- true 2>&1); then
     log_fail "expected dev to refuse Docker Desktop on macOS; got: $out"
     exit 1
 fi

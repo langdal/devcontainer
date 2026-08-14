@@ -41,7 +41,7 @@ cleanup_extra() {
 # Add to the existing trap.
 trap 'cleanup_extra; restore_host' EXIT
 
-filter=$(DEV_ASSUME_YES=1 ./dev --dind -- cat /etc/tinyproxy/filter 2>&1) \
+filter=$(DEV_ASSUME_YES=1 ./dev exec --dind -- cat /etc/tinyproxy/filter 2>&1) \
     || { log_fail "could not read /etc/tinyproxy/filter inside container"; exit 1; }
 
 escaped="${SENTINEL//./\\\\.}"

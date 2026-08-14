@@ -18,14 +18,14 @@ remember_container "$D"
 
 # Make sure alpine is cached so this test focuses on --privileged behaviour
 # rather than registry traffic.
-./dev --dind -- docker pull alpine:3.20 >/dev/null 2>&1 || true
+./dev exec --dind -- docker pull alpine:3.20 >/dev/null 2>&1 || true
 
 # Rootless dockerd cannot grant --privileged in any meaningful sense; even if
 # the run "succeeds", the container does not actually have host privilege.
 # We assert the safer thing: we cannot mount a real cgroup tree on /sys/fs/cgroup
 # inside a --privileged nested container. (This is how real privileged escapes
 # are typically attempted.)
-out=$(./dev --dind -- docker run --rm --privileged alpine:3.20 \
+out=$(./dev exec --dind -- docker run --rm --privileged alpine:3.20 \
     sh -c 'mount -t cgroup2 cgroup2 /tmp/c 2>&1; ls /tmp/c 2>&1' 2>&1)
 # Either the run fails outright, or the mount fails. Both are acceptable.
 if expect_grep "$out" "Operation not permitted" || \

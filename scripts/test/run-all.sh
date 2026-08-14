@@ -107,20 +107,20 @@ fi
 
 # ---- Build the base, :dind, and :pind images up front so scenarios don't race the build ----
 echo "Building images..."
-if ! ./dev --build --dry-run >/dev/null 2>&1; then
+if ! ./dev up --build --dry-run >/dev/null 2>&1; then
     : # dry-run sanity probe is best-effort
 fi
-if ! ./dev --build -- true 2>&1 | tee -a "$LAST_LOG"; then
+if ! ./dev exec --build -- true 2>&1 | tee -a "$LAST_LOG"; then
     echo "FATAL: failed to build base image" | tee -a "$LAST_LOG"
     exit 1
 fi
 "$RT" rm -f "dev-$(basename "$WORKSPACE")" 2>/dev/null || true
-if ! ./dev --build --dind -- true 2>&1 | tee -a "$LAST_LOG"; then
+if ! ./dev exec --build --dind -- true 2>&1 | tee -a "$LAST_LOG"; then
     echo "FATAL: failed to build :dind image" | tee -a "$LAST_LOG"
     exit 1
 fi
 "$RT" rm -f "dev-$(basename "$WORKSPACE")"-dind 2>/dev/null || true
-if ! ./dev --build --pind -- true 2>&1 | tee -a "$LAST_LOG"; then
+if ! ./dev exec --build --pind -- true 2>&1 | tee -a "$LAST_LOG"; then
     echo "FATAL: failed to build :pind image" | tee -a "$LAST_LOG"
     exit 1
 fi

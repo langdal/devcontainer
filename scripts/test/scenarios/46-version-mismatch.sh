@@ -54,21 +54,21 @@ build_scenario_image "could not build image with stale dev.version label" \
 
 # --- Path 1: non-interactive default-no ---
 # Closed stdin → not a TTY → dev should warn and continue (rc=0).
-out=$(./dev -- true </dev/null 2>&1)
+out=$(./dev exec -- true </dev/null 2>&1)
 rc=$?
 if [ "$rc" -ne 0 ]; then
     log_fail "expected dev to continue past version mismatch in non-tty; rc=$rc out: $out"
-    ./dev --build -- true >/dev/null 2>&1 || true
+    ./dev exec --build -- true >/dev/null 2>&1 || true
     exit 1
 fi
 if ! echo "$out" | grep -q "$OLD_VERSION"; then
     log_fail "expected diagnostic to mention stale version '$OLD_VERSION'; got: $out"
-    ./dev --build -- true >/dev/null 2>&1 || true
+    ./dev exec --build -- true >/dev/null 2>&1 || true
     exit 1
 fi
 if ! echo "$out" | grep -q "$SCRIPT_VERSION"; then
     log_fail "expected diagnostic to mention current version '$SCRIPT_VERSION'; got: $out"
-    ./dev --build -- true >/dev/null 2>&1 || true
+    ./dev exec --build -- true >/dev/null 2>&1 || true
     exit 1
 fi
 
@@ -76,7 +76,7 @@ img_version=$(docker image inspect generic-devcontainer \
     --format '{{ index .Config.Labels "dev.version" }}' 2>/dev/null)
 if [ "$img_version" != "$OLD_VERSION" ]; then
     log_fail "image was rebuilt without consent: label=$img_version"
-    ./dev --build -- true >/dev/null 2>&1 || true
+    ./dev exec --build -- true >/dev/null 2>&1 || true
     exit 1
 fi
 
@@ -85,9 +85,9 @@ fi
 "$RUNTIME" rm -f "dev-${WS}" >/dev/null 2>&1
 
 # --- Path 2: DEV_ASSUME_YES rebuilds ---
-if ! DEV_ASSUME_YES=1 ./dev -- true >/dev/null 2>&1; then
+if ! DEV_ASSUME_YES=1 ./dev exec -- true >/dev/null 2>&1; then
     log_fail "dev failed under DEV_ASSUME_YES with stale version label"
-    ./dev --build -- true >/dev/null 2>&1 || true
+    ./dev exec --build -- true >/dev/null 2>&1 || true
     exit 1
 fi
 
@@ -95,7 +95,7 @@ img_version=$(docker image inspect generic-devcontainer \
     --format '{{ index .Config.Labels "dev.version" }}' 2>/dev/null)
 if [ "$img_version" != "$SCRIPT_VERSION" ]; then
     log_fail "label not updated after rebuild: got '$img_version', want '$SCRIPT_VERSION'"
-    ./dev --build -- true >/dev/null 2>&1 || true
+    ./dev exec --build -- true >/dev/null 2>&1 || true
     exit 1
 fi
 

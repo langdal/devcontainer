@@ -28,8 +28,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-if out=$(./dev --dind -- true 2>&1); then
-    log_fail "expected dev --dind to fail with podman machine stopped; got: $out"
+if out=$(./dev exec --dind -- true 2>&1); then
+    log_fail "expected dev exec --dind to fail with podman machine stopped; got: $out"
     exit 1
 fi
 if expect_grep "$out" "podman machine"; then

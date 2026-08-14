@@ -34,9 +34,9 @@ build_image_with_uid_gid 4242 4242 || exit 1
 # Make sure the named volumes really do not exist.
 "$RUNTIME" volume rm devcontainer-mise devcontainer-home >/dev/null 2>&1 || true
 
-if ! DEV_ASSUME_YES=1 ./dev -- true >/dev/null 2>&1; then
+if ! DEV_ASSUME_YES=1 ./dev exec -- true >/dev/null 2>&1; then
     log_fail "dev failed when no volumes existed before rebuild"
-    ./dev --build -- true >/dev/null 2>&1 || true
+    ./dev exec --build -- true >/dev/null 2>&1 || true
     exit 1
 fi
 
@@ -44,14 +44,14 @@ img_uid=$(docker image inspect generic-devcontainer \
     --format '{{ index .Config.Labels "dev.uid" }}' 2>/dev/null)
 if [ "$img_uid" != "$HOST_UID" ]; then
     log_fail "labels not updated after rebuild: $img_uid"
-    ./dev --build -- true >/dev/null 2>&1 || true
+    ./dev exec --build -- true >/dev/null 2>&1 || true
     exit 1
 fi
 
 # `dev` re-creates the volumes on container start.
 if ! "$RUNTIME" volume inspect devcontainer-home >/dev/null 2>&1; then
     log_fail "devcontainer-home was not re-created on container start"
-    ./dev --build -- true >/dev/null 2>&1 || true
+    ./dev exec --build -- true >/dev/null 2>&1 || true
     exit 1
 fi
 

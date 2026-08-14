@@ -16,9 +16,9 @@ P="dev-${WS}-pind"
 remember_container "$P"
 "$RUNTIME" rm -f "$P" 2>/dev/null
 
-./dev --pind -- podman pull alpine:3.20 >/dev/null 2>&1 || true
+./dev exec --pind -- podman pull alpine:3.20 >/dev/null 2>&1 || true
 
-out=$(./dev --pind -- podman run --rm alpine:3.20 \
+out=$(./dev exec --pind -- podman run --rm alpine:3.20 \
     wget -T3 -q -O- https://example.com 2>&1 || echo BLOCKED)
 if expect_grep "$out" "BLOCKED"; then
     log_pass "nested podman container blocked from reaching example.com"

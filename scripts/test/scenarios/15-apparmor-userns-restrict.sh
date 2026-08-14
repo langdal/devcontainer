@@ -27,7 +27,7 @@ cd "$(dirname "$0")/../../.." || exit 1
 
 # The dev script preflights this and should refuse fast (well under 30s),
 # emitting the remediation message on stderr.
-out=$(timeout 30 ./dev --dind -- docker version 2>&1)
+out=$(timeout 30 ./dev exec --dind -- docker version 2>&1)
 rc=$?
 
 if [ "$rc" = 0 ]; then
@@ -45,7 +45,7 @@ fi
 # Verify the bypass env var actually bypasses the preflight. We don't
 # expect dockerd-rootless to succeed (the kernel will still block it),
 # but the failure should now come from rootlesskit, not the preflight.
-out=$(timeout 30 env DEV_SKIP_APPARMOR_CHECK=1 ./dev --dind -- docker version 2>&1)
+out=$(timeout 30 env DEV_SKIP_APPARMOR_CHECK=1 ./dev exec --dind -- docker version 2>&1)
 if expect_grep "$out" "kernel.apparmor_restrict_unprivileged_userns=1 on this host"; then
     log_fail "DEV_SKIP_APPARMOR_CHECK=1 did not bypass the preflight"
     "$RUNTIME" rm -f "dev-$(basename "$(pwd)")"-dind 2>/dev/null
@@ -58,7 +58,7 @@ fi
 
 # --pind shares the same preflight and should refuse fast (well under
 # 30s) with the same remediation message on stderr.
-out=$(timeout 30 ./dev --pind -- docker version 2>&1)
+out=$(timeout 30 ./dev exec --pind -- docker version 2>&1)
 rc=$?
 
 if [ "$rc" = 0 ]; then
@@ -74,7 +74,7 @@ if ! expect_grep "$out" "apparmor_restrict_unprivileged_userns"; then
 fi
 
 # Verify the bypass env var actually bypasses the preflight for --pind too.
-out=$(timeout 30 env DEV_SKIP_APPARMOR_CHECK=1 ./dev --pind -- docker version 2>&1)
+out=$(timeout 30 env DEV_SKIP_APPARMOR_CHECK=1 ./dev exec --pind -- docker version 2>&1)
 if expect_grep "$out" "kernel.apparmor_restrict_unprivileged_userns=1 on this host"; then
     log_fail "DEV_SKIP_APPARMOR_CHECK=1 did not bypass the preflight for --pind"
     "$RUNTIME" rm -f "dev-$(basename "$(pwd)")"-pind 2>/dev/null
