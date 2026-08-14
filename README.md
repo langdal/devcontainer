@@ -83,12 +83,12 @@ python = "3.12"
 ## Daily Use
 
 ```bash
-dev                       # start or attach to the container
-dev -- npm test           # run a one-off command in the container
-dev --build               # rebuild the image
-dev --port 9000           # forward an extra port (repeatable)
-dev --default-ports       # forward 5173, 5174, 8080, 2345, 3000
-dev --host-port 8080      # allow egress to host.docker.internal:8080
+dev up                    # start or attach to the container
+dev exec -- npm test      # run a one-off command in the container
+dev up --build            # rebuild the image
+dev up --port 9000        # forward an extra port (repeatable)
+dev up --default-ports    # forward 5173, 5174, 8080, 2345, 3000
+dev up --host-port 8080   # allow egress to host.docker.internal:8080
 ```
 
 Multiple terminals: just run `dev` again — it `exec`s into the running container.
@@ -105,9 +105,9 @@ Only one mode runs per workspace at a time. The script enforces this with a four
 | `--pind`         | Run nested Podman (testcontainers, builds).        | `dev-<dir>-pind`    |
 
 ```bash
-dev --maintenance         # firewall off, sudo enabled
-dev --dind                # rootless dockerd inside the container
-dev --pind                # rootless podman inside the container
+dev up --maint            # firewall off, sudo enabled
+dev up --dind             # rootless dockerd inside the container
+dev up --pind             # rootless podman inside the container
 ```
 
 ## Firewall
@@ -131,7 +131,7 @@ One entry per line, `#` for comments. Bare hostnames match exactly; `*.example.c
   the project allowlist. Restart to pick up an approved change (no rebuild
   needed). Note: the approval gate itself is enforced by the baked
   `firewall-init.sh`, so it only applies on an image built with this version
-  of the tooling — on an older image, run `dev --build` once.
+  of the tooling — on an older image, run `dev up --build` once.
 - `allowlist.dind` — additionally merged in `--dind` mode (Docker Hub, MCR, Quay, GCR, …). `--pind` reuses this same file — there is no separate `allowlist.pind` — since both nested engines pull from the same registries.
 
 ### What works out of the box
@@ -161,30 +161,30 @@ Known caveats, deliberate and otherwise:
 ### Firewall controls
 
 ```bash
-dev fw disable    # open the firewall (running container, or fresh start)
-dev fw enable     # restore default-deny + allowlist on the running container
+dev fw off        # open the firewall on the running container
+dev fw on         # restore default-deny + allowlist on the running container
 dev fw log        # tail the tinyproxy log
 dev fw drops      # tcpdump on iptables-dropped packets (NFLOG group 1)
 ```
 
-`dev fw disable` is dual-purpose: if a workspace container (normal or dind) is already running it toggles that one in place; if none is running it starts a **fresh** container with the firewall already open — the same end state as starting normally and toggling off. `dev fw enable` only acts on a running container.
+`dev fw off` toggles an already-running workspace container (normal or dind) in place; it errors if none is running. To start a **fresh** container with the firewall already open — the same end state as starting normally and toggling off — use `dev up --open`. `dev fw on` only acts on a running container.
 
 The container name does **not** change when the firewall is toggled, so for longer-lived unrestricted work prefer `--maintenance` — its name (`-maint`) is a visible signal.
 
 ### Reaching a host service (e.g. local LLM)
 
-`dev --host-port 8080` (repeatable) is a scoped escape hatch for talking to a service on the Docker host. It:
+`dev up --host-port 8080` (repeatable) is a scoped escape hatch for talking to a service on the Docker host. It:
 
 - adds `--add-host=host.docker.internal:host-gateway` so the hostname resolves to the host gateway IP,
 - passes `DEVCONTAINER_HOST_PORTS=8080[,…]` into the container,
 - and `firewall-init.sh` adds an iptables `ACCEPT` rule for **only that port to that gateway IP**.
 
-Everything else stays default-deny. Use it instead of `--network host` or `dev fw disable` when an agent inside the container needs to call out to a local model server, a metrics endpoint, etc. From inside the container: `curl http://host.docker.internal:8080/...`.
+Everything else stays default-deny. Use it instead of `--network host` or `dev fw off` when an agent inside the container needs to call out to a local model server, a metrics endpoint, etc. From inside the container: `curl http://host.docker.internal:8080/...`.
 
 To verify the firewall posture from inside:
 
 ```bash
-dev -- /workspace/scripts/verify-firewall.sh
+dev exec -- /workspace/scripts/verify-firewall.sh
 ```
 
 ## Docker-in-Docker
@@ -192,7 +192,7 @@ dev -- /workspace/scripts/verify-firewall.sh
 Run a rootless `dockerd` inside the container — for the `docker` CLI, testcontainers, and image builds — without `--privileged` and without breaking the firewall.
 
 ```bash
-dev --dind
+dev up --dind
 docker ps   # nested daemon
 ```
 
@@ -201,8 +201,8 @@ Registry pulls flow through tinyproxy and are filtered against the same allowlis
 A separate `devcontainer-dind` named volume preserves the nested image cache across rebuilds.
 
 ```bash
-dev --dind -- /workspace/scripts/verify-firewall.sh   # 12 checks
-dev --dind -- /workspace/scripts/verify-dind.sh       # heavier smoke tests
+dev exec --dind -- /workspace/scripts/verify-firewall.sh   # 12 checks
+dev exec --dind -- /workspace/scripts/verify-dind.sh       # heavier smoke tests
 ```
 
 ## Podman-in-Podman
@@ -210,7 +210,7 @@ dev --dind -- /workspace/scripts/verify-dind.sh       # heavier smoke tests
 Run rootless `podman` inside the container — for image builds, testcontainers, and `docker`/`docker compose`-shaped tooling — without `--privileged` and without breaking the firewall. Unlike `--dind`, podman is daemonless: there's no background process, just the `podman` binary and (optionally) a Docker-API compat socket.
 
 ```bash
-dev --pind
+dev up --pind
 podman ps   # nested engine
 docker ps   # podman-docker shim; talks to the same engine
 ```
@@ -222,8 +222,8 @@ Registry pulls for podman's own images route through tinyproxy at `127.0.0.1:888
 A separate `devcontainer-pind` named volume (`/home/vscode/.local/share/containers`) preserves the nested image cache across rebuilds.
 
 ```bash
-dev --pind -- /workspace/scripts/verify-firewall.sh   # 12 checks
-dev --pind -- /workspace/scripts/verify-pind.sh       # heavier smoke tests
+dev exec --pind -- /workspace/scripts/verify-firewall.sh   # 12 checks
+dev exec --pind -- /workspace/scripts/verify-pind.sh       # heavier smoke tests
 ```
 
 **Build tip:** `podman build`/`RUN` steps that need network access require the nested build to reach tinyproxy from inside the pind container's own netns. Pass `--network=host` plus **lowercase** proxy build args:
@@ -274,7 +274,7 @@ from inside a container, forward your host's ssh-agent socket (or mount a
 per-project deploy key) via `DEV_EXTRA_RUN_ARGS`, e.g.:
 
 ```bash
-DEV_EXTRA_RUN_ARGS="-v $SSH_AUTH_SOCK:/ssh-agent -e SSH_AUTH_SOCK=/ssh-agent" ./dev
+DEV_EXTRA_RUN_ARGS="-v $SSH_AUTH_SOCK:/ssh-agent -e SSH_AUTH_SOCK=/ssh-agent" ./dev up
 ```
 
 ## Injecting agent credentials
@@ -300,7 +300,7 @@ container lives in a separate rootful podman connection with its **own** home
 volume; writing into the default rootless volume it never mounts means the
 credentials silently never appear inside. `dev agent` handles this for you:
 
-- If a `dev --dind`/`--pind` container is **running**, `dev agent` auto-detects
+- If a `dev up --dind`/`--pind` container is **running**, `dev agent` auto-detects
   it and targets that storage — no flag needed.
 - Otherwise pass the matching flag explicitly (`dev agent add claude --pind`),
   which also works for `list`/`rm` (`dev agent list --pind`) and always wins
@@ -358,7 +358,7 @@ be copied into the volume as real file contents.
 **Local (127.0.0.1) providers:** if your agent config points at a
 host-side server (e.g. a local LLM at `http://127.0.0.1:PORT`), that address
 means the container itself inside the sandbox. Start with
-`dev --host-port PORT` and edit the in-volume config to use
+`dev up --host-port PORT` and edit the in-volume config to use
 `host.docker.internal:PORT` instead.
 
 ## Injecting dotfiles
@@ -383,7 +383,7 @@ dest is computed relative to it); paths elsewhere, or ones resolving to unsafe
 locations, are rejected. `--secret` forces the copied paths to mode `0600`.
 
 Storage routing matches `dev agent` exactly: on macOS+podman a running
-`dev --dind`/`--pind` container's storage is auto-detected, and `--dind`/`--pind`
+`dev up --dind`/`--pind` container's storage is auto-detected, and `--dind`/`--pind`
 target it explicitly. Remove with `dev dotfile rm <path>` or wipe the whole
 home volume with `dev reset`.
 
@@ -509,10 +509,10 @@ gate. A run flows from your terminal to a locked-down shell like this:
   +===================================================================================+
 ```
 
-Same wiring, four modes: `./dev` (firewall on, no sudo — the default),
-`./dev --maintenance` (separate container, firewall off, sudo back on),
-`./dev --dind` (adds rootless dockerd; nested pulls still routed through the
-proxy), and `./dev --pind` (adds rootless podman instead; same routing,
+Same wiring, four modes: `./dev up` (firewall on, no sudo — the default),
+`./dev up --maint` (separate container, firewall off, sudo back on),
+`./dev up --dind` (adds rootless dockerd; nested pulls still routed through the
+proxy), and `./dev up --pind` (adds rootless podman instead; same routing,
 daemonless engine).
 
 A rendered version of this diagram lives at [`docs/architecture.html`](docs/architecture.html)
