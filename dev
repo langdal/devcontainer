@@ -206,6 +206,8 @@ MAINTENANCE=false
 DIND=false
 PIND=false
 FORCE=false
+# shellcheck disable=SC2034  # consumed by start_container in lib/dev/lifecycle.sh (Task 3)
+SHELL_ONLY=false
 EXTRA_PORTS=()
 HOST_PORTS=()
 CMD_ARGS=()
@@ -226,14 +228,23 @@ IMAGE_VERSION=""
 
 usage() {
   cat <<EOF
-Usage: dev [OPTIONS] [-- COMMAND...]      # start/attach (default)
-       dev fw {disable|enable|log|drops}
-       dev agent {add|list|rm} [name...]
-       dev dotfile {add|rm} [--secret] <path>...
-       dev reset
-       dev scaffold [--dind] [--force]
-       dev update [--dry-run]
-       dev install
+Usage: dev <verb> [options]
+
+VERBS:
+  up       Build image if needed, start the container, attach a shell.
+           Options: --dind | --pind | --maint (mode), --open (firewall off),
+           --build, --dry-run, --port P, --host-port P, --default-ports
+  shell    Attach another shell to the running container.
+  exec     Run one command inside (starts the container if needed):
+           dev exec [up-options] -- CMD [ARGS...]
+  down     Stop this workspace's container(s).
+  status   dev status — show what is running, its mode, and firewall state.
+  fw       off|on|log|drops — firewall toggle and observability.
+  agent    add|list|rm — inject AI-agent credentials (claude|opencode|pi).
+  dotfile  add|rm — inject an arbitrary host dotfile/dir.
+  reset    Remove containers and prompt per named volume.
+  update   Update this git checkout to the latest released tag.
+  install  Symlink dev onto PATH.
 
 Run or attach to the generic devcontainer.
 
@@ -471,7 +482,7 @@ _deprecated() { echo "Warning: '$1' is deprecated; use 'dev $2'." >&2; }
 
 subcmd=""
 case "${1:-}" in
-  fw|reset|scaffold|update|install|agent|dotfile|dotfiles) subcmd="$1"; shift ;;
+  up|shell|exec|down|status|fw|reset|scaffold|update|install|agent|dotfile|dotfiles) subcmd="$1"; shift ;;
   --help)       usage; exit 0 ;;
   --version)    echo "dev $(resolve_dev_version)"; exit 0 ;;
   # Deprecated flag aliases -> subcommands. Note the ordering for the fw
@@ -607,6 +618,43 @@ case "$subcmd" in
     done
     create_dev_container
     exit 0
+    ;;
+  up)
+    # Verb shim (PR1): translate to the legacy start parser's spellings and
+    # fall through to it. The real extraction into lib/dev/up.sh is PR4.
+    UP_ARGS=()
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --maint) UP_ARGS+=(--maintenance); shift ;;
+        --open)
+          # shellcheck disable=SC2034  # consumed by start_container (lib/dev/lifecycle.sh)
+          FW_DISABLED_START=true; shift ;;
+        --)
+          echo "Error: 'dev up' does not take a command; use 'dev exec' -- CMD [ARGS...]." >&2
+          exit 2 ;;
+        *) UP_ARGS+=("$1"); shift ;;
+      esac
+    done
+    set -- ${UP_ARGS[@]+"${UP_ARGS[@]}"}
+    ;;
+  exec)
+    EXEC_ARGS=(); _saw_ddash=false
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --maint) EXEC_ARGS+=(--maintenance); shift ;;
+        --open)
+          # shellcheck disable=SC2034  # consumed by start_container (lib/dev/lifecycle.sh)
+          FW_DISABLED_START=true; shift ;;
+        --)      _saw_ddash=true; EXEC_ARGS+=("$@"); break ;;
+        *)       EXEC_ARGS+=("$1"); shift ;;
+      esac
+    done
+    if [[ "$_saw_ddash" != true ]]; then
+      echo "Error: 'dev exec' requires '-- CMD [ARGS...]'." >&2
+      exit 2
+    fi
+    unset _saw_ddash
+    set -- ${EXEC_ARGS[@]+"${EXEC_ARGS[@]}"}
     ;;
   fw)
     fw_action="${1:-}"
