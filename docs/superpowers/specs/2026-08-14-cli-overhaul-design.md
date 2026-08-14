@@ -42,6 +42,7 @@ dev agent add|list|rm [NAME]
 dev dotfile add|rm PATH [--secret]
 dev reset                 # remove containers + prompt per named volume
 dev update                # git-checkout self-update to latest release tag
+dev install               # symlink dev onto PATH (install.sh hands off here)
 ```
 
 - `up` = build image if needed, create-or-start container, attach an
