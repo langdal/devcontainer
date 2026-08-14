@@ -250,6 +250,11 @@ start_container() {
   fi
 
   if [[ "$DRY_RUN" == false ]]; then
+    # `dev shell` attaches only — it must never create a container.
+    if [[ "${SHELL_ONLY:-false}" == true ]] && ! container_running "$CONTAINER_NAME"; then
+      echo "Error: nothing running for this workspace — 'dev up' starts one." >&2
+      exit 1
+    fi
     # The image's USER is root because entrypoint.sh needs root to run
     # firewall-init.sh / dind-init.sh and only afterwards drops to vscode via
     # `gosu vscode`. `docker exec` bypasses the entrypoint and uses the image's

@@ -656,6 +656,15 @@ case "$subcmd" in
     unset _saw_ddash
     set -- ${EXEC_ARGS[@]+"${EXEC_ARGS[@]}"}
     ;;
+  shell)
+    if [[ $# -gt 0 ]]; then
+      echo "Error: 'dev shell' takes no arguments." >&2
+      exit 2
+    fi
+    # shellcheck disable=SC2034  # consumed by start_container (lib/dev/lifecycle.sh)
+    SHELL_ONLY=true
+    set --
+    ;;
   fw)
     fw_action="${1:-}"
     case "$fw_action" in
