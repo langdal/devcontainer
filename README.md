@@ -134,6 +134,30 @@ One entry per line, `#` for comments. Bare hostnames match exactly; `*.example.c
   of the tooling — on an older image, run `dev --build` once.
 - `allowlist.dind` — additionally merged in `--dind` mode (Docker Hub, MCR, Quay, GCR, …). `--pind` reuses this same file — there is no separate `allowlist.pind` — since both nested engines pull from the same registries.
 
+### What works out of the box
+
+The default allowlist is validated end-to-end against the mainstream dev
+workflows (probe suite run inside the firewalled container): npm/yarn,
+pip/uv (mise-managed Python), Go modules, cargo (sparse index), Maven
+Central, NuGet/.NET, git/gh against GitHub, mise toolchain installs, and
+Claude Code as the in-container agent harness (login, model calls,
+WebSearch, plugin marketplace).
+
+Known caveats, deliberate and otherwise:
+
+- **Claude's WebFetch of arbitrary URLs stays blocked by design.** WebSearch
+  works (it runs server-side via the Anthropic API), and WebFetch works for
+  allowlisted hosts. For project-specific documentation hosts, add them to
+  `.devcontainer-allowlist`.
+- **JVM tools ignore `HTTPS_PROXY`.** Maven needs `~/.m2/settings.xml` with a
+  `<proxies>` entry for `127.0.0.1:8888`; Gradle needs the equivalent
+  `systemProp.http(s).proxyHost/Port` in `~/.gradle/gradle.properties`.
+  Without it, downloads fail with unhelpful "could not be resolved" errors
+  (the kernel silently drops the direct connection).
+- **Telemetry endpoints are left blocked** (e.g. .NET CLI's
+  `dc.services.visualstudio.com`, Claude Code's Datadog log intake). Tools
+  work fine without them.
+
 ### Firewall controls
 
 ```bash
