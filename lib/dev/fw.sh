@@ -56,3 +56,23 @@ fw_disable() {
     return 0
   fi
 }
+
+# fw_off_running_only: toggle a running firewall container's iptables off in
+# place, same as fw_disable's running-container branch. Unlike fw_disable,
+# this NEVER cold-starts: if nothing is running for this workspace, it
+# errors instead of falling through to the default start path (that
+# fallthrough is being replaced by 'dev up --open').
+fw_off_running_only() {
+  resolve_managed_container
+  if [[ "$MANAGED_TARGET" == "maint" ]]; then
+    echo "Error: maintenance container ${MAINT_NAME} has no firewall — 'dev fw off' is meaningless in maintenance mode." >&2
+    exit 1
+  elif [[ -n "$MANAGED_TARGET" ]]; then
+    # shellcheck disable=SC2086  # intentional word-splitting of $MANAGED_RUNTIME_ARGS
+    exec $RUNTIME $MANAGED_RUNTIME_ARGS exec --user root "$MANAGED_NAME" /usr/local/sbin/firewall-disable.sh
+  else
+    echo "Error: nothing running for this workspace." >&2
+    echo "       'dev up --open' starts a fresh container with the firewall already open." >&2
+    exit 1
+  fi
+}

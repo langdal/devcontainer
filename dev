@@ -495,6 +495,12 @@ case "${1:-}" in
   --monitor-fw)           _deprecated --monitor-fw "fw drops"; subcmd="fw"; shift; set -- "drops" "$@" ;;
   --disable-firewall)     _deprecated --disable-firewall "fw disable"; subcmd="fw"; shift; set -- "disable" "$@" ;;
   --enable-firewall)      _deprecated --enable-firewall "fw enable"; subcmd="fw"; shift; set -- "enable" "$@" ;;
+  ''|-*) ;; # no verb, or a legacy/start flag: fall through to the default start parser below
+  *)
+    echo "Error: unknown verb: '$1'" >&2
+    echo "Run 'dev --help' for usage information" >&2
+    exit 2
+    ;;
 esac
 
 # Resolve the workspace's three container names + the dind storage
@@ -684,12 +690,25 @@ case "$subcmd" in
   fw)
     fw_action="${1:-}"
     case "$fw_action" in
-      log|drops|enable)
+      log|drops|enable|on)
         shift
-        # These three exec into the container and take no further arguments,
-        # so reject anything left over (consistent with reset/scaffold/update).
+        # These share a strict no-extra-args branch (consistent with
+        # reset/scaffold/update). `on` is an alias for `enable`: map it after
+        # validation so the dispatch below only needs to handle `enable`.
         if [[ $# -gt 0 ]]; then
           echo "Error: dev fw $fw_action does not take extra arguments: $*" >&2
+          exit 1
+        fi
+        [[ "$fw_action" == on ]] && fw_action=enable
+        ;;
+      off)
+        shift
+        # Unlike `disable`, `off` never cold-starts: it only toggles an
+        # already-running container's firewall off, and errors instead of
+        # falling through to the default start path.
+        if [[ $# -gt 0 ]]; then
+          echo "Error: dev fw off does not take extra arguments: $*" >&2
+          echo "       To start a fresh container with the firewall open, use 'dev up --open'." >&2
           exit 1
         fi
         ;;
@@ -718,7 +737,7 @@ case "$subcmd" in
         unset _a
         ;;
       *)
-        echo "Error: dev fw: expected an action (log|drops|enable|disable), got '${fw_action:-<none>}'" >&2
+        echo "Error: dev fw: expected an action (off|on|log|drops), got '${fw_action:-<none>}'" >&2
         echo "Run 'dev --help' for usage information" >&2
         exit 1
         ;;
@@ -730,6 +749,7 @@ case "$subcmd" in
       log)     fw_log ;;
       drops)   fw_drops ;;
       enable)  fw_enable ;;
+      off)     fw_off_running_only ;;
       disable)
         fw_disable
         # No container was running: fw_disable set FW_DISABLED_START=true and
