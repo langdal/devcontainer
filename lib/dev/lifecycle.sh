@@ -532,7 +532,8 @@ status_workspace() {
       return 0
     fi
     # shellcheck disable=SC2086  # intentional word-splitting of $args
-    st=$($RUNTIME $args ps --filter "name=^${name}\$" --format '{{.Status}}' 2>/dev/null | head -1)
+    st=$($RUNTIME $args ps --filter "name=^${name}\$" --format '{{.Status}}' 2>/dev/null | head -1) || true
+    [[ -n "$st" ]] || return 0
     any=true
     fw="firewall on"
     # shellcheck disable=SC2086  # intentional word-splitting of $args
