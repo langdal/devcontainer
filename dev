@@ -604,6 +604,22 @@ case "$subcmd" in
     reset_workspace
     exit 0
     ;;
+  down)
+    if [[ $# -gt 0 ]]; then
+      echo "Error: 'dev down' takes no arguments." >&2; exit 2
+    fi
+    detect_runtime; ensure_runtime_ready; _resolve_workspace_names
+    down_workspace
+    exit 0
+    ;;
+  status)
+    if [[ $# -gt 0 ]]; then
+      echo "Error: 'dev status' takes no arguments." >&2; exit 2
+    fi
+    detect_runtime; ensure_runtime_ready; _resolve_workspace_names
+    status_workspace
+    exit 0
+    ;;
   scaffold)
     while [[ $# -gt 0 ]]; do
       case $1 in
