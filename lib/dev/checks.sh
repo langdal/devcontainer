@@ -73,7 +73,8 @@ run_check() {
     CHECK_STATE=na
     return 0
   fi
-  "$fn"; rc=$?
+  rc=0
+  "$fn" || rc=$?
   # shellcheck disable=SC2034  # CHECK_STATE is consumed by callers of run_check (dev doctor, cmd_start preflights)
   case "$rc" in
     0) CHECK_STATE=pass ;;

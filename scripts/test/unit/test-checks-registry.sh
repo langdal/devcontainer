@@ -72,6 +72,23 @@ run_check fixture_na;   [ "$CHECK_STATE" = na ]   || fail "2 should be na, got $
 run_check no_such_check
 [ "$CHECK_STATE" = na ] || fail "missing probe must be na, never pass — got $CHECK_STATE"
 
+# run_check must survive errexit: dev runs under `set -euo pipefail` and
+# sources this file into that shell. A bare probe call would abort the whole
+# process on the first failing check instead of reporting it.
+out=$(bash -c '
+  set -euo pipefail
+  . "'"$ROOT"'/lib/dev/runtime.sh"
+  . "'"$ROOT"'/lib/dev/checks.sh"
+  _chk_errexit_fail() { return 1; }
+  _chk_errexit_na()   { return 2; }
+  run_check errexit-fail; echo "fail->$CHECK_STATE"
+  run_check errexit-na;   echo "na->$CHECK_STATE"
+  echo SURVIVED
+' 2>&1) || fail "run_check aborted under set -e: $out"
+echo "$out" | grep -q 'fail->fail' || fail "errexit run: expected fail, got: $out"
+echo "$out" | grep -q 'na->na'     || fail "errexit run: expected na, got: $out"
+echo "$out" | grep -q 'SURVIVED'   || fail "run_check killed the shell under set -e: $out"
+
 # Selection filters by phase, applicability and severity. Phase 0 exists so
 # 'is there a runtime at all' can be answered before $RUNTIME is known.
 sel=$(checks_select 0 all Linux docker)
