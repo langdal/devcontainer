@@ -43,6 +43,21 @@ fi
 
 # ---------- manifest / dry-run resolution (fake HOME, no runtime writes) ----------
 
+# dev's agent.sh has no override for the claude source directory (unlike
+# pi's PI_CODING_AGENT_DIR, see scenario 49), so faking where `dev agent add`
+# reads curated host files FROM means faking $HOME itself. Under rootless
+# podman, storage is HOME-derived too (defaults to
+# $HOME/.local/share/containers/storage), so a bare HOME override silently
+# relocates the runtime's own image/volume storage along with the fake
+# source tree -- `dev agent add` then reports the real, already-built image
+# as "not built yet" because it's hunting for it under the fake HOME's
+# (empty) storage instead of the real one. Capture the real storage root
+# once, up front, and pin it explicitly on every faked-HOME invocation below
+# so rootless podman keeps resolving the real storage regardless of which
+# HOME the command sees. (No-op for docker/rootful podman, whose storage is
+# never HOME-derived.)
+REAL_XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
+
 FAKE_HOME="$(mktemp -d)"
 # shellcheck disable=SC2317,SC2329  # invoked via trap
 cleanup_extra() { rm -rf "$FAKE_HOME"; }
@@ -59,7 +74,7 @@ printf 'x\n'         > "$FAKE_HOME/.claude.json"
 mkdir -p "$FAKE_HOME/.claude/projects/secret-proj"
 printf 'log\n'       > "$FAKE_HOME/.claude/history.jsonl"
 
-dry="$(HOME="$FAKE_HOME" "$DEV" agent add claude --dry-run 2>&1)"
+dry="$(HOME="$FAKE_HOME" XDG_DATA_HOME="$REAL_XDG_DATA_HOME" "$DEV" agent add claude --dry-run 2>&1)"
 
 if echo "$dry" | grep -q ".claude/.credentials.json"; then
     log_pass "dry-run includes .credentials.json"
@@ -189,16 +204,30 @@ ln -s "$FAKE_HOME/outside-skill.md" "$FAKE_HOME/.claude/skills/linked.md"
 # Broken symlink inside a copied dir must be skipped (warn), not abort the copy.
 ln -s /nonexistent/nope "$FAKE_HOME/.claude/commands/broken.md"
 
-( cd "$WORK" && HOME="$FAKE_HOME" "$DEV" agent add claude ) \
+( cd "$WORK" && HOME="$FAKE_HOME" XDG_DATA_HOME="$REAL_XDG_DATA_HOME" "$DEV" agent add claude ) \
     || { log_fail "dev agent add claude (real) exited non-zero"; }
+
+# Probe the volume under the same --userns=keep-id mapping the real copy
+# used (rootless podman only). Without it, `-u vscode` maps to a subuid
+# that can't even traverse the keep-id-owned /home/vscode mount, so every
+# probe below would report files "missing" that the copy actually wrote —
+# the same failure mode scenario 49's own comment documents for its
+# keep-id-aware helpers.
+KEEPID_ARGS=()
+if "$RUNTIME" --version 2>/dev/null | grep -qi podman \
+   && [ "$("$RUNTIME" info --format '{{.Host.Security.Rootless}}' 2>/dev/null)" = "true" ]; then
+    KEEPID_ARGS=(--userns=keep-id)
+fi
 
 # Helper: test a path inside the volume as vscode.
 vol_has() {
-    "$RUNTIME" run --rm -u vscode -v "$VOL":/home/vscode \
+    # shellcheck disable=SC2086  # intentional word-splitting; empty-safe via ${KEEPID_ARGS[@]+...}
+    "$RUNTIME" run --rm ${KEEPID_ARGS[@]+"${KEEPID_ARGS[@]}"} -u vscode -v "$VOL":/home/vscode \
         --entrypoint sh generic-devcontainer -c "test -e /home/vscode/$1"
 }
 vol_mode() {
-    "$RUNTIME" run --rm -u vscode -v "$VOL":/home/vscode \
+    # shellcheck disable=SC2086  # intentional word-splitting; empty-safe via ${KEEPID_ARGS[@]+...}
+    "$RUNTIME" run --rm ${KEEPID_ARGS[@]+"${KEEPID_ARGS[@]}"} -u vscode -v "$VOL":/home/vscode \
         --entrypoint sh generic-devcontainer -c "stat -c %a /home/vscode/$1"
 }
 
@@ -233,7 +262,8 @@ else
 fi
 
 # Symlink was dereferenced to a real file with real content.
-if "$RUNTIME" run --rm -u vscode -v "$VOL":/home/vscode --entrypoint sh \
+# shellcheck disable=SC2086  # intentional word-splitting; empty-safe via ${KEEPID_ARGS[@]+...}
+if "$RUNTIME" run --rm ${KEEPID_ARGS[@]+"${KEEPID_ARGS[@]}"} -u vscode -v "$VOL":/home/vscode --entrypoint sh \
       generic-devcontainer -c 'test -f /home/vscode/.claude/skills/linked.md && ! test -L /home/vscode/.claude/skills/linked.md'; then
     log_pass "symlinked skill was dereferenced to a real file"
 else
@@ -256,7 +286,8 @@ if vol_has ".claude.json"; then
 else
     log_fail "onboarding file ~/.claude.json missing from the volume (login wizard would reappear)"
 fi
-onboard="$("$RUNTIME" run --rm -u vscode -v "$VOL":/home/vscode --entrypoint sh \
+# shellcheck disable=SC2086  # intentional word-splitting; empty-safe via ${KEEPID_ARGS[@]+...}
+onboard="$("$RUNTIME" run --rm ${KEEPID_ARGS[@]+"${KEEPID_ARGS[@]}"} -u vscode -v "$VOL":/home/vscode --entrypoint sh \
     generic-devcontainer -c 'cat /home/vscode/.claude.json 2>/dev/null')"
 if echo "$onboard" | grep -q '"hasCompletedOnboarding": true'; then
     log_pass "onboarding file has hasCompletedOnboarding=true"
@@ -270,7 +301,7 @@ else
 fi
 
 # ---------- list ----------
-listout="$( cd "$WORK" && HOME="$FAKE_HOME" "$DEV" agent list 2>&1 )"
+listout="$( cd "$WORK" && HOME="$FAKE_HOME" XDG_DATA_HOME="$REAL_XDG_DATA_HOME" "$DEV" agent list 2>&1 )"
 if echo "$listout" | grep -E "claude.*yes.*yes" >/dev/null; then
     log_pass "list shows claude present on host and injected"
 else
@@ -281,7 +312,7 @@ fi
 
 # Unknown name must exit non-zero and remove nothing (regression: process-sub
 # swallowed exit — dev agent rm claude bogus used to exit 0 and no-op).
-if ( cd "$WORK" && HOME="$FAKE_HOME" DEV_ASSUME_YES=1 "$DEV" agent rm bogus ) >/dev/null 2>&1; then
+if ( cd "$WORK" && HOME="$FAKE_HOME" XDG_DATA_HOME="$REAL_XDG_DATA_HOME" DEV_ASSUME_YES=1 "$DEV" agent rm bogus ) >/dev/null 2>&1; then
     log_fail "dev agent rm bogus should exit non-zero"
 else
     log_pass "dev agent rm bogus exits non-zero (no silent no-op)"
@@ -293,7 +324,7 @@ else
     log_fail "failed rm removed files it should not have"
 fi
 
-( cd "$WORK" && HOME="$FAKE_HOME" DEV_ASSUME_YES=1 "$DEV" agent rm claude ) \
+( cd "$WORK" && HOME="$FAKE_HOME" XDG_DATA_HOME="$REAL_XDG_DATA_HOME" DEV_ASSUME_YES=1 "$DEV" agent rm claude ) \
     || log_fail "dev agent rm claude exited non-zero"
 
 if vol_has ".claude/.credentials.json"; then
@@ -307,7 +338,7 @@ else
     log_pass "rm removed commands/x.md (non-secret dest)"
 fi
 
-listout2="$( cd "$WORK" && HOME="$FAKE_HOME" "$DEV" agent list 2>&1 )"
+listout2="$( cd "$WORK" && HOME="$FAKE_HOME" XDG_DATA_HOME="$REAL_XDG_DATA_HOME" "$DEV" agent list 2>&1 )"
 if echo "$listout2" | grep -E "claude.*yes.*yes" >/dev/null; then
     log_fail "list still shows claude injected after rm: $listout2"
 else
