@@ -79,3 +79,30 @@ require_platform() {
         *)      log_fail "unknown platform tag: $want"; exit 1 ;;
     esac
 }
+
+# Read scenario front-matter privilege tag. Returns "root" / "user" / "any".
+# "root" means the scenario manipulates HOST state — sysctls, AppArmor
+# profiles, package installs, device nodes — and cannot run in a cell that has
+# no sudo. "user" means it needs only a working runtime.
+scenario_privilege() {
+    local f="${BASH_SOURCE[1]}"
+    local tag
+    tag=$(awk '/^# privilege:/{print $3; exit}' "$f" 2>/dev/null)
+    echo "${tag:-any}"
+}
+
+# Skip the scenario when the current run cannot grant what it needs.
+# DEV_TEST_PRIVILEGE is set by the orchestrator: "root" (the default sudo
+# invocation) runs everything; "user" runs only what needs no host changes.
+# Unset means "run everything", so existing invocations are unaffected.
+require_privilege() {
+    local want="$1"
+    local have="${DEV_TEST_PRIVILEGE:-root}"
+    case "$want" in
+        root)
+            [[ "$have" == root ]] || {
+                log_skip "scenario needs host privileges (run is $have)"; exit 0; } ;;
+        user|any) : ;;
+        *) log_fail "unknown privilege tag: $want"; exit 1 ;;
+    esac
+}
