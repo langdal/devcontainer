@@ -22,7 +22,30 @@ _chk_platform_supported_fix() {
   echo "dev supports Linux and macOS only; this host reports $(_host_os)."
 }
 
+# DEV_RUNTIME is an explicit override, so naming something absent is a user
+# error worth reporting rather than a host condition. detect_runtime refuses
+# outright in that case, which is why this has to be answerable in phase 0.
+_chk_dev_runtime_valid() {
+  [[ -z "${DEV_RUNTIME:-}" ]] && return 2   # unset: nothing to validate
+  _have_cmd "$DEV_RUNTIME" && return 0
+  return 1
+}
+_chk_dev_runtime_valid_fix() {
+  echo "DEV_RUNTIME=${DEV_RUNTIME:-} is set, but '${DEV_RUNTIME:-}' is not on PATH."
+  echo "Unset it to let dev choose, or install that runtime:"
+  echo "    unset DEV_RUNTIME"
+}
+
 _chk_runtime_present() {
+  # Platform-aware, because detect_runtime is: its Darwin branch requires
+  # podman specifically and refuses outright on anything else (Docker Desktop
+  # is unsupported). A check that accepted "docker OR podman" everywhere would
+  # pass on a Mac that detect_runtime is about to reject, and the report would
+  # end there instead of explaining why.
+  if [[ "$(_host_os)" == "Darwin" ]]; then
+    _have_cmd podman && return 0
+    return 1
+  fi
   _have_cmd docker && return 0
   _have_cmd podman && return 0
   return 1

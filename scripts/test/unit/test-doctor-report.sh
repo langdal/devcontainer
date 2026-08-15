@@ -55,6 +55,7 @@ echo "$out" | grep -qi 'no such container' && fail "doctor touched a container"
   # shellcheck source=lib/dev/doctor.sh
   . "$ROOT/lib/dev/doctor.sh"
   detect_runtime()        { RUNTIME=docker; RUNTIME_ARGS=""; }
+  # shellcheck disable=SC2329  # invoked indirectly via run_check's dynamic dispatch
   _chk_runtime_present()  { return 0; }
   _doc_header()           { :; }   # avoid shelling out to a real runtime
   export DEV_FAKE_OS=Linux DEV_FAKE_CMDS=docker
@@ -65,5 +66,42 @@ echo "$out" | grep -qi 'no such container' && fail "doctor touched a container"
   [ "$brc" -eq 1 ] \
     || { echo "FAIL: missing buildx must exit 1 (block-in-doctor), got $brc: $bout"; exit 1; }
 ) || fail "doctor block-in-doctor coverage failed"
+
+
+# --- doctor must survive hosts where detect_runtime would refuse -----------
+#
+# detect_runtime calls `exit 1` on three host shapes. When it does so from
+# inside cmd_doctor, the user gets that one error and NOTHING else: no header,
+# no phase-0 rows, no tally — and doctor's whole promise is that it works on a
+# machine where nothing is set up yet. These are exactly the machines that need
+# it most, including `not-docker-desktop`'s own target host.
+#
+# A sandbox PATH with no podman, so detect_runtime's Darwin branch would refuse.
+SANDBOX="$WORK/bin"; mkdir -p "$SANDBOX"
+for b in bash sh sed awk grep cat cut tr uname id basename dirname mktemp rm \
+         printf df sysctl head tail sort wc stat date curl; do
+    [ -e "/usr/bin/$b" ] && ln -sf "/usr/bin/$b" "$SANDBOX/$b"
+done
+[ -e /usr/bin/docker ] && ln -sf /usr/bin/docker "$SANDBOX/docker"
+
+doctor_sandboxed() { (cd "$WORK" && PATH="$SANDBOX" "$ROOT/dev" doctor </dev/null 2>&1); }
+
+# 1. macOS with docker but no podman — detect_runtime's Darwin branch refuses.
+out=$(DEV_FAKE_OS=Darwin doctor_sandboxed); rc=$?
+echo "$out" | grep -qE '[0-9]+ (blocking|passed)' \
+    || fail "macOS-without-podman: doctor produced no tally, so it bailed mid-report: $out"
+echo "$out" | grep -q 'supported platform' \
+    || fail "macOS-without-podman: phase-0 rows missing from report: $out"
+[ "$rc" -eq 1 ] || fail "macOS-without-podman should exit 1 (blocking), got $rc: $out"
+
+# 2. DEV_RUNTIME naming something absent — detect_runtime refuses.
+out=$(cd "$WORK" && DEV_RUNTIME=nosuchruntime "$ROOT/dev" doctor </dev/null 2>&1); rc=$?
+echo "$out" | grep -qE '[0-9]+ (blocking|passed)' \
+    || fail "bad DEV_RUNTIME: doctor produced no tally, so it bailed mid-report: $out"
+[ "$rc" -eq 1 ] || fail "bad DEV_RUNTIME should exit 1 (blocking), got $rc: $out"
+
+# 3. The report must name the actual problem, not just fail silently.
+echo "$out" | grep -qi 'DEV_RUNTIME' \
+    || fail "bad DEV_RUNTIME: report never mentions DEV_RUNTIME: $out"
 
 echo "PASS: doctor report and exit contract"

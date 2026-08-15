@@ -23,6 +23,7 @@
 CHECKS=(
   "platform-supported|0|*:*|block|supported platform (linux/darwin)"
   "runtime-present|0|*:*|block|a container runtime is installed"
+  "dev-runtime-valid|0|*:*|block|DEV_RUNTIME names an installed runtime"
   "buildx|1|linux,darwin:docker|block-in-doctor|docker buildx present"
   "not-docker-desktop|1|darwin:*|block|not Docker Desktop"
   "podman-machine|1|darwin:podman|block-in-doctor|podman machine running"

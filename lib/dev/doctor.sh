@@ -152,6 +152,17 @@ cmd_doctor() {
   # lines into a plain file (a brace group, not a subshell, so _report_one's
   # tally increments above land in THIS shell) and flush them after the
   # header prints.
+  # True unless a phase-0 check that detect_runtime would refuse on has
+  # explicitly FAILED. `na` means "nothing to validate", which is fine.
+  _doc_runtime_identifiable() {
+    local id
+    for id in runtime-present dev-runtime-valid; do
+      run_check "$id"
+      [[ "$CHECK_STATE" == fail ]] && return 1
+    done
+    return 0
+  }
+
   local phase0_buf
   phase0_buf="$(mktemp 2>/dev/null)" || phase0_buf=""
   if [[ -n "$phase0_buf" ]]; then
@@ -160,8 +171,18 @@ cmd_doctor() {
     _doc_phase0   # mktemp unavailable: fall back to printing immediately
   fi
 
-  # Only now is it safe to identify the runtime.
-  if _chk_runtime_present; then
+  # Only now is it safe to identify the runtime — and only if every phase-0
+  # condition detect_runtime would refuse on has passed. detect_runtime exits
+  # rather than returning, so calling it on a host it rejects would abandon the
+  # report mid-flight: no header, no rows, no tally, on precisely the
+  # unconfigured machines doctor exists to diagnose.
+  #
+  # Test the probes through run_check, NOT by calling them directly: a probe
+  # returns 0/1/2, and 2 ("not applicable") is falsy in bash. Calling
+  # _chk_dev_runtime_valid in a boolean context would read its perfectly
+  # healthy "no DEV_RUNTIME set, nothing to validate" as a failure and skip
+  # phase 1 on every ordinary host. Only an explicit `fail` should stop us.
+  if _doc_runtime_identifiable; then
     detect_runtime
     _doc_header "$os"
     [[ -n "$phase0_buf" ]] && cat "$phase0_buf"

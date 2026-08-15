@@ -7,7 +7,11 @@
 # (test scenarios that mask a runtime via PATH overlay; broken
 # symlinks left on a stale PATH; etc.).
 _runtime_works() {
-  command -v "$1" >/dev/null 2>&1 && "$1" --version >/dev/null 2>&1
+  # Routed through _have_cmd rather than a bare `command -v` so this agrees
+  # with the registry's runtime-present check. When they disagreed, a stub
+  # that _have_cmd could see but _runtime_works could not let the check pass
+  # and detect_runtime then exit — a refusal the report never explained.
+  _have_cmd "$1" && "$1" --version >/dev/null 2>&1
 }
 
 # Host OS, behind an indirection so unit tests can exercise the Darwin
