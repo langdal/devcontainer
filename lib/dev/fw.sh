@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# lib/dev/fw.sh — `dev fw` handlers (log, drops, enable, disable).
+# lib/dev/fw.sh — `dev fw` handlers (off, on, log, drops).
 # Sourced by dev; not executed directly.
 
 # cmd_fw <action> [args]: the `dev fw` verb. Validates the action (each takes no
@@ -53,13 +53,16 @@ cmd_fw() {
     enable)  fw_enable ;;
     off)     fw_off_running_only ;;
   esac
+  # Every fw_* handler above exec's or exits; the explicit exit keeps the
+  # router's "no arm falls through" invariant local to this function.
+  exit
 }
 
 # fw_log: stream tinyproxy's log from the running workspace firewall
 # container. Requires a firewall-capable container (normal or dind) to
 # already be running; never returns (execs into `tail`).
 fw_log() {
-  require_workspace_firewall_container "--monitor/--monitor-fw"
+  require_workspace_firewall_container "fw log"
   # shellcheck disable=SC2086  # intentional word-splitting of $MANAGED_RUNTIME_ARGS
   exec $RUNTIME $MANAGED_RUNTIME_ARGS exec -it "$MANAGED_NAME" tail -F /var/log/tinyproxy.log
 }
@@ -69,7 +72,7 @@ fw_log() {
 # has it) and root inside the container. Never returns (execs into
 # `tcpdump`).
 fw_drops() {
-  require_workspace_firewall_container "--monitor/--monitor-fw"
+  require_workspace_firewall_container "fw drops"
   # shellcheck disable=SC2086  # intentional word-splitting of $MANAGED_RUNTIME_ARGS
   exec $RUNTIME $MANAGED_RUNTIME_ARGS exec -it --user root "$MANAGED_NAME" \
       tcpdump -i nflog:1 -nn -l
@@ -80,7 +83,7 @@ fw_drops() {
 # require_workspace_firewall_container. Never returns (execs into
 # firewall-init.sh).
 fw_enable() {
-  require_workspace_firewall_container "--enable-firewall"
+  require_workspace_firewall_container "fw on"
   # shellcheck disable=SC2086  # intentional word-splitting of $MANAGED_RUNTIME_ARGS
   exec $RUNTIME $MANAGED_RUNTIME_ARGS exec --user root "$MANAGED_NAME" /usr/local/sbin/firewall-init.sh
 }

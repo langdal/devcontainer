@@ -36,6 +36,8 @@ chk "up --dry-run works"    0 'Would\|docker\|podman' ./dev up --dry-run
 chk "up rejects --"         2 "use 'dev exec'" ./dev up --dry-run -- true
 # exec requires --.
 chk "exec without -- errors" 2 'requires' ./dev exec --dry-run
+# ... and a command after it: a bare -- must not become an interactive attach.
+chk "exec with empty -- errors" 2 'command' ./dev exec --dry-run --
 # exec --dry-run with a command parses through the verb path.
 chk "exec --dry-run works"  0 'Would\|docker\|podman' ./dev exec --dry-run -- true
 # --maint spelling accepted (translated to maintenance mode).

@@ -132,7 +132,7 @@ require_workspace_firewall_container() {
   local op="$1"
   resolve_managed_container
   if [[ -z "$MANAGED_TARGET" ]]; then
-    echo "Error: no dev container is running for this workspace (looked for ${NORMAL_NAME}, ${DIND_NAME}, ${PIND_NAME}, ${MAINT_NAME}). Start one with 'dev', 'dev --dind', 'dev --pind', or 'dev --maintenance' first." >&2
+    echo "Error: no dev container is running for this workspace (looked for ${NORMAL_NAME}, ${DIND_NAME}, ${PIND_NAME}, ${MAINT_NAME}). Start one with 'dev up', 'dev up --dind', 'dev up --pind', or 'dev up --maint' first." >&2
     exit 1
   fi
   if [[ "$MANAGED_TARGET" == "maint" ]]; then

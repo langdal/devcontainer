@@ -36,7 +36,15 @@ cmd_exec() {
       --open)
         # shellcheck disable=SC2034  # consumed by start_container (lib/dev/lifecycle.sh)
         FW_DISABLED_START=true; shift ;;
-      --)      _saw_ddash=true; EXEC_ARGS+=("$@"); break ;;
+      --)      _saw_ddash=true
+               # $# counts the `--` itself, so 1 means nothing follows it.
+               # Without this guard `dev exec --` would cold-start and attach
+               # an interactive zsh, contradicting `-- CMD [ARGS...]`.
+               if [[ $# -eq 1 ]]; then
+                 echo "Error: 'dev exec' requires a command after '--'." >&2
+                 exit 2
+               fi
+               EXEC_ARGS+=("$@"); break ;;
       *)       EXEC_ARGS+=("$1"); shift ;;
     esac
   done
