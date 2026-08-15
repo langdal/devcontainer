@@ -57,6 +57,14 @@ chk "down reports nothing running"      0 'Nothing running' ./dev down
 # Unknown verb is a hard error.
 chk "unknown verb exits 2" 2 '' ./dev frobnicate
 
+# Clean break: legacy spellings are gone.
+chk "bare dev prints usage"        0 'VERBS' ./dev
+chk "legacy --dind start rejected" 2 '' ./dev --dind -- true
+chk "legacy -- start rejected"     2 '' ./dev -- true
+chk "fw disable removed"           1 'off'  ./dev fw disable
+chk "fw enable removed"            1 'on'   ./dev fw enable
+chk "--disable-firewall removed"   2 ''     ./dev --disable-firewall
+
 [ "$fail" -eq 0 ] || exit 1
 log_pass "verb grammar surface: up/exec/shell/down/status/fw parse and error contracts hold"
 exit 0
