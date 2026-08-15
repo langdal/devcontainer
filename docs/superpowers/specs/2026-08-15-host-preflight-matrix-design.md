@@ -282,7 +282,7 @@ Five cells:
 | Fedora 41 · rootful docker | full suite (SELinux enforcing) |
 | Ubuntu 24.04 · rootful docker | full suite |
 | Ubuntu 24.04 · rootless podman | `privilege: user` subset — new |
-| macOS 14 · podman (GHA) | unit suite + `dev doctor` smoke |
+| macOS 14 · podman (GHA) | unit suite + `dev doctor` only — no VM, no containers (see Resolved below) |
 
 Every cell asserts `dev doctor` exits 0 before running anything else. If the
 doctor cannot certify the host, the suite result is meaningless — precisely the
@@ -297,7 +297,41 @@ failure mode that produced the truncated summary on 2026-08-15.
 
 ### Open question, to resolve during implementation
 
-Whether `podman machine` can start on GitHub's macOS runners is unverified.
+**RESOLVED (2026-08-15): no. `podman machine` cannot start on GitHub's macOS
+runners. The macOS cell is the degraded one.**
+
+Run 2, with `--provider applehv` (podman's built-in macOS provider, no external
+binary), initialised a machine in 33s and then failed to start:
+
+```
+Error: vfkit exited unexpectedly with exit code 1
+```
+
+vfkit is applehv's Virtualization.framework helper, and it has no hypervisor to
+build on. The runner reports itself as `Apple M1 (Virtual)` running kernel
+`RELEASE_ARM64_VMAPPLE`, with no `hv.*` sysctls: GitHub's macOS ARM runners are
+themselves VMs and do not expose nested virtualization. Both providers fail —
+libkrun for want of `krunkit`, applehv for want of a hypervisor — and only the
+second is a real capability limit.
+
+Consequences, now settled rather than contingent:
+
+- The macOS cell runs the **unit suite plus `dev doctor`**, with no VM and no
+  containers. It verifies logic, not integration.
+- The **manual Apple Silicon session is the only real-hardware coverage** the
+  project will ever have in this design. Its release gate is load-bearing, not
+  ceremonial.
+- Not worth chasing: `macos-13` is Intel and might expose virtualization, but it
+  would exercise linux/amd64 images on hardware nobody in the target fleet runs.
+  A green cell that does not represent the fleet is worse than an honest gap.
+
+`.github/workflows/macos-probe.yml` is **retained rather than deleted** (a
+deliberate deviation from "delete once answered"): the answer is a property of
+GitHub's runner images, not of this repo, and it can change when those images
+do. Re-dispatch it after a runner-image bump to see whether the macOS cell can
+be upgraded. It costs nothing while undispatched.
+
+---
 
 **Run 1 (2026-08-15, `macos-14`) did not answer it.** `podman machine init`
 succeeded in 44s, then `start` failed with:
@@ -360,7 +394,8 @@ In order:
 
 1. Unit suite green on every developer platform
 2. Four Linux matrix cells green
-3. macOS GHA smoke green (or documented as degraded, per the open question)
+3. macOS GHA cell green — unit suite + `dev doctor`, no VM (degraded by
+   runner limitation, confirmed 2026-08-15)
 4. **Manual Apple Silicon sanity session**, run by the repo owner on a real
    Mac, covering `dev doctor`, `dev up`, `dev shell`, and `podman machine`
    lifecycle. This is a required gate, not a courtesy check: it is the only
