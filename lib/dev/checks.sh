@@ -27,7 +27,6 @@ CHECKS=(
   "fuse-device|1|linux:*|block-if-nested|/dev/fuse accessible"
   "cgroup2|1|linux:*|block-if-nested|cgroup v2"
   "engine-cli-match|1|*:*|advise|CLI and engine agree"
-  "home-volume-owner|1|*:podman|advise|home volume ownership matches uid"
   "selinux-enforcing|1|linux:*|advise|SELinux not enforcing"
   "disk-space|1|*:*|advise|at least 3 GB free"
   "memory|1|*:*|advise|at least 6 GB RAM for nested engines"

@@ -191,7 +191,17 @@ _engine_server_name() {
   # shellcheck disable=SC2086  # intentional word-splitting of RUNTIME_ARGS
   $RUNTIME ${RUNTIME_ARGS:-} version --format '{{.Server.Components}}' 2>/dev/null || true
 }
-_free_disk_gb() { df -Pg . 2>/dev/null | awk 'NR==2{print $4}' || echo 0; }
+# Free GiB on the filesystem holding the workspace, or EMPTY when it cannot
+# be determined. `df -g` is BSD/macOS-only; GNU df needs -BG and prints a
+# "40G" style figure that has to have its suffix stripped. Returning empty
+# rather than 0 matters: 0 would read as "no space left" and fail the check.
+_free_disk_gb() {
+  if [[ "$(_host_os)" == "Darwin" ]]; then
+    df -Pg . 2>/dev/null | awk 'NR==2{print $4}'
+  else
+    df -PBG . 2>/dev/null | awk 'NR==2{gsub(/G$/,"",$4); print $4}'
+  fi
+}
 _total_mem_gb() {
   if [[ "$(_host_os)" == "Darwin" ]]; then
     echo $(( $(sysctl -n hw.memsize 2>/dev/null || echo 0) / 1073741824 ))
@@ -213,7 +223,9 @@ _selinux_mode() { command -v getenforce >/dev/null 2>&1 && getenforce 2>/dev/nul
 # their commands are being rewritten. Advisory, never blocking.
 _chk_engine_cli_match() {
   _runtime_version | grep -qi podman && return 0     # CLI is podman: agrees
-  _engine_server_name | grep -qi podman && return 1  # CLI docker, engine podman
+  local server; server="$(_engine_server_name)"
+  [[ -z "$server" ]] && return 2                      # engine unreachable: undetermined
+  echo "$server" | grep -qi podman && return 1        # CLI docker, engine podman
   return 0
 }
 _chk_engine_cli_match_fix() {
@@ -221,16 +233,6 @@ _chk_engine_cli_match_fix() {
   echo "CLI is Docker. dev drives podman directly, because --userns=keep-id is"
   echo "podman-only and the Docker CLI rejects it."
   echo "Pin it explicitly to silence this:  DEV_RUNTIME=podman"
-}
-
-_chk_home_volume_owner() {
-  runtime_is_rootless || return 2
-  return 0   # dev migrates ownership automatically; report the posture only
-}
-_chk_home_volume_owner_fix() {
-  echo "Under rootless podman dev re-chowns named volumes once via"
-  echo "'podman unshare chown'. If \$HOME or /mise is unwritable inside the"
-  echo "container, run 'dev down' then 'dev up' to trigger the migration."
 }
 
 _chk_selinux_enforcing() {
@@ -245,7 +247,12 @@ _chk_selinux_enforcing_fix() {
   echo "that is the first thing to check."
 }
 
-_chk_disk_space() { [[ "$(_free_disk_gb)" -lt 3 ]] && return 1; return 0; }
+_chk_disk_space() {
+  local free; free="$(_free_disk_gb)"
+  case "$free" in ''|*[!0-9]*) return 2 ;; esac
+  [[ "$free" -lt 3 ]] && return 1
+  return 0
+}
 _chk_disk_space_fix() { echo "Images and the mise cache need ~3 GB free; free some space."; }
 
 _chk_memory() { [[ "$(_total_mem_gb)" -lt 6 ]] && return 1; return 0; }

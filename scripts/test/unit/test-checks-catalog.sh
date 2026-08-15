@@ -89,14 +89,20 @@ DEV_FAKE_RUNTIME_VERSION='podman version 5.7.0' run_check engine-cli-match
 _engine_server_name() { echo "Podman Engine"; }
 DEV_FAKE_RUNTIME_VERSION='Docker version 29.1.3' run_check engine-cli-match
 [ "$CHECK_STATE" = fail ] || fail "docker CLI on a podman socket must be flagged"
+# shellcheck disable=SC2329  # invoked indirectly via run_check -> _chk_engine_cli_match
 _engine_server_name() { echo "Engine"; }
 DEV_FAKE_RUNTIME_VERSION='Docker version 29.1.3' run_check engine-cli-match
 [ "$CHECK_STATE" = pass ] || fail "docker CLI + dockerd agree"
+_engine_server_name() { echo ""; }
+DEV_FAKE_RUNTIME_VERSION='Docker version 29.1.3' run_check engine-cli-match
+[ "$CHECK_STATE" = na ] || fail "engine unreachable must be na, not a false pass"
 
 # --- disk-space / memory: thresholds from docs/ci-testing.md ---
 # shellcheck disable=SC2329  # invoked indirectly via run_check -> _chk_disk_space
 _free_disk_gb() { echo 10; }; run_check disk-space; [ "$CHECK_STATE" = pass ] || fail "10 GB is enough"
+# shellcheck disable=SC2329  # invoked indirectly via run_check -> _chk_disk_space
 _free_disk_gb() { echo 1; };  run_check disk-space; [ "$CHECK_STATE" = fail ] || fail "1 GB is not"
+_free_disk_gb() { echo ""; }; run_check disk-space; [ "$CHECK_STATE" = na ]   || fail "undeterminable free space must be na, not fail"
 # shellcheck disable=SC2329  # invoked indirectly via run_check -> _chk_memory
 _total_mem_gb() { echo 16; }; run_check memory;     [ "$CHECK_STATE" = pass ] || fail "16 GB is enough"
 _total_mem_gb() { echo 4; };  run_check memory;     [ "$CHECK_STATE" = fail ] || fail "4 GB is not"
@@ -114,15 +120,5 @@ GITHUB_TOKEN=x run_check github-token-scopes; [ "$CHECK_STATE" = fail ] || fail 
 # shellcheck disable=SC2329  # invoked indirectly via run_check -> _chk_selinux_enforcing
 _selinux_mode() { echo Enforcing; }; run_check selinux-enforcing; [ "$CHECK_STATE" = fail ] || fail "enforcing"
 _selinux_mode() { echo ""; };        run_check selinux-enforcing; [ "$CHECK_STATE" = na ]   || fail "absent = na"
-
-# --- home-volume-owner: rootless-podman posture only ---
-# shellcheck disable=SC2329  # invoked indirectly via run_check -> _chk_home_volume_owner
-runtime_is_rootless() { return 1; }
-run_check home-volume-owner
-[ "$CHECK_STATE" = na ] || fail "rootful runtimes never remap ids — must be na, got $CHECK_STATE"
-runtime_is_rootless() { return 0; }
-run_check home-volume-owner
-[ "$CHECK_STATE" = pass ] || fail "rootless posture should report pass, got $CHECK_STATE"
-_chk_home_volume_owner_fix | grep -q 'dev down' || fail "home-volume fix lost its remediation"
 
 echo "PASS: phase-0 and blocking probes"
