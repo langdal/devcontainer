@@ -485,7 +485,11 @@ run_check() {
     CHECK_STATE=na
     return 0
   fi
-  "$fn"; rc=$?
+  # `dev` runs `set -euo pipefail` and sources this file into that shell, so a
+  # BARE `"$fn"` would abort the whole process the first time a probe returns
+  # non-zero — the case, the return, and every remaining check never happen.
+  rc=0
+  "$fn" || rc=$?
   case "$rc" in
     0) CHECK_STATE=pass ;;
     1) CHECK_STATE=fail ;;
