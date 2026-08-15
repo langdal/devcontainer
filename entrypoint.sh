@@ -75,6 +75,23 @@ echo "=========================================================="
 echo
 EOF
     chmod 644 /etc/profile.d/zz-maint-banner.sh
+
+    # The Maven/Gradle proxy files seeded further down live in the PERSISTENT
+    # per-workspace home volume, which this container mounts too. Maintenance
+    # mode runs no tinyproxy, so those files point every JVM download at a
+    # 127.0.0.1:8888 that nothing is listening on — connection-refused in
+    # exactly the mode meant to have unrestricted egress. Don't rewrite them
+    # (the seeding contract is never to overwrite, and this volume outlives the
+    # container); make the failure self-explanatory instead.
+    for _jvm_cfg in /home/vscode/.m2/settings.xml /home/vscode/.gradle/gradle.properties; do
+        if [ -f "$_jvm_cfg" ] && grep -q '8888' "$_jvm_cfg" 2>/dev/null; then
+            echo "Note: $_jvm_cfg points JVM downloads at the firewall proxy" >&2
+            echo "      (127.0.0.1:8888), which does not run in maintenance mode." >&2
+            echo "      Bypass it for this session, e.g.  mvn -s /dev/null ...  or" >&2
+            echo "      gradle -Dhttp.proxyHost= -Dhttps.proxyHost= ..." >&2
+        fi
+    done
+    unset _jvm_cfg
 fi
 
 # --- DinD mode: launch rootless dockerd ---
@@ -169,10 +186,23 @@ if [ -n "${HTTPS_PROXY:-}" ]; then
      Safe to edit; the entrypoint never overwrites an existing file. -->
 <settings xmlns="http://maven.apache.org/SETTINGS/1.0.0">
   <proxies>
+    <!-- Two entries, not one. Maven Resolver's DefaultProxySelector matches a
+         proxy's <protocol> against the REPOSITORY URL's scheme, not against
+         the protocol used to reach the proxy. Maven Central and every JVM host
+         in the allowlist are https, so an http-only entry is never selected
+         and the download goes direct, into the firewall's DROP rule. -->
     <proxy>
-      <id>devcontainer-firewall</id>
+      <id>devcontainer-firewall-http</id>
       <active>true</active>
       <protocol>http</protocol>
+      <host>127.0.0.1</host>
+      <port>8888</port>
+      <nonProxyHosts>localhost|127.0.0.1|host.docker.internal</nonProxyHosts>
+    </proxy>
+    <proxy>
+      <id>devcontainer-firewall-https</id>
+      <active>true</active>
+      <protocol>https</protocol>
       <host>127.0.0.1</host>
       <port>8888</port>
       <nonProxyHosts>localhost|127.0.0.1|host.docker.internal</nonProxyHosts>
