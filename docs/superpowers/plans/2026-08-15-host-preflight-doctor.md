@@ -56,7 +56,7 @@ The spec's example omitted `phase`; the runner needs it, because "is there a run
 **Interfaces:**
 - Produces: `_host_os()` (exists), `_have_cmd <name>` → 0/1, `_runtime_version()` → prints `$RUNTIME --version` output or empty, `_read_sysfs <path>` → prints file contents or empty. All honour a `DEV_FAKE_*` override so tests can drive them.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `scripts/test/unit/test-checks-registry.sh`:
 
@@ -107,12 +107,12 @@ rm -f "$tmp"
 echo "PASS: check registry indirections"
 ```
 
-- [ ] **Step 2: Run it — must fail**
+- [x] **Step 2: Run it — must fail**
 
 Run: `bash scripts/test/unit/test-checks-registry.sh`
 Expected: `FAIL: _have_cmd not defined`
 
-- [ ] **Step 3: Implement the indirections**
+- [x] **Step 3: Implement the indirections**
 
 In `lib/dev/runtime.sh`, immediately after the existing `_host_os` function:
 
@@ -151,12 +151,12 @@ _read_sysfs() {
 }
 ```
 
-- [ ] **Step 4: Run it — must pass**
+- [x] **Step 4: Run it — must pass**
 
 Run: `bash scripts/test/unit/test-checks-registry.sh`
 Expected: `PASS: check registry indirections`
 
-- [ ] **Step 5: Regression + commit**
+- [x] **Step 5: Regression + commit**
 
 ```bash
 mise x shellcheck -- shellcheck -x dev lib/dev/*.sh
@@ -182,7 +182,7 @@ git -c user.name='Jakob Langdal' -c user.email='jakob@langdal.dk' \
 
 **Why:** confirmed twice on real macOS hardware (2026-08-15 probe runs). `dev status`, `dev up --dry-run` and four unit tests all die with "podman machine is not running" because `ensure_runtime_ready` gates unconditionally. `--dry-run` prints a command without executing it, and `dev doctor` must work on a machine where nothing is set up — otherwise the doctor cannot diagnose the very condition it exists to report.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `scripts/test/unit/test-runtime-ready.sh`:
 
@@ -233,12 +233,12 @@ out=$(DEV_FAKE_OS=Linux DEV_FAKE_MACHINE_RUNNING=false NEEDS_ENGINE=true \
 echo "PASS: ensure_runtime_ready gates only engine-touching operations"
 ```
 
-- [ ] **Step 2: Run it — must fail**
+- [x] **Step 2: Run it — must fail**
 
 Run: `bash scripts/test/unit/test-runtime-ready.sh`
 Expected: `FAIL: require_engine not defined`
 
-- [ ] **Step 3: Rewrite `ensure_runtime_ready` in `lib/dev/runtime.sh`**
+- [x] **Step 3: Rewrite `ensure_runtime_ready` in `lib/dev/runtime.sh`**
 
 Replace the whole existing function with:
 
@@ -273,7 +273,7 @@ ensure_runtime_ready() {
 }
 ```
 
-- [ ] **Step 4: Set `NEEDS_ENGINE` at the call sites**
+- [x] **Step 4: Set `NEEDS_ENGINE` at the call sites**
 
 In `lib/dev/up.sh`, in `cmd_start`, on the line immediately before its
 `ensure_runtime_ready` call:
@@ -313,7 +313,7 @@ Declare the default in `dev` beside the other start-flow globals (near line 83):
 NEEDS_ENGINE=false
 ```
 
-- [ ] **Step 5: Run the tests**
+- [x] **Step 5: Run the tests**
 
 Run:
 ```bash
@@ -323,7 +323,7 @@ bash scripts/test/scenarios/50-cli-verbs.sh
 ```
 Expected: first prints `PASS: ensure_runtime_ready gates only engine-touching operations`; second exits 0; third prints `[PASS] 50-cli-verbs`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 mise x shellcheck -- shellcheck -x dev lib/dev/*.sh && bash scripts/lint.sh
@@ -349,7 +349,7 @@ git -c user.name='Jakob Langdal' -c user.email='jakob@langdal.dk' \
   - `run_check <id>` → sets `CHECK_STATE` to `pass|fail|na`, returns 0 always
   - `checks_select <phase> <severity-filter> <os> <runtime>` → prints matching ids, one per line. `severity-filter` is `blocking` (block + block-if-nested-when-nested) or `all`.
 
-- [ ] **Step 1: Write the failing test — append to `scripts/test/unit/test-checks-registry.sh`, above its final `echo "PASS: ..."` line**
+- [x] **Step 1: Write the failing test — append to `scripts/test/unit/test-checks-registry.sh`, above its final `echo "PASS: ..."` line**
 
 ```bash
 # --- registry -------------------------------------------------------------
@@ -402,12 +402,12 @@ sel=$(checks_select 1 blocking Linux podman)
 echo "$sel" | grep -q '^userns-sysctl$' || fail "block-if-nested not promoted under --dind"
 ```
 
-- [ ] **Step 2: Run it — must fail**
+- [x] **Step 2: Run it — must fail**
 
 Run: `bash scripts/test/unit/test-checks-registry.sh`
 Expected: FAIL — `lib/dev/checks.sh` does not exist (bash reports "No such file or directory").
 
-- [ ] **Step 3: Create `lib/dev/checks.sh` with the registry and runner**
+- [x] **Step 3: Create `lib/dev/checks.sh` with the registry and runner**
 
 ```bash
 # shellcheck shell=bash
@@ -523,12 +523,12 @@ checks_select() {
 }
 ```
 
-- [ ] **Step 4: Run it — must pass**
+- [x] **Step 4: Run it — must pass**
 
 Run: `bash scripts/test/unit/test-checks-registry.sh`
 Expected: `PASS: check registry indirections`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 mise x shellcheck -- shellcheck -x dev lib/dev/*.sh && bash scripts/lint.sh
@@ -553,7 +553,7 @@ Note the shell-name mapping: registry id `not-docker-desktop` → function
 `_chk_not_docker_desktop`. `run_check` must translate hyphens to underscores;
 add that now.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `scripts/test/unit/test-checks-catalog.sh`:
 
@@ -611,12 +611,12 @@ HOST_UID=0    run_check workspace-not-root; [ "$CHECK_STATE" = fail ] || fail "r
 echo "PASS: phase-0 and blocking probes"
 ```
 
-- [ ] **Step 2: Run it — must fail**
+- [x] **Step 2: Run it — must fail**
 
 Run: `bash scripts/test/unit/test-checks-catalog.sh`
 Expected: `FAIL: run_check did not map hyphens to underscores`
 
-- [ ] **Step 3: Append the probes to `lib/dev/checks.sh`**
+- [x] **Step 3: Append the probes to `lib/dev/checks.sh`**
 
 (The hyphen→underscore mapping `run_check` needs already shipped in Task 3;
 the assertion in Step 1 is its regression guard. The `_fix` lookup follows the
@@ -701,12 +701,12 @@ _chk_workspace_not_root_fix() {
 }
 ```
 
-- [ ] **Step 4: Run it — must pass**
+- [x] **Step 4: Run it — must pass**
 
 Run: `bash scripts/test/unit/test-checks-catalog.sh`
 Expected: `PASS: phase-0 and blocking probes`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 mise x shellcheck -- shellcheck -x dev lib/dev/*.sh && bash scripts/lint.sh
@@ -727,7 +727,7 @@ git -c user.name='Jakob Langdal' -c user.email='jakob@langdal.dk' \
 - Consumes: `_read_sysfs`, `runtime_is_rootless`, `subid_total`.
 - Produces: `_chk_userns_sysctl`, `_chk_subid_grant`, `_chk_fuse_device`, `_chk_cgroup2` and `_fix` twins. `subid_total` moves from `preflight.sh` into `checks.sh` unchanged.
 
-- [ ] **Step 1: Write the failing test — append above the final `echo` of `scripts/test/unit/test-checks-catalog.sh`**
+- [x] **Step 1: Write the failing test — append above the final `echo` of `scripts/test/unit/test-checks-catalog.sh`**
 
 ```bash
 # --- userns-sysctl: the host control that blocked 10 scenarios on 2026-08-15 ---
@@ -757,12 +757,12 @@ _cgroup_version() { echo 2; }; run_check cgroup2; [ "$CHECK_STATE" = pass ] || f
 _cgroup_version() { echo 1; }; run_check cgroup2; [ "$CHECK_STATE" = fail ] || fail "cgroup v1 must fail"
 ```
 
-- [ ] **Step 2: Run it — must fail**
+- [x] **Step 2: Run it — must fail**
 
 Run: `bash scripts/test/unit/test-checks-catalog.sh`
 Expected: FAIL at the userns case (`CHECK_STATE` is `na`, probe undefined).
 
-- [ ] **Step 3: Append to `lib/dev/checks.sh`**
+- [x] **Step 3: Append to `lib/dev/checks.sh`**
 
 Move `subid_total` from `preflight.sh` verbatim (it is unchanged), then add:
 
@@ -834,12 +834,12 @@ _chk_cgroup2_fix() {
 }
 ```
 
-- [ ] **Step 4: Run it — must pass**
+- [x] **Step 4: Run it — must pass**
 
 Run: `bash scripts/test/unit/test-checks-catalog.sh`
 Expected: `PASS: phase-0 and blocking probes`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 mise x shellcheck -- shellcheck -x dev lib/dev/*.sh && bash scripts/lint.sh
@@ -858,7 +858,7 @@ git -c user.name='Jakob Langdal' -c user.email='jakob@langdal.dk' \
 **Interfaces:**
 - Produces: `_chk_engine_cli_match`, `_chk_home_volume_owner`, `_chk_selinux_enforcing`, `_chk_disk_space`, `_chk_memory`, `_chk_github_token_scopes` and `_fix` twins.
 
-- [ ] **Step 1: Write the failing test — append above the final `echo`**
+- [x] **Step 1: Write the failing test — append above the final `echo`**
 
 ```bash
 # --- engine-cli-match: the 2026-08-15 DOCKER_HOST bug ---
@@ -900,12 +900,12 @@ run_check home-volume-owner
 _chk_home_volume_owner_fix | grep -q 'dev down' || fail "home-volume fix lost its remediation"
 ```
 
-- [ ] **Step 2: Run it — must fail**
+- [x] **Step 2: Run it — must fail**
 
 Run: `bash scripts/test/unit/test-checks-catalog.sh`
 Expected: FAIL at the engine-cli-match case.
 
-- [ ] **Step 3: Append to `lib/dev/checks.sh`**
+- [x] **Step 3: Append to `lib/dev/checks.sh`**
 
 ```bash
 # --- phase 1, advisory ----------------------------------------------------
@@ -988,12 +988,12 @@ _chk_github_token_scopes_fix() {
 }
 ```
 
-- [ ] **Step 4: Run it — must pass**
+- [x] **Step 4: Run it — must pass**
 
 Run: `bash scripts/test/unit/test-checks-catalog.sh`
 Expected: `PASS: phase-0 and blocking probes`
 
-- [ ] **Step 5: Budget checkpoint**
+- [x] **Step 5: Budget checkpoint**
 
 Run: `wc -l lib/dev/checks.sh`
 If over 300, move every `_chk_*`/`_chk_*_fix` pair into a new
@@ -1001,7 +1001,7 @@ If over 300, move every `_chk_*`/`_chk_*_fix` pair into a new
 automatically), leaving `CHECKS`, `check_field`, `check_applies`,
 `run_check` and `checks_select` in `checks.sh`. Re-run both unit tests.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 mise x shellcheck -- shellcheck -x dev lib/dev/*.sh && bash scripts/lint.sh
@@ -1023,7 +1023,7 @@ git -c user.name='Jakob Langdal' -c user.email='jakob@langdal.dk' \
 - Consumes: `checks_select`, `run_check`, `CHECK_STATE`, `check_field`, `CHECKS`; `detect_runtime`, `_host_os`.
 - Produces: `cmd_doctor "$@"`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `scripts/test/unit/test-doctor-report.sh`:
 
@@ -1072,12 +1072,12 @@ echo "$out" | grep -qi 'no such container' && fail "doctor touched a container"
 echo "PASS: doctor report and exit contract"
 ```
 
-- [ ] **Step 2: Run it — must fail**
+- [x] **Step 2: Run it — must fail**
 
 Run: `bash scripts/test/unit/test-doctor-report.sh`
 Expected: FAIL — `dev` rejects `doctor` as an unknown verb (exit 2).
 
-- [ ] **Step 3: Create `lib/dev/doctor.sh`**
+- [x] **Step 3: Create `lib/dev/doctor.sh`**
 
 ```bash
 # shellcheck shell=bash
@@ -1184,7 +1184,7 @@ Note: the `Host`/`Runtime` lines print after phase 0 because phase 0 can fail
 before a runtime exists. If a reviewer prefers them first, buffer phase-0
 output — do not move `detect_runtime` earlier.
 
-- [ ] **Step 4: Route the verb**
+- [x] **Step 4: Route the verb**
 
 In `dev`, in the `case "$subcmd"` block, after the `status)` arm:
 
@@ -1201,7 +1201,7 @@ In `lib/dev/usage.sh`, in the VERBS block after the `status` entry:
                   prerequisites). Exits 1 if anything blocking fails.
 ```
 
-- [ ] **Step 5: Run the tests**
+- [x] **Step 5: Run the tests**
 
 Run:
 ```bash
@@ -1211,12 +1211,12 @@ bash scripts/test/scenarios/50-cli-verbs.sh
 ```
 Expected: `PASS: doctor report and exit contract`; the other two exit 0.
 
-- [ ] **Step 6: Eyeball it**
+- [x] **Step 6: Eyeball it**
 
 Run: `./dev doctor` and read the output. It must fit a screen, name a real
 problem if this host has one, and print no remediation under a passing check.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 mise x shellcheck -- shellcheck -x dev lib/dev/*.sh && bash scripts/lint.sh
@@ -1238,7 +1238,7 @@ git -c user.name='Jakob Langdal' -c user.email='jakob@langdal.dk' \
 - Consumes: `checks_select`, `run_check`, `CHECK_STATE`, `check_field`.
 - Produces: `run_blocking_checks <phase>` in `checks.sh`.
 
-- [ ] **Step 1: Add the blocking runner to `lib/dev/checks.sh`**
+- [x] **Step 1: Add the blocking runner to `lib/dev/checks.sh`**
 
 ```bash
 # Run every blocking check for <phase> and refuse if any fail. Reports ALL
@@ -1270,7 +1270,7 @@ run_blocking_checks() {
 }
 ```
 
-- [ ] **Step 2: Replace the preflight calls in `lib/dev/up.sh`**
+- [x] **Step 2: Replace the preflight calls in `lib/dev/up.sh`**
 
 `NESTED` drives `block-if-nested`, so set it from the mode flags. Delete the
 line `preflight_apparmor_userns` and the line `preflight_subid_grant`, and the
@@ -1294,7 +1294,7 @@ used to be:
 
 `refuse_root_uid` is now the `workspace-not-root` check; delete its call too.
 
-- [ ] **Step 3: Delete the migrated file**
+- [x] **Step 3: Delete the migrated file**
 
 ```bash
 git rm lib/dev/preflight.sh
@@ -1303,7 +1303,7 @@ grep -rn 'preflight_apparmor_userns\|preflight_subid_grant\|refuse_root_uid' dev
 ```
 Expected: `no dangling references`.
 
-- [ ] **Step 4: Run the migration gate**
+- [x] **Step 4: Run the migration gate**
 
 These four scenarios assert preflight behaviour and are the risk the spec
 flagged. All must still pass:
@@ -1318,7 +1318,7 @@ Expected: each prints `[PASS]` or `[SKIP]` — no `[FAIL]`.
 If one fails on message wording rather than behaviour, fix the check's text to
 match what the scenario greps; the scenarios encode the contract users see.
 
-- [ ] **Step 5: Full local verification**
+- [x] **Step 5: Full local verification**
 
 ```bash
 bash scripts/lint.sh
@@ -1329,7 +1329,7 @@ bash scripts/test/scenarios/50-cli-verbs.sh
 Expected: lint exits 0; the only unit failure is `test-cli-invalid-distro`
 (pre-existing, needs qemu); scenario 50 passes.
 
-- [ ] **Step 6: Full matrix**
+- [x] **Step 6: Full matrix**
 
 Run: `sudo bash scripts/test/run-all.sh`
 Expected: **23 passed, 10 failed, 6 skipped** — identical to the 2026-08-15
@@ -1337,7 +1337,7 @@ baseline. The 10 failures are the `kernel.apparmor_restrict_unprivileged_userns=
 blockers, left set deliberately. Any *other* failure is a regression from this
 task; investigate before committing.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add -A
@@ -1352,7 +1352,7 @@ git -c user.name='Jakob Langdal' -c user.email='jakob@langdal.dk' \
 **Files:**
 - Modify: `README.md` (Daily Use, Host Requirements), `CLAUDE.md` (command block, Architecture)
 
-- [ ] **Step 1: README — add `dev doctor` to Daily Use**
+- [x] **Step 1: README — add `dev doctor` to Daily Use**
 
 After the `dev up --host-port 8080` line in the Daily Use block:
 
@@ -1361,7 +1361,7 @@ dev doctor                # check this host for everything dev needs
 dev doctor --dind         # also check nested-engine prerequisites
 ```
 
-- [ ] **Step 2: README — rewrite the Host Requirements opening**
+- [x] **Step 2: README — rewrite the Host Requirements opening**
 
 Replace its first paragraph with:
 
@@ -1371,7 +1371,7 @@ and prints the fix for anything missing. It needs no image, no container and
 no running podman machine, so it works before anything is set up.
 ```
 
-- [ ] **Step 3: CLAUDE.md — add to the command block and Architecture**
+- [x] **Step 3: CLAUDE.md — add to the command block and Architecture**
 
 In the `## Build and Run` block:
 
@@ -1391,7 +1391,7 @@ In `## Architecture`, after the `dev` bullet:
   macOS checks testable from Linux.
 ```
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 ```bash
 grep -n 'dev doctor' README.md CLAUDE.md | head
