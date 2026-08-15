@@ -1,6 +1,7 @@
 #!/bin/bash
 # scripts/test/scenarios/49-agent-inject-podman.sh
 # platform: linux
+# privilege: user
 #
 # The docker path of `dev agent` (scenario 48) never exercises the
 # runtime-specific behaviour that two real host bugs slipped through:

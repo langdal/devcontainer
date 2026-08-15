@@ -1,6 +1,7 @@
 #!/bin/bash
 # scripts/test/scenarios/05-runtime-env-override.sh
 # platform: linux
+# privilege: root
 set -u
 LIB="$(dirname "$0")/../lib"
 # shellcheck source=scripts/test/lib/assert.sh
@@ -10,6 +11,7 @@ LIB="$(dirname "$0")/../lib"
 # shellcheck source=scripts/test/lib/restore.sh
 . "$LIB/restore.sh"
 require_platform linux
+require_privilege root
 trap restore_host EXIT
 
 if ! command -v docker >/dev/null 2>&1; then

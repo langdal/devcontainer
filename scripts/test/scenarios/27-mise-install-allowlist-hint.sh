@@ -1,6 +1,7 @@
 #!/bin/bash
 # scripts/test/scenarios/27-mise-install-allowlist-hint.sh
 # platform: linux
+# privilege: user
 #
 # A project mise tool whose download host lives only in the workspace
 # .devcontainer-allowlist is blocked by the firewall until that allowlist is

@@ -1,6 +1,7 @@
 #!/bin/bash
 # scripts/test/scenarios/48-agent-inject.sh
 # platform: linux
+# privilege: user
 #
 # `dev agent add|list|rm` copies a curated, per-agent allowlist of
 # credentials + settings from the host into the per-workspace home volume

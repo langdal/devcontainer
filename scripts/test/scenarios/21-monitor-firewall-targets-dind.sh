@@ -1,6 +1,7 @@
 #!/bin/bash
 # scripts/test/scenarios/21-monitor-firewall-targets-dind.sh
 # platform: linux
+# privilege: user
 #
 # `dev fw log`, `fw drops`, `fw off`, `fw on`
 # must operate on whichever workspace container is running (normal *or*

@@ -1,6 +1,7 @@
 #!/bin/bash
 # scripts/test/scenarios/15-apparmor-userns-restrict.sh
 # platform: linux
+# privilege: root
 set -u
 LIB="$(dirname "$0")/../lib"
 # shellcheck source=scripts/test/lib/assert.sh
@@ -8,6 +9,7 @@ LIB="$(dirname "$0")/../lib"
 # shellcheck source=scripts/test/lib/restore.sh
 . "$LIB/restore.sh"
 require_platform linux
+require_privilege root
 
 # This sysctl exists on Ubuntu 23.10+ / current Debian / Pop!_OS, gating
 # unprivileged userns creation behind AppArmor. Older kernels and non-

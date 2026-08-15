@@ -1,6 +1,7 @@
 #!/bin/bash
 # scripts/test/scenarios/41-uid-gid-mismatch-no-tty.sh
 # platform: linux
+# privilege: user
 #
 # Image built for a different UID/GID than the host: a non-interactive
 # `dev` invocation must refuse to attach and exit non-zero with a

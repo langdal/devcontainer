@@ -1,6 +1,7 @@
 #!/bin/bash
 # scripts/test/scenarios/40-uid-gid-default-build.sh
 # platform: linux
+# privilege: user
 #
 # `dev exec --build` bakes the invoking user's UID/GID into the image labels
 # and into the in-container vscode user.

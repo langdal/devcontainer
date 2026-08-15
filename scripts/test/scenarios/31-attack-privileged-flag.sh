@@ -1,6 +1,7 @@
 #!/bin/bash
 # scripts/test/scenarios/31-attack-privileged-flag.sh
 # platform: linux
+# privilege: user
 set -u
 LIB="$(dirname "$0")/../lib"
 # shellcheck source=scripts/test/lib/assert.sh

@@ -1,6 +1,7 @@
 #!/bin/bash
 # scripts/test/scenarios/28-bash-mise-activation.sh
 # platform: linux
+# privilege: user
 #
 # mise must be *activated* (not merely reachable via the /mise/shims PATH
 # entry) in an interactive shell, because activation is what exports tool env

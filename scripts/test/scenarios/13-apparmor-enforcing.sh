@@ -1,11 +1,13 @@
 #!/bin/bash
 # scripts/test/scenarios/13-apparmor-enforcing.sh
 # platform: linux
+# privilege: root
 set -u
 LIB="$(dirname "$0")/../lib"
 # shellcheck source=scripts/test/lib/assert.sh
 . "$LIB/assert.sh"
 require_platform linux
+require_privilege root
 
 if ! command -v aa-status >/dev/null 2>&1; then
     log_skip "AppArmor not installed on host"

@@ -1,6 +1,7 @@
 #!/bin/bash
 # scripts/test/scenarios/26-allowlist-approval-gate.sh
 # platform: linux
+# privilege: user
 #
 # The workspace allowlist is agent-writable. Verify an entry added WITHOUT
 # host-side approval never reaches the tinyproxy filter, and that the same

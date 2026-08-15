@@ -1,6 +1,7 @@
 #!/bin/bash
 # scripts/test/scenarios/42-uid-gid-mismatch-rebuild.sh
 # platform: linux
+# privilege: user
 #
 # DEV_ASSUME_YES bypasses the prompt; the script then removes the named
 # volumes and rebuilds the image. The marker file we plant in

@@ -1,6 +1,7 @@
 #!/bin/bash
 # scripts/test/scenarios/16-rootless-subid-preflight.sh
 # platform: linux
+# privilege: user
 #
 # Under a rootless runtime the dind container's user namespace only spans
 # the ids granted in /etc/subuid + /etc/subgid (typically 65536). rootless

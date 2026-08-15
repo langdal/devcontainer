@@ -1,6 +1,7 @@
 #!/bin/bash
 # scripts/test/scenarios/12-fuse-missing.sh
 # platform: linux
+# privilege: root
 set -u
 LIB="$(dirname "$0")/../lib"
 # shellcheck source=scripts/test/lib/assert.sh
@@ -8,6 +9,7 @@ LIB="$(dirname "$0")/../lib"
 # shellcheck source=scripts/test/lib/restore.sh
 . "$LIB/restore.sh"
 require_platform linux
+require_privilege root
 
 if [ ! -e /dev/fuse ]; then
     log_skip "/dev/fuse not present on host (already missing)"

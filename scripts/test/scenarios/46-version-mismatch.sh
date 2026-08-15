@@ -1,6 +1,7 @@
 #!/bin/bash
 # scripts/test/scenarios/46-version-mismatch.sh
 # platform: linux
+# privilege: user
 #
 # Image's dev.version label differs from the running dev script's
 # VERSION. Two paths:

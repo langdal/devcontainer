@@ -1,6 +1,7 @@
 #!/bin/bash
 # scripts/test/scenarios/33-attack-nested-egress.sh
 # platform: linux
+# privilege: user
 set -u
 LIB="$(dirname "$0")/../lib"
 # shellcheck source=scripts/test/lib/assert.sh

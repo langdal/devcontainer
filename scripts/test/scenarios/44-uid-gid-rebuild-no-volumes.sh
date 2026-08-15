@@ -1,6 +1,7 @@
 #!/bin/bash
 # scripts/test/scenarios/44-uid-gid-rebuild-no-volumes.sh
 # platform: linux
+# privilege: user
 #
 # cleanup_for_rebuild must skip absent volumes silently. Otherwise a
 # user who manually wiped their volumes hits a `volume rm: no such

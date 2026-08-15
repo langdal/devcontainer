@@ -1,6 +1,7 @@
 #!/bin/bash
 # scripts/test/scenarios/47-home-volume-isolation.sh
 # platform: linux
+# privilege: user
 #
 # The home volume is per-workspace by default (devcontainer-home-<dir>,
 # <dir> = basename of the launch directory), so one project's agent can't

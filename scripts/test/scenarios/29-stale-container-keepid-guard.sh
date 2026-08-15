@@ -1,6 +1,7 @@
 #!/bin/bash
 # scripts/test/scenarios/29-stale-container-keepid-guard.sh
 # platform: linux
+# privilege: user
 #
 # dev reuses a name-matched container via `exec`. A container created before
 # --userns=keep-id was applied (older dev version, or a different runtime)

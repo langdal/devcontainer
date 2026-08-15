@@ -1,6 +1,7 @@
 #!/bin/bash
 # scripts/test/scenarios/10-cgroupv2-default.sh
 # platform: linux
+# privilege: user
 set -u
 LIB="$(dirname "$0")/../lib"
 # shellcheck source=scripts/test/lib/assert.sh

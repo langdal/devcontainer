@@ -1,6 +1,7 @@
 #!/bin/bash
 # scripts/test/scenarios/50-cli-verbs.sh
 # platform: linux
+# privilege: user
 # CLI surface contract for the compose-style verb grammar. Container-free:
 # every check uses --dry-run, usage output, or error paths only.
 set -u

@@ -1,6 +1,7 @@
 #!/bin/bash
 # scripts/test/scenarios/91-mac-only-docker-desktop.sh
 # platform: darwin
+# privilege: user
 set -u
 LIB="$(dirname "$0")/../lib"
 # shellcheck source=scripts/test/lib/assert.sh

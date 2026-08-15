@@ -1,6 +1,7 @@
 #!/bin/bash
 # scripts/test/scenarios/43-uid-gid-running-container.sh
 # platform: linux
+# privilege: user
 #
 # A running container backed by a mismatched image must be removed by
 # the rebuild path. After DEV_ASSUME_YES=1 ./dev exec …, the image tag must
