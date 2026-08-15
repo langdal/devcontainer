@@ -60,12 +60,23 @@ status_workspace() {
     st=$($RUNTIME $args ps --filter "name=^${name}\$" --format '{{.Status}}' 2>/dev/null | head -1) || true
     [[ -n "$st" ]] || return 0
     any=true
-    fw="firewall on"
-    # shellcheck disable=SC2086  # intentional word-splitting of $args
     if [[ "$mode" == maintenance ]]; then
       fw="no firewall (maintenance)"
-    elif $RUNTIME $args exec "$name" test -f /etc/profile.d/zz-fw-disabled-banner.sh >/dev/null 2>&1; then
-      fw="firewall OFF"
+    else
+      # `dev status` is the security-visibility surface, so it must not fail
+      # open: a probe that cannot run has to read as unknown, never as "on".
+      # `exec ... test -f` alone cannot distinguish "banner absent" (exit 1)
+      # from "exec failed" (container exited mid-command, exec denied), so
+      # have the probe *print* its verdict and treat anything else as unknown.
+      local probe
+      # shellcheck disable=SC2086  # intentional word-splitting of $args
+      probe=$($RUNTIME $args exec "$name" sh -c \
+        'test -f /etc/profile.d/zz-fw-disabled-banner.sh && echo OFF || echo ON' 2>/dev/null) || true
+      case "$probe" in
+        OFF) fw="firewall OFF" ;;
+        ON)  fw="firewall on" ;;
+        *)   fw="firewall ? (probe failed)" ;;
+      esac
     fi
     printf '%-12s %-30s %s — %s\n' "$mode" "$name" "$st" "$fw"
   }

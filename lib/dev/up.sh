@@ -57,18 +57,6 @@ cmd_exec() {
   exit $?
 }
 
-# cmd_shell: the `dev shell` verb — attach a shell to an already-running
-# container for this workspace (never creates one; see attach_existing_container).
-cmd_shell() {
-  if [[ $# -gt 0 ]]; then
-    echo "Error: 'dev shell' takes no arguments." >&2
-    exit 2
-  fi
-  # shellcheck disable=SC2034  # consumed by attach_existing_container (lib/dev/container.sh)
-  SHELL_ONLY=true
-  cmd_start
-  exit $?
-}
 
 # cmd_start [start-options...] [-- CMD ...]
 # The shared flag engine for `dev up`/`dev exec`/`dev shell`: those verb arms
@@ -166,6 +154,14 @@ cmd_start() {
   if [[ "$PIND" == true && "$DIND" == true ]]; then
     echo "Error: --pind and --dind are mutually exclusive." >&2
     exit 1
+  fi
+  # Maintenance mode already runs without a firewall, and entrypoint.sh nests
+  # the FW_DISABLED branch inside the non-maintenance block — so --open here is
+  # a silent no-op rather than an error. Reject it, as the pre-verb CLI did.
+  if [[ "$MAINTENANCE" == true && "${FW_DISABLED_START:-false}" == true ]]; then
+    echo "Error: --open is meaningless with --maint (maintenance mode already has" >&2
+    echo "       no firewall). Drop --open." >&2
+    exit 2
   fi
 
   preflight_apparmor_userns

@@ -110,6 +110,21 @@ detect_with_stubs 2>/dev/null
 [ "$RUNTIME" = "podman" ] \
     || fail "docker CLI on a podman socket should switch to the podman CLI, got '$RUNTIME'"
 
+# B2. The switch must carry the socket over. podman reads CONTAINER_HOST, not
+#     DOCKER_HOST, so a bare `podman` would target the invoking user's default
+#     rootless storage — not necessarily the engine we just identified.
+rm -f "$STUBS"/*
+place docker 'Docker version 29.1.3, build 29.1.3-0ubuntu4.1' \
+    '[{Podman Engine 5.7.0 map[APIVersion:5.7.0]}]'
+place podman 'podman version 5.7.0' ''
+unset CONTAINER_HOST
+RUNTIME=""; unset _ENGINE_IS_PODMAN
+PATH="$STUBS:$PATH" DEV_RUNTIME="" DOCKER_HOST=unix:///run/podman/podman.sock \
+    detect_runtime 2>/dev/null
+[ "${CONTAINER_HOST:-}" = "unix:///run/podman/podman.sock" ] \
+    || fail "switch dropped DOCKER_HOST targeting; CONTAINER_HOST='${CONTAINER_HOST:-unset}'"
+unset CONTAINER_HOST
+
 # C. Real Docker CLI against real dockerd: untouched.
 rm -f "$STUBS"/*
 place docker 'Docker version 29.1.3, build 29.1.3-0ubuntu4.1' \

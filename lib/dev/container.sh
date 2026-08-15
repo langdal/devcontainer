@@ -168,6 +168,18 @@ attach_existing_container() {
       # leave vscode's uid mapped so it cannot write /mise or $HOME under
       # rootless podman -- the "java/JAVA_HOME missing after an upgrade" trap.
       # Recreate it with the correct mapping instead of attaching.
+      #
+      # ...except under `dev shell`, which is attach-only: destroying the
+      # container here would kill whatever session another terminal is running
+      # in it, and then create a replacement the verb promised never to create.
+      if [[ "${SHELL_ONLY:-false}" == true ]]; then
+        echo "Error: $CONTAINER_NAME was created without --userns=keep-id (older dev" >&2
+        echo "       version or a different runtime), so vscode cannot write /mise or" >&2
+        echo "       \$HOME in it under rootless podman." >&2
+        echo "       'dev shell' only attaches and will not recreate a container other" >&2
+        echo "       terminals may be using. Run 'dev down', then 'dev up'." >&2
+        exit 1
+      fi
       echo "Recreating $CONTAINER_NAME: it was created without --userns=keep-id" >&2
       echo "  (older dev version or different runtime). Reusing it would leave vscode" >&2
       echo "  unable to write /mise and \$HOME under rootless podman." >&2
@@ -184,6 +196,13 @@ attach_existing_container() {
     fi
   fi
   if [[ "$attach" == true ]]; then
+    # FW_DISABLED_START only takes effect on the create path below, so --open
+    # cannot do anything to a container that already exists. Say so instead of
+    # attaching with the firewall silently still on.
+    if [[ "${FW_DISABLED_START:-false}" == true ]]; then
+      echo "Note: --open has no effect on an existing container; its firewall is" >&2
+      echo "      unchanged. Use 'dev fw off' to toggle it, or 'dev down' first." >&2
+    fi
     # `exec` bypasses the entrypoint, so the attached process inherits
     # neither the proxy env nor the nested-engine env that the container's
     # original process tree got (and /etc/profile.d only covers login

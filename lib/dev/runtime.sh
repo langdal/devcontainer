@@ -30,6 +30,15 @@ _prefer_podman_cli_for_podman_engine() {
     echo "      podman CLI instead (required for --userns=keep-id)." >&2
     echo "      Set DEV_RUNTIME=docker to override." >&2
     RUNTIME=podman
+    # podman does not read DOCKER_HOST — it reads CONTAINER_HOST. Carry the
+    # socket over so we keep talking to the engine we just identified rather
+    # than the invoking user's default rootless one, which can be entirely
+    # different storage (e.g. DOCKER_HOST=unix:///run/podman/podman.sock is
+    # the rootful socket; bare `podman` would silently target rootless, and
+    # the workspace's containers, images and volumes would appear to vanish).
+    if [[ -n "${DOCKER_HOST:-}" ]]; then
+      export CONTAINER_HOST="$DOCKER_HOST"
+    fi
     unset _ENGINE_IS_PODMAN   # re-probe against the new CLI
     return 0
   fi
