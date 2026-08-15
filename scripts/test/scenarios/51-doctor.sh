@@ -36,19 +36,31 @@ chk "doctor names the runtime" 0 '^Runtime ' ./dev doctor
 # Usage errors exit 2, matching the verb grammar.
 chk "bad flag exits 2" 2 'Usage: dev doctor' ./dev doctor --bogus
 
-# --dind is accepted and promotes the nested checks.
-chk "--dind accepted" 0 '[0-9]+ blocking' env DEV_SKIP_APPARMOR_CHECK=1 ./dev doctor --dind
+# block-if-nested promotion. Force the condition rather than skipping past it:
+# DEV_FAKE_SYSFS_VALUE=1 makes userns-sysctl fail on ANY host, so this tests
+# the promotion instead of this machine's sysctl. Bare, the check is advisory
+# and doctor still exits 0; under --dind it becomes blocking and exits 1. If
+# both cases ever agree, the promotion has broken.
+chk "block-if-nested is advisory when bare" 0 '0 blocking' \
+    env DEV_FAKE_SYSFS_VALUE=1 ./dev doctor
+chk "block-if-nested is promoted under --dind" 1 '1 blocking' \
+    env DEV_FAKE_SYSFS_VALUE=1 ./dev doctor --dind
 
-# A blocking failure exits 1 and names the check. buildx is scoped to docker,
-# so pin the runtime as well as the probe.
+# A blocking failure exits 1 and names the check. buildx is scoped to docker;
+# DEV_RUNTIME=docker is load-bearing: without the pin this host's DOCKER_HOST
+# auto-switches RUNTIME to podman, making the check not-applicable and the
+# assertion vacuous.
 chk "blocking failure exits 1" 1 'buildx' \
-    env -u DOCKER_HOST DEV_RUNTIME=docker DEV_FAKE_BUILDX=false ./dev doctor
+    env DEV_RUNTIME=docker DEV_FAKE_BUILDX=false ./dev doctor
 
-# The same failure must NOT block dev up: image.sh guards the build site, so
-# block-in-doctor is a doctor-only severity. This is the asymmetry the
-# severity model exists to express, and it is worth pinning.
+# The same failure must NOT block dev up: checks_select's 'blocking' filter
+# (cmd_start's only consumer) drops block-in-doctor entirely, so a doctor-only
+# failure never reaches dev up's preflight. This does not exercise
+# image.sh's own buildx guard (runtime_build is never reached under
+# --dry-run) — it pins the other half of the asymmetry: doctor's severity
+# model itself, not the real build site.
 chk "block-in-doctor does not block dev up" 0 '' \
-    env -u DOCKER_HOST DEV_RUNTIME=docker DEV_FAKE_BUILDX=false ./dev up --dry-run
+    env DEV_RUNTIME=docker DEV_FAKE_BUILDX=false ./dev up --dry-run
 
 # An unconfigured host still gets a full report rather than one bare error.
 chk "bad DEV_RUNTIME still reports" 1 '[0-9]+ blocking' \
