@@ -91,14 +91,55 @@ Useful environment variables for `./dev`:
 There is an automated end-to-end test suite under `scripts/test/`:
 
 ```bash
-# Full matrix
+# Full matrix, rootful docker. Needs passwordless sudo.
 sudo bash scripts/test/run-all.sh
+
+# The unprivileged subset under rootless podman. No sudo anywhere.
+bash scripts/test/run-rootless.sh
 
 # Run one scenario directly (each script under scenarios/ is self-contained
 # and uses helpers from scripts/test/lib/). Pass/fail is determined by
-# log_pass/log_fail/log_skip lines.
+# log_pass/log_fail/log_skip lines; any [FAIL] line fails the scenario,
+# whatever else it printed.
 bash scripts/test/scenarios/22-cold-start-budget.sh
 ```
+
+Scenarios declare what they need in front-matter, and the orchestrator
+filters on it:
+
+```bash
+# platform: linux        # linux | darwin | any
+# privilege: root        # root = changes HOST state (sysctls, AppArmor,
+                         # package installs, device nodes); user = needs
+                         # only a working runtime
+```
+
+`DEV_TEST_PRIVILEGE=user` runs only the `user` subset and requires no sudo;
+unset means "run everything". 9 of the 39 scenarios are `root`.
+
+Two cells, two baselines on the dev host. Compare the failure SET, not just
+the tally — a run can hit the same count with a different set:
+
+| Cell | Command | Baseline |
+| --- | --- | --- |
+| rootful docker | `sudo bash scripts/test/run-all.sh` | 24 passed / 10 failed / 6 skipped |
+| rootless podman | `bash scripts/test/run-rootless.sh` | 13 passed / 14 failed / 4 skipped |
+
+Every failure in both is environmental, not a defect:
+
+- 10 in each trace to `kernel.apparmor_restrict_unprivileged_userns=1` on this
+  host, which blocks the rootless nested engines every `--dind`/`--pind`
+  scenario needs. Host-specific, not inherent to unprivileged operation — both
+  cells hit the same family on the same machine.
+- The rootless cell's extra 4 (`41`-`44`) are the GitHub anonymous API rate
+  limit during image builds. Set `GITHUB_TOKEN` to avoid them; without it,
+  release-metadata lookups share a 60/hr limit per IP.
+
+Comparing two runs requires capturing each to its own file —
+`scripts/test/last-run.log` is shared and overwritten per run — and requires
+that nothing else drives the suite concurrently. Two agents running it at once
+share one image tag, one container namespace and one volume namespace, and
+will produce results that agree with each other and with nothing else.
 
 The orchestrator needs passwordless `sudo`. It auto-installs `docker.io`,
 `docker-buildx`, and `podman` on Debian/Ubuntu hosts if a runtime is
