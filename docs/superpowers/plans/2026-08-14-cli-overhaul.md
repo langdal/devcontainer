@@ -2,6 +2,20 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status: complete.** All 13 tasks (plus an unscheduled 10a) landed on
+`production-prep`, `9f98b9e..fd20d17`. Per-task commit ranges and review
+rulings are in `.superpowers/sdd/2026-08-14-cli-overhaul/progress.md`.
+
+Two deviations worth knowing:
+
+- **Task 13, Step 1** — the plan asked for a VERBS table in README mirroring
+  `usage()`. What landed instead is a `## dev Flags` section that defers to
+  `dev --help` as the authoritative reference, precisely so the two cannot
+  drift. The verbs themselves are documented under `## Daily Use`.
+- **Task 13, Step 3 (full matrix)** — this step was recorded as done, but the
+  run behind it had in fact failed at its first action and written a truncated
+  summary. See the verification note under Task 13 below.
+
 **Goal:** Replace dev's flag-based CLI with compose-style verbs (clean break), delete scaffold and deprecated aliases, and restructure into a ≤150-line dispatcher plus focused lib modules with a reviewer-facing SECURITY.md.
 
 **Architecture:** Four sequential PRs on branch `production-prep`. PR1 adds a verb router whose verbs translate into the existing start-path variables (shim approach — old spellings keep working). PR2 migrates every caller (scenario suite, unit test, docs) to verbs. PR3 deletes the legacy surface. PR4 extracts the monolithic bottom half of `dev` into per-verb modules and adds the security documentation.
@@ -59,7 +73,7 @@ verb/flag → usage hint to stderr, exit 2.
 **Interfaces:**
 - Produces: the executable contract every later task keeps green. PR3's task 8 EDITS this file (marked below).
 
-- [ ] **Step 1: Write the scenario (it must FAIL now — the verbs don't exist yet)**
+- [x] **Step 1: Write the scenario (it must FAIL now — the verbs don't exist yet)**
 
 ```bash
 #!/bin/bash
@@ -132,12 +146,12 @@ run-all) leaves `RUNTIME` unset, default it near the top:
 `RUNTIME=${RUNTIME:-podman}`. Check `scripts/test/lib/assert.sh` for the
 exact helper names before finalizing.
 
-- [ ] **Step 2: Run it — must fail on the first `up` check**
+- [x] **Step 2: Run it — must fail on the first `up` check**
 
 Run: `bash scripts/test/scenarios/50-cli-verbs.sh`
 Expected: `log_fail` lines (e.g. "up --dry-run works: expected exit 0, got 1" — today `dev up` is an unknown option error), overall exit 1.
 
-- [ ] **Step 3: Commit the red test**
+- [x] **Step 3: Commit the red test**
 
 ```bash
 git add scripts/test/scenarios/50-cli-verbs.sh
@@ -153,15 +167,15 @@ git commit -m "test(cli): add verb-grammar surface contract (red)"
 - Consumes: existing globals `MAINTENANCE/DIND/PIND/DRY_RUN/FW_DISABLED_START/CMD_ARGS` and the legacy start parser (lines ~758-836), which stays unchanged in PR1.
 - Produces: verbs `up`/`exec` that translate to legacy-parser arguments; global `SHELL_ONLY=false` default (consumed by Task 3); router recognizes `up|shell|exec|down|status`.
 
-- [ ] **Step 1: Add `SHELL_ONLY=false` to the defaults block** (next to `FORCE=false`, with a shellcheck disable=SC2034 comment noting it is consumed by start_container in lib/dev/lifecycle.sh).
+- [x] **Step 1: Add `SHELL_ONLY=false` to the defaults block** (next to `FORCE=false`, with a shellcheck disable=SC2034 comment noting it is consumed by start_container in lib/dev/lifecycle.sh).
 
-- [ ] **Step 2: Extend the router's first-token case** — change the subcommand line to:
+- [x] **Step 2: Extend the router's first-token case** — change the subcommand line to:
 
 ```bash
   up|shell|exec|down|status|fw|reset|scaffold|update|install|agent|dotfile|dotfiles) subcmd="$1"; shift ;;
 ```
 
-- [ ] **Step 3: Add verb arms to the `case "$subcmd"` block** (insert BEFORE the `fw)` arm; these arms do NOT `exit` — they fall through to the legacy start parser below, exactly like the existing `fw disable` fallthrough):
+- [x] **Step 3: Add verb arms to the `case "$subcmd"` block** (insert BEFORE the `fw)` arm; these arms do NOT `exit` — they fall through to the legacy start parser below, exactly like the existing `fw disable` fallthrough):
 
 ```bash
   up)
@@ -201,7 +215,7 @@ git commit -m "test(cli): add verb-grammar surface contract (red)"
     ;;
 ```
 
-- [ ] **Step 4: Add a verbs section at the top of usage()** — insert after the `Usage:` block, replacing its first line:
+- [x] **Step 4: Add a verbs section at the top of usage()** — insert after the `Usage:` block, replacing its first line:
 
 ```
 Usage: dev <verb> [options]
@@ -225,12 +239,12 @@ VERBS:
 
 Keep the existing legacy option/subcommand text below it for now (PR3 deletes it).
 
-- [ ] **Step 5: Run the scenario — up/exec checks now pass**
+- [x] **Step 5: Run the scenario — up/exec checks now pass**
 
 Run: `bash scripts/test/scenarios/50-cli-verbs.sh`
 Expected: still exits 1 (shell/status/down/fw arms missing), but the up/exec/usage checks no longer log_fail.
 
-- [ ] **Step 6: Shellcheck + regression, commit**
+- [x] **Step 6: Shellcheck + regression, commit**
 
 Run: `mise x shellcheck -- shellcheck -x dev lib/dev/*.sh scripts/test/scenarios/50-cli-verbs.sh`
 Run: `bash scripts/test/unit/test-dev-subcommands.sh` (old aliases must still work in PR1)
@@ -250,7 +264,7 @@ git commit -m "feat(cli): add up/exec verbs as shims over the start path"
 - Consumes: `SHELL_ONLY` global from Task 2; `container_running`/`container_exists` helpers in lifecycle.sh.
 - Produces: `dev shell` behavior; the lifecycle guard later tasks keep intact.
 
-- [ ] **Step 1: Add the `shell` arm** (falls through to legacy parser with empty args):
+- [x] **Step 1: Add the `shell` arm** (falls through to legacy parser with empty args):
 
 ```bash
   shell)
@@ -263,7 +277,7 @@ git commit -m "feat(cli): add up/exec verbs as shims over the start path"
     ;;
 ```
 
-- [ ] **Step 2: Add the guard in lifecycle.sh** — inside `start_container`'s reuse block, immediately after the `if [[ "$DRY_RUN" == false ]]; then` line and before the `container_exists` check:
+- [x] **Step 2: Add the guard in lifecycle.sh** — inside `start_container`'s reuse block, immediately after the `if [[ "$DRY_RUN" == false ]]; then` line and before the `container_exists` check:
 
 ```bash
     # `dev shell` attaches only — it must never create a container.
@@ -275,9 +289,9 @@ git commit -m "feat(cli): add up/exec verbs as shims over the start path"
 
 (Verify the helper is named `container_running` in lifecycle.sh; it is used at line ~272.)
 
-- [ ] **Step 3: Run scenario 50** — the "shell errors when nothing running" check passes.
+- [x] **Step 3: Run scenario 50** — the "shell errors when nothing running" check passes.
 
-- [ ] **Step 4: Manual positive check** (needs the image; skip if slow, scenario coverage lands in PR2):
+- [x] **Step 4: Manual positive check** (needs the image; skip if slow, scenario coverage lands in PR2):
 
 ```bash
 cd "$(mktemp -d)" && DEV_RUNTIME=podman DEV_ASSUME_YES=1 timeout 120 /home/jakob/code/devcontainer/dev exec -- sleep 90 &
@@ -286,7 +300,7 @@ sleep 60 && DEV_RUNTIME=podman /home/jakob/code/devcontainer/dev shell <<< 'echo
 
 Expected: `SHELL_OK`.
 
-- [ ] **Step 5: Shellcheck, commit**
+- [x] **Step 5: Shellcheck, commit**
 
 ```bash
 git add dev lib/dev/lifecycle.sh
@@ -302,7 +316,7 @@ git commit -m "feat(cli): add shell verb (attach-only, never creates)"
 - Consumes: `_resolve_workspace_names`, `detect_runtime`, `ensure_runtime_ready` (defined in `dev`), `DIND_RUNTIME_ARGS`.
 - Produces: `down_workspace()` and `status_workspace()` in lifecycle.sh (PR4 moves them to their own modules under the same names).
 
-- [ ] **Step 1: Add functions to lib/dev/lifecycle.sh** (adapt the running-check to the file's existing helpers — `container_running` takes a name and uses `$RUNTIME` without extra args; for dind/pind names mirror how `refuse_if_running` passes `$DIND_RUNTIME_ARGS`):
+- [x] **Step 1: Add functions to lib/dev/lifecycle.sh** (adapt the running-check to the file's existing helpers — `container_running` takes a name and uses `$RUNTIME` without extra args; for dind/pind names mirror how `refuse_if_running` passes `$DIND_RUNTIME_ARGS`):
 
 ```bash
 # Stop this workspace's container(s), whatever mode is running. Containers
@@ -362,7 +376,7 @@ status_workspace() {
 }
 ```
 
-- [ ] **Step 2: Add verb arms in `dev`** (these DO exit — no fallthrough):
+- [x] **Step 2: Add verb arms in `dev`** (these DO exit — no fallthrough):
 
 ```bash
   down)
@@ -383,9 +397,9 @@ status_workspace() {
     ;;
 ```
 
-- [ ] **Step 3: Run scenario 50** — status/down checks pass. Manual positive check: start a container (`dev exec -- sleep 60 &`), then `dev status` shows `normal ... firewall on`, `dev down` stops it, second `dev status` prints the nothing-running line.
+- [x] **Step 3: Run scenario 50** — status/down checks pass. Manual positive check: start a container (`dev exec -- sleep 60 &`), then `dev status` shows `normal ... firewall on`, `dev down` stops it, second `dev status` prints the nothing-running line.
 
-- [ ] **Step 4: Shellcheck, commit**
+- [x] **Step 4: Shellcheck, commit**
 
 ```bash
 git add dev lib/dev/lifecycle.sh
@@ -401,7 +415,7 @@ git commit -m "feat(cli): add down and status verbs"
 - Consumes: `fw_disable`/`fw_enable`/`fw_log`/`fw_drops` in lib/dev/fw.sh.
 - Produces: actions `off`/`on` (PR1 keeps `disable`/`enable` working unchanged, including disable's cold-start fallthrough; PR3 removes them). New fw.sh function `fw_off_running_only`.
 
-- [ ] **Step 1: In `dev`'s fw arm**, extend the action case: `log|drops|enable|on)` share the strict no-extra-args branch (map `on` → `enable` after validation: `[[ "$fw_action" == on ]] && fw_action=enable`). Add a NEW strict branch for `off` (unlike `disable`, `off` takes no trailing args and never cold-starts):
+- [x] **Step 1: In `dev`'s fw arm**, extend the action case: `log|drops|enable|on)` share the strict no-extra-args branch (map `on` → `enable` after validation: `[[ "$fw_action" == on ]] && fw_action=enable`). Add a NEW strict branch for `off` (unlike `disable`, `off` takes no trailing args and never cold-starts):
 
 ```bash
       off)
@@ -416,7 +430,7 @@ git commit -m "feat(cli): add down and status verbs"
 
 and dispatch: `off) fw_off_running_only ;;` in the second case. Update the action-error line to name the new set first: `expected an action (off|on|log|drops), got ...`.
 
-- [ ] **Step 2: In lib/dev/fw.sh**, add `fw_off_running_only()` — same as `fw_disable` but erroring instead of falling through when nothing is running. Read `fw_disable` first (file is 58 lines); the new function reuses its running-container branch verbatim and replaces the fallthrough branch with:
+- [x] **Step 2: In lib/dev/fw.sh**, add `fw_off_running_only()` — same as `fw_disable` but erroring instead of falling through when nothing is running. Read `fw_disable` first (file is 58 lines); the new function reuses its running-container branch verbatim and replaces the fallthrough branch with:
 
 ```bash
   echo "Error: nothing running for this workspace." >&2
@@ -424,14 +438,14 @@ and dispatch: `off) fw_off_running_only ;;` in the second case. Update the actio
   exit 1
 ```
 
-- [ ] **Step 3: Run scenario 50** (`fw bad action lists off` passes) and the full scenario file end-to-end: `bash scripts/test/scenarios/50-cli-verbs.sh` → `log_pass`, exit 0.
+- [x] **Step 3: Run scenario 50** (`fw bad action lists off` passes) and the full scenario file end-to-end: `bash scripts/test/scenarios/50-cli-verbs.sh` → `log_pass`, exit 0.
 
-- [ ] **Step 4: Regression: old spellings intact**
+- [x] **Step 4: Regression: old spellings intact**
 
 Run: `bash scripts/test/unit/test-dev-subcommands.sh` and `bash scripts/test/scenarios/26-allowlist-approval-gate.sh`
 Expected: pass (26 needs the image built; it is — `generic-devcontainer:latest` exists on this host).
 
-- [ ] **Step 5: Shellcheck, commit — PR1 complete**
+- [x] **Step 5: Shellcheck, commit — PR1 complete**
 
 ```bash
 git add dev lib/dev/fw.sh
@@ -450,7 +464,7 @@ git commit -m "feat(cli): add fw off/on actions (off is running-only; up --open 
 **Interfaces:**
 - Consumes: PR1 verbs. Old spellings still work, so this is a pure text migration with the suite green before AND after.
 
-- [ ] **Step 1: Apply the spelling map.** Mechanical rules (apply with sed or manually per file; `--maintenance` also appears in prose/comments — update those too):
+- [x] **Step 1: Apply the spelling map.** Mechanical rules (apply with sed or manually per file; `--maintenance` also appears in prose/comments — update those too):
 
 | old | new |
 |---|---|
@@ -470,17 +484,17 @@ git commit -m "feat(cli): add fw off/on actions (off is running-only; up --open 
 
 Files to touch (from the inventory): scenarios 01-05, 10-16, 20-29, 30-34, 40-49, 90, 91 — every scenario EXCEPT 45 (scaffold; PR3 deletes it — leave it on old spellings) — plus `scripts/test/lib/privilege.sh` and `scripts/test/run-all.sh` if they invoke `./dev` (check with `grep -n './dev' scripts/test/run-all.sh scripts/test/lib/privilege.sh`).
 
-- [ ] **Step 2: Grep-verify no stragglers**
+- [x] **Step 2: Grep-verify no stragglers**
 
 Run: `grep -rn '\./dev \(--\|fw disable\|fw enable\)\|\./dev --' scripts/test/scenarios/ scripts/test/lib/ scripts/test/run-all.sh | grep -v '45-create-dev-container'`
 Expected: no output (comments mentioning old flags in explanatory prose are OK if reworded or clearly historical; invocations must be zero).
 
-- [ ] **Step 3: Run the cheap scenarios locally**
+- [x] **Step 3: Run the cheap scenarios locally**
 
 Run: `for s in 20 26 50; do bash scripts/test/scenarios/${s}-*.sh || echo "FAILED: $s"; done`
 Expected: three `log_pass` lines. (20 and 26 start real containers — allow several minutes.)
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add scripts/test/
@@ -493,7 +507,7 @@ git commit -m "test: migrate scenario suite to verb spellings"
 - Rewrite: `scripts/test/unit/test-dev-subcommands.sh`
 - Modify: `README.md`, `CLAUDE.md` (invocation examples only; structural rewrite is PR4).
 
-- [ ] **Step 1: Rewrite the unit test** to cover the verb surface instead of deprecated aliases. Read the current file first for its harness conventions (it calls a `dev` function/binary directly and greps output). New assertions, using the same style:
+- [x] **Step 1: Rewrite the unit test** to cover the verb surface instead of deprecated aliases. Read the current file first for its harness conventions (it calls a `dev` function/binary directly and greps output). New assertions, using the same style:
   1. `dev update --dry-run` output unchanged (spelling already new).
   2. `dev fw log` with no running container → same error as before.
   3. `dev exec` without `--` → exit 2, message contains `requires`.
@@ -501,14 +515,14 @@ git commit -m "test: migrate scenario suite to verb spellings"
   5. `dev status` with nothing running → contains `Nothing running`.
   Drop every `--self-update` / `--monitor` / `--create-dev-container` deprecation-warning assertion (PR3 deletes the aliases; they are intentionally untested from here on).
 
-- [ ] **Step 2: Run it**
+- [x] **Step 2: Run it**
 
 Run: `bash scripts/test/unit/test-dev-subcommands.sh`
 Expected: pass.
 
-- [ ] **Step 3: Update README.md and CLAUDE.md invocation examples** to the new spellings using the Task 6 map (README "Build and Run"-equivalent sections, firewall-controls block `fw disable|enable` → `fw off|on` with the `--open` note; CLAUDE.md's command block likewise). Do NOT restructure prose yet. Do NOT touch the deprecated-flags documentation paragraphs — PR3 deletes them with the code.
+- [x] **Step 3: Update README.md and CLAUDE.md invocation examples** to the new spellings using the Task 6 map (README "Build and Run"-equivalent sections, firewall-controls block `fw disable|enable` → `fw off|on` with the `--open` note; CLAUDE.md's command block likewise). Do NOT restructure prose yet. Do NOT touch the deprecated-flags documentation paragraphs — PR3 deletes them with the code.
 
-- [ ] **Step 4: Commit — PR2 complete**
+- [x] **Step 4: Commit — PR2 complete**
 
 ```bash
 git add scripts/test/unit/test-dev-subcommands.sh README.md CLAUDE.md
@@ -524,7 +538,7 @@ git commit -m "docs+test: move unit test and doc examples to verb spellings"
 **Files:**
 - Modify: `dev` (router case ~473-487, fw arm, usage()), `lib/dev/fw.sh`, `scripts/test/scenarios/50-cli-verbs.sh`.
 
-- [ ] **Step 1: Extend scenario 50 FIRST (red)** — add these checks:
+- [x] **Step 1: Extend scenario 50 FIRST (red)** — add these checks:
 
 ```bash
 # Clean break: legacy spellings are gone.
@@ -538,7 +552,7 @@ chk "--disable-firewall removed"   2 ''     ./dev --disable-firewall
 
 Run: `bash scripts/test/scenarios/50-cli-verbs.sh` → fails on all six.
 
-- [ ] **Step 2: Router changes in `dev`:**
+- [x] **Step 2: Router changes in `dev`:**
   - Delete the seven deprecated-alias case arms and the `_deprecated()` helper.
   - Bare invocation: change `subcmd=""` handling — after the case, add:
 
@@ -562,16 +576,16 @@ fi
 ```
 
   - Delete the `fw_disable` fallthrough dispatch (`disable) fw_disable ;;` line and the comment block about it).
-- [ ] **Step 3: lib/dev/fw.sh** — delete `fw_disable`'s no-container fallthrough branch (fold what remains into `fw_off_running_only`, delete `fw_disable`, and keep `fw_enable` as the implementation `on` dispatches to). `FW_DISABLED_START` is now set ONLY by `up --open`/`exec --open`; update its comment block in `dev` (lines ~213-218).
+- [x] **Step 3: lib/dev/fw.sh** — delete `fw_disable`'s no-container fallthrough branch (fold what remains into `fw_off_running_only`, delete `fw_disable`, and keep `fw_enable` as the implementation `on` dispatches to). `FW_DISABLED_START` is now set ONLY by `up --open`/`exec --open`; update its comment block in `dev` (lines ~213-218).
 
-- [ ] **Step 4: usage()** — delete the legacy `START OPTIONS`/`SUBCOMMANDS`/`DEPRECATED FLAGS` sections; the VERBS section from Task 2 plus a short OPTIONS-per-verb block is the whole help text now. Keep `--help`/`--version` handling.
+- [x] **Step 4: usage()** — delete the legacy `START OPTIONS`/`SUBCOMMANDS`/`DEPRECATED FLAGS` sections; the VERBS section from Task 2 plus a short OPTIONS-per-verb block is the whole help text now. Keep `--help`/`--version` handling.
 
-- [ ] **Step 5: Green + regression**
+- [x] **Step 5: Green + regression**
 
 Run: `bash scripts/test/scenarios/50-cli-verbs.sh && bash scripts/test/unit/test-dev-subcommands.sh && bash scripts/test/scenarios/20-mode-conflict-pairs.sh`
 Expected: all pass.
 
-- [ ] **Step 6: Commit (breaking)**
+- [x] **Step 6: Commit (breaking)**
 
 ```bash
 git add dev lib/dev/fw.sh scripts/test/scenarios/50-cli-verbs.sh
@@ -590,7 +604,7 @@ cold-start-with-firewall-open is 'dev up --open'. The old --flag aliases
 - Delete: `lib/dev/scaffold.sh`, `scripts/test/scenarios/45-create-dev-container.sh`
 - Modify: `dev` (router token list, scaffold arm, usage remnants), `README.md`, `CLAUDE.md` (scaffold sections), `scripts/test/unit/test-dev-subcommands.sh` (scaffold assertions, if any survived Task 7).
 
-- [ ] **Step 1: Delete files and references**
+- [x] **Step 1: Delete files and references**
 
 ```bash
 git rm lib/dev/scaffold.sh scripts/test/scenarios/45-create-dev-container.sh
@@ -600,7 +614,7 @@ In `dev`: remove `scaffold` from the router token list, delete the `scaffold)` a
 
 In README.md/CLAUDE.md: delete the scaffold command from command blocks and the "Scaffold a self-contained .devcontainer/" prose/sections.
 
-- [ ] **Step 2: Verify nothing dangles**
+- [x] **Step 2: Verify nothing dangles**
 
 Run: `grep -rn 'scaffold\|create_dev_container' dev lib/ scripts/ README.md CLAUDE.md examples/ 2>/dev/null`
 Expected: no output (historical docs/ and CHANGELOG.md hits are fine and excluded from this grep).
@@ -608,7 +622,7 @@ Expected: no output (historical docs/ and CHANGELOG.md hits are fine and exclude
 Run: `mise x shellcheck -- shellcheck -x dev lib/dev/*.sh && bash scripts/test/scenarios/50-cli-verbs.sh`
 Expected: clean, pass.
 
-- [ ] **Step 3: Commit — PR3 complete**
+- [x] **Step 3: Commit — PR3 complete**
 
 ```bash
 git add -A
@@ -630,11 +644,11 @@ removed; use 'dev up' / editor-agnostic attach instead."
 
 Mechanical extraction — no behavior change; scenario 50 + unit test are the regression net, run after each move:
 
-- [ ] **Step 1:** Move `detect_runtime`, `ensure_runtime_ready`, `runtime_is_rootless`, and related runtime-probe helpers from `dev` into new `lib/dev/runtime.sh` (they are defined in `dev`'s top half — locate with `grep -n '^detect_runtime\|^ensure_runtime_ready\|^runtime_is_rootless' dev`). The lib/dev/*.sh loader glob at `dev` line ~46 picks the new file up automatically. Run scenario 50; commit `refactor(cli): extract runtime detection to lib/dev/runtime.sh`.
-- [ ] **Step 2:** Move the whole legacy start block (`dev` lines from the `# --- Default "start" command` comment to the final `start_container` call) into `lib/dev/up.sh` as `cmd_start "$@"` (one function wrapping the parser + preflights + name resolution + build check + `start_container`). The up/exec/shell router arms end with `cmd_start ${ARGS...}` instead of falling through. Move `_resolve_workspace_names`, `_resolve_home_volume`, `resolve_agent_storage` into `lib/dev/up.sh` only if they are not consumed by other subcommands (they ARE — reset/fw/agent use them; leave them in `dev` for Task 11 to place in container.sh). Run scenario 50 + 20; commit `refactor(cli): extract start flow to lib/dev/up.sh`.
-- [ ] **Step 3:** Move `down_workspace` + `status_workspace` from lifecycle.sh into `lib/dev/status.sh`. Run scenario 50; commit `refactor(cli): move down/status into lib/dev/status.sh`.
+- [x] **Step 1:** Move `detect_runtime`, `ensure_runtime_ready`, `runtime_is_rootless`, and related runtime-probe helpers from `dev` into new `lib/dev/runtime.sh` (they are defined in `dev`'s top half — locate with `grep -n '^detect_runtime\|^ensure_runtime_ready\|^runtime_is_rootless' dev`). The lib/dev/*.sh loader glob at `dev` line ~46 picks the new file up automatically. Run scenario 50; commit `refactor(cli): extract runtime detection to lib/dev/runtime.sh`.
+- [x] **Step 2:** Move the whole legacy start block (`dev` lines from the `# --- Default "start" command` comment to the final `start_container` call) into `lib/dev/up.sh` as `cmd_start "$@"` (one function wrapping the parser + preflights + name resolution + build check + `start_container`). The up/exec/shell router arms end with `cmd_start ${ARGS...}` instead of falling through. Move `_resolve_workspace_names`, `_resolve_home_volume`, `resolve_agent_storage` into `lib/dev/up.sh` only if they are not consumed by other subcommands (they ARE — reset/fw/agent use them; leave them in `dev` for Task 11 to place in container.sh). Run scenario 50 + 20; commit `refactor(cli): extract start flow to lib/dev/up.sh`.
+- [x] **Step 3:** Move `down_workspace` + `status_workspace` from lifecycle.sh into `lib/dev/status.sh`. Run scenario 50; commit `refactor(cli): move down/status into lib/dev/status.sh`.
 
-- [ ] **Step 4: Budget check**
+- [x] **Step 4: Budget check**
 
 Run: `wc -l dev lib/dev/*.sh`
 Expected: `dev` ≤ ~150 lines (router + usage + module loader + version helpers). If usage() text keeps it over, move usage() into `lib/dev/usage.sh` — acceptable and preferred over trimming help text.
@@ -645,10 +659,10 @@ Expected: `dev` ≤ ~150 lines (router + usage + module loader + version helpers
 - Create: `lib/dev/container.sh`, `lib/dev/volumes.sh`, `lib/dev/inject.sh`
 - Modify: `lib/dev/lifecycle.sh` (shrinks; delete when empty), `lib/dev/agent.sh`, `dev`
 
-- [ ] **Step 1:** `container.sh` takes: container name resolution (`_resolve_workspace_names` from `dev`), `container_exists`/`container_running`/`container_label`, `refuse_if_running` + the four-way guard block (move from up.sh's cmd_start into a `resolve_container_name_and_guard` function), and the create-or-start/attach logic of `start_container`. `volumes.sh` takes `_resolve_home_volume` (from `dev`), volume mounts assembly, and `migrate_volume_for_keepid`. What remains of lifecycle.sh after the moves: if under ~50 lines, fold it into container.sh and `git rm` lifecycle.sh.
-- [ ] **Step 2:** `inject.sh` takes the helper-container tar-copy machinery from agent.sh (the functions shared by dotfile.sh — identify with `grep -n '_agent\|helper' lib/dev/agent.sh lib/dev/dotfile.sh` and move exactly the functions dotfile.sh also calls, plus their private helpers). agent.sh keeps resolution/UI (`_agent_add/list/rm`, allowlist tables, keychain fallback).
-- [ ] **Step 3:** After each move: `mise x shellcheck -- shellcheck -x dev lib/dev/*.sh` + scenario 50 + `bash scripts/test/scenarios/48-agent-inject.sh`. Budget: every module ≤ ~250 lines (`wc -l lib/dev/*.sh`); if agent.sh still exceeds, note it in the commit body rather than force a worse split.
-- [ ] **Step 4: Commit** `refactor(cli): split lifecycle into container/volumes modules, extract shared inject helpers`
+- [x] **Step 1:** `container.sh` takes: container name resolution (`_resolve_workspace_names` from `dev`), `container_exists`/`container_running`/`container_label`, `refuse_if_running` + the four-way guard block (move from up.sh's cmd_start into a `resolve_container_name_and_guard` function), and the create-or-start/attach logic of `start_container`. `volumes.sh` takes `_resolve_home_volume` (from `dev`), volume mounts assembly, and `migrate_volume_for_keepid`. What remains of lifecycle.sh after the moves: if under ~50 lines, fold it into container.sh and `git rm` lifecycle.sh.
+- [x] **Step 2:** `inject.sh` takes the helper-container tar-copy machinery from agent.sh (the functions shared by dotfile.sh — identify with `grep -n '_agent\|helper' lib/dev/agent.sh lib/dev/dotfile.sh` and move exactly the functions dotfile.sh also calls, plus their private helpers). agent.sh keeps resolution/UI (`_agent_add/list/rm`, allowlist tables, keychain fallback).
+- [x] **Step 3:** After each move: `mise x shellcheck -- shellcheck -x dev lib/dev/*.sh` + scenario 50 + `bash scripts/test/scenarios/48-agent-inject.sh`. Budget: every module ≤ ~250 lines (`wc -l lib/dev/*.sh`); if agent.sh still exceeds, note it in the commit body rather than force a worse split.
+- [x] **Step 4: Commit** `refactor(cli): split lifecycle into container/volumes modules, extract shared inject helpers`
 
 ### Task 12: SECURITY.md + threat-model headers
 
@@ -656,23 +670,23 @@ Expected: `dev` ≤ ~150 lines (router + usage + module loader + version helpers
 - Create: `SECURITY.md`
 - Modify (comment-only): `Dockerfile`, `entrypoint.sh`, `firewall-init.sh`, `firewall-disable.sh`, `allowlist.base`, `allowlist.dind`
 
-- [ ] **Step 1: Write SECURITY.md** with exactly these sections:
+- [x] **Step 1: Write SECURITY.md** with exactly these sections:
   1. **Threat model** — verbatim framing: the sandbox protects against an agent *finding and using the host's keys and secrets by accident, or — in misguided loyalty — searching for solutions outside the sandbox*. Containment of agent reach; NOT exfiltration-prevention (allowlisted hosts are reachable and bidirectional by design).
   2. **What enforces the boundary** — table: file → mechanism → what to verify when reviewing (Dockerfile: no sudo for vscode, dc-tinyproxy copy, proxy user; entrypoint.sh: fail-closed firewall start, seed-never-overwrite; firewall-init.sh: default-DROP v4+v6, owner rule, never reads /workspace; firewall-disable.sh: explicit opt-out surface; allowlists: the egress universe).
   3. **Reading order for a first review** — Dockerfile → entrypoint.sh → firewall-init.sh → allowlist.base/dind → lib/dev/container.sh mount/exec surface (what the CLI mounts and injects).
   4. **Deliberate non-goals** — exfiltration via allowlisted hosts; malicious base image; kernel exploits from inside; the maintenance-mode escape hatch (documented, opt-in, loudly bannered).
   5. **Known sharp edges** — host AppArmor interactions, IPv6 posture (mirrored since the fix-pack), `DEV_ASSUME_YES=1` waiving the project-allowlist review.
-- [ ] **Step 2: Add threat-model headers** — 3-6 comment lines at the top of each of the six files stating what the file may and may not do (e.g. firewall-init.sh: "May: program iptables/ip6tables, write tinyproxy config/filter from BAKED and APPROVED allowlists. Must never: read allowlist material from /workspace, weaken rules based on env vars an in-container process can set."). Comment-only — `git diff` per file must show zero non-comment changes.
-- [ ] **Step 3:** `mise x shellcheck -- shellcheck -x entrypoint.sh firewall-init.sh firewall-disable.sh` + `mise x hadolint -- hadolint Dockerfile` → clean. Rebuild sanity: `podman build --network=host -t generic-devcontainer /home/jakob/code/devcontainer >/dev/null && echo BUILD_OK`.
-- [ ] **Step 4: Commit** `docs(security): add reviewer guide and threat-model headers to the enforcement core`
+- [x] **Step 2: Add threat-model headers** — 3-6 comment lines at the top of each of the six files stating what the file may and may not do (e.g. firewall-init.sh: "May: program iptables/ip6tables, write tinyproxy config/filter from BAKED and APPROVED allowlists. Must never: read allowlist material from /workspace, weaken rules based on env vars an in-container process can set."). Comment-only — `git diff` per file must show zero non-comment changes.
+- [x] **Step 3:** `mise x shellcheck -- shellcheck -x entrypoint.sh firewall-init.sh firewall-disable.sh` + `mise x hadolint -- hadolint Dockerfile` → clean. Rebuild sanity: `podman build --network=host -t generic-devcontainer /home/jakob/code/devcontainer >/dev/null && echo BUILD_OK`.
+- [x] **Step 4: Commit** `docs(security): add reviewer guide and threat-model headers to the enforcement core`
 
 ### Task 13: docs restructure + full matrix
 
 **Files:**
 - Modify: `README.md`, `CLAUDE.md`, `scripts/lint.sh`
 
-- [ ] **Step 1: README/CLAUDE.md restructure** — rewrite the command-reference sections around the verb grammar (VERBS table mirroring usage()); update the "12 checks"→13 references if any remain; link SECURITY.md prominently in README's firewall section; delete any remaining scaffold/deprecated-flag prose.
-- [ ] **Step 2: Line-budget gate** — append to `scripts/lint.sh`:
+- [x] **Step 1: README/CLAUDE.md restructure** — rewrite the command-reference sections around the verb grammar (VERBS table mirroring usage()); update the "12 checks"→13 references if any remain; link SECURITY.md prominently in README's firewall section; delete any remaining scaffold/deprecated-flag prose.
+- [x] **Step 2: Line-budget gate** — append to `scripts/lint.sh`:
 
 ```bash
 echo "=== line budgets ==="
@@ -686,12 +700,32 @@ done
 
 (Budgets are the spec's soft targets plus slack; tune the numbers to the actual post-refactor counts if a file is legitimately over — the gate exists to catch future creep, not to force artificial splits. `wc -l < file` keeps output filename-free.)
 
-- [ ] **Step 3: Full matrix**
+- [x] **Step 3: Full matrix**
 
 Run: `sudo bash scripts/test/run-all.sh` (needs passwordless sudo; logs at scripts/test/last-summary.log)
 Expected: pass/skip only. Scenario 45 no longer exists; scenario 50 present. Investigate ANY fail before committing; macOS scenarios (90/91) skip on Linux.
 
-- [ ] **Step 4: Commit — PR4 complete**
+> **Verification note (2026-08-15, re-run).** The run originally recorded here
+> had failed at its first action and written a truncated summary, so "pass/skip
+> only" was never actually observed. Root cause: `run-all.sh:72` only installs
+> `docker-buildx` when *neither* runtime is on PATH. Docker was present, so
+> buildx was never installed, `dev` refused to build (buildx is mandatory for
+> `RUN --mount=type=secret`), and 21 scenarios failed downstream of the missing
+> image.
+>
+> After `apt-get install docker-buildx`, the matrix is **23 passed, 10 failed,
+> 6 skipped**, and `50-cli-verbs` passes. All 10 failures share one
+> environmental cause — `kernel.apparmor_restrict_unprivileged_userns=1` on the
+> host blocks the rootless nested engines that every `--dind`/`--pind` scenario
+> needs (25 included; it is a `--dind` scenario whose message masks the cause).
+> `dev` behaves correctly against that sysctl: scenario 15, which asserts the
+> preflight refuses cleanly with remediation, passes. Left unset by choice — the
+> restriction is a host security control, not a project defect.
+>
+> Follow-up worth doing separately: widen `run-all.sh`'s install gate to check
+> for buildx specifically, so this cannot silently recur.
+
+- [x] **Step 4: Commit — PR4 complete**
 
 ```bash
 git add -A
