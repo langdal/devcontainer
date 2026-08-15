@@ -72,6 +72,9 @@ docker build -t generic-devcontainer .
 
 # Update a git-checkout install to the latest released tag.
 ./dev update
+
+# Check the host for everything dev needs (no image or container required).
+./dev doctor
 ```
 
 Useful environment variables for `./dev`:
@@ -134,14 +137,31 @@ Three components, each with a distinct role:
 `dev` itself is a thin subcommand router: it sources every file under
 `lib/dev/*.sh` and dispatches the first argument to a `cmd_*` function.
 Each verb (`up`/`exec`/`shell`, `down`/`status`, `fw`, `agent`, `dotfile`,
-`reset`, `update`, `install`) gets roughly one module, plus a handful of
-shared-concern modules split out of the old monolith: `container.sh` and
-`volumes.sh` (container lifecycle and mount/volume logic), `inject.sh`
-(shared plumbing behind `agent`/`dotfile`), `runtime.sh` (docker/podman
-detection), `approval.sh` (the project-allowlist diff/approve flow), and
-`usage.sh` (the `--help` text). `scripts/lint.sh` enforces a line-budget
-gate over `dev` and `lib/dev/*.sh` so this stays split rather than
-regrowing into one large file.
+`reset`, `update`, `install`, `doctor`) gets roughly one module, plus a
+handful of shared-concern modules split out of the old monolith:
+`container.sh` and `volumes.sh` (container lifecycle and mount/volume
+logic), `inject.sh` (shared plumbing behind `agent`/`dotfile`),
+`runtime.sh` (docker/podman detection), `approval.sh` (the
+project-allowlist diff/approve flow), `usage.sh` (the `--help` text), and
+`checks.sh` + `checks-catalog.sh` (the host-check registry shared by `dev
+doctor` and the blocking preflights in `dev up`). `scripts/lint.sh`
+enforces a line-budget gate over `dev` and `lib/dev/*.sh` so this stays
+split rather than regrowing into one large file.
+
+`checks.sh` holds the `CHECKS` array (one entry per requirement:
+`id|phase|applies-to|severity|title`) plus the machinery that reads it
+(`check_field`, `check_applies`, `run_check`, `checks_select`);
+`checks-catalog.sh` holds the `_chk_<id>` / `_chk_<id>_fix` probe/fix
+function pairs the registry dispatches to by name. There are four
+severities: `block` refuses in both `dev up` and `dev doctor`;
+`block-if-nested` blocks only under `--dind`/`--pind`; `block-in-doctor`
+blocks `dev doctor` (readiness) but never `dev up`, because
+`lib/dev/image.sh` already guards the real build site with the same probe;
+`advise` never blocks anything. `dev doctor` runs every applicable entry,
+`cmd_start` runs the blocking subset, so the two can never disagree about
+whether a host is usable. Probes reach the outside world only through the
+indirections in `runtime.sh`, which is what makes the macOS checks
+testable from Linux.
 
 ## Key Design Decisions
 

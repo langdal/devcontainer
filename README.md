@@ -89,6 +89,8 @@ dev up --build            # rebuild the image
 dev up --port 9000        # forward an extra port (repeatable)
 dev up --default-ports    # forward 5173, 5174, 8080, 2345, 3000
 dev up --host-port 8080   # allow egress to host.docker.internal:8080
+dev doctor                # check this host for everything dev needs
+dev doctor --dind         # also check nested-engine prerequisites
 ```
 
 Multiple terminals: run `dev shell` to attach another shell to the running container (`dev up` also attaches when one is already running).
@@ -389,6 +391,10 @@ home volume with `dev reset`.
 
 ## Host Requirements
 
+Run `dev doctor` — it checks every requirement below on your actual machine
+and prints the fix for anything missing. It needs no image, no container and
+no running podman machine, so it works before anything is set up.
+
 - **Linux**: `docker` or `podman`. Docker is preferred when both are installed. Override with `DEV_RUNTIME=docker` or `DEV_RUNTIME=podman`.
 - **macOS**: `podman` only — Docker Desktop is not supported.
 
@@ -419,7 +425,7 @@ home volume with `dev reset`.
 
 The script reads `id -u` / `id -g` and bakes them into the image. If your host UID/GID later changes, the next `dev` invocation detects the mismatch and prompts to rebuild + wipe volumes.
 
-- **On rootless podman, `dev` runs the container with `--userns=keep-id`.** Rootless podman's default user-namespace mapping puts container root at the invoking host user and shifts every other container id — including the baked `vscode` uid — into the subuid/subgid range, so the baked-uid-matches-host-uid assumption above doesn't hold by default: the bind-mounted workspace shows up root-owned to `vscode`, who can't write to it. `--userns=keep-id` maps the invoking host user 1:1 onto the matching container id instead, fixing that. It only applies when the runtime is actually rootless podman (including the `podman-docker` shim) — Docker and rootful podman don't remap ids and don't need it. The first run after upgrading re-chowns the named volumes (`devcontainer-mise`, the resolved home volume — `devcontainer-home-<dir>` by default or `devcontainer-home` under `DEV_SHARED_HOME=1`, `devcontainer-dind`/`devcontainer-pind`), since their content was written under the old mapping; you'll see one `Migrating <volume> ownership for --userns=keep-id (one-time)...` line per volume, and nothing on subsequent runs.
+- **On rootless podman, `dev` runs the container with `--userns=keep-id`.** Rootless podman's default user-namespace mapping puts container root at the invoking host user and shifts every other container id — including the baked `vscode` uid — into the subuid/subgid range, so the baked-uid-matches-host-uid assumption above doesn't hold by default: the bind-mounted workspace shows up root-owned to `vscode`, who can't write to it. `--userns=keep-id` maps the invoking host user 1:1 onto the matching container id instead, fixing that. It only applies when the runtime is actually rootless podman (including the `podman-docker` shim) — Docker and rootful podman don't remap ids and don't need it. The first run after upgrading re-chowns the named volumes (`devcontainer-mise`, the resolved home volume — `devcontainer-home-<dir>` by default or `devcontainer-home` under `DEV_SHARED_HOME=1`, `devcontainer-dind`/`devcontainer-pind`), since their content was written under the old mapping; you'll see one `Migrating <volume> ownership for --userns=keep-id (one-time)...` line per volume, and nothing on subsequent runs. If a volume somehow ends up with the wrong owner anyway — `$HOME` or `/mise` unwritable inside the container — `dev down` then `dev up` re-triggers this migration.
 
 ## `dev` Flags
 
