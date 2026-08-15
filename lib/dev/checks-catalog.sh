@@ -31,7 +31,10 @@ _chk_dev_runtime_valid() {
   return 1
 }
 _chk_dev_runtime_valid_fix() {
-  echo "DEV_RUNTIME=${DEV_RUNTIME:-} is set, but '${DEV_RUNTIME:-}' is not on PATH."
+  # "not found on PATH" verbatim from the message detect_runtime used to
+  # print: scripts/test/scenarios/05-runtime-env-override.sh greps for that
+  # exact phrase, and it is the wording users have seen for this failure.
+  echo "DEV_RUNTIME=${DEV_RUNTIME:-} but '${DEV_RUNTIME:-}' not found on PATH."
   echo "Unset it to let dev choose, or install that runtime:"
   echo "    unset DEV_RUNTIME"
 }
