@@ -5,8 +5,8 @@
 # dereferencing symlinks. A one-way snapshot, same mechanism and storage
 # routing as `dev agent`: never a host mount, never baked into an image.
 #
-# Reuses agent.sh's _stage_and_extract + volume helpers (_agent_require_image,
-# _agent_keepid, _agent_volume_exists) and lifecycle.sh's migrate_volume_for_keepid.
+# Reuses inject.sh's _stage_and_extract + volume helpers (_agent_require_image,
+# _agent_keepid, _agent_volume_exists) and volumes.sh's migrate_volume_for_keepid.
 # The dispatch in `dev` has already set IMAGE_TAG / RUNTIME_ARGS / HOST_UID for
 # the target storage via resolve_agent_storage. Sourced by dev; not executed
 # directly.

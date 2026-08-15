@@ -194,9 +194,12 @@ check_github_token() {
 #   RUNTIME_ARGS      — connection args for this invocation's primary
 #                       target. Empty for normal/maint, set to
 #                       DIND_RUNTIME_ARGS for --dind.
+# shellcheck disable=SC2034  # set/read by _resolve_workspace_names + the lib/dev/* runtime calls
 DIND_RUNTIME_ARGS=""
+# shellcheck disable=SC2034  # set/read by cmd_start (lib/dev/up.sh) and every lib/dev/* runtime call
 RUNTIME_ARGS=""
 
+# shellcheck disable=SC2034  # consumed by cmd_start (lib/dev/up.sh) and resolve_agent_storage (lib/dev/inject.sh)
 IMAGE_NAME="generic-devcontainer"
 
 # Start-flow defaults. All of these are set by cmd_start (lib/dev/up.sh) and
@@ -333,85 +336,6 @@ case "${1:-}" in
     exit 2
     ;;
 esac
-
-# Resolve the workspace's three container names + the dind storage
-# connection args. Shared by reset/fw (which need it standalone) and the
-# start path below (which resolves it again after runtime detection).
-# shellcheck disable=SC2034  # the resolved names are consumed by lib/dev/* helpers
-_resolve_workspace_names() {
-  if [[ "$(uname -s)" == "Darwin" && "$RUNTIME" == "podman" ]]; then
-    DIND_RUNTIME_ARGS="--connection=podman-machine-default-root"
-  fi
-  WORKSPACE_BASENAME="$(basename "$(pwd)")"
-  NORMAL_NAME="dev-${WORKSPACE_BASENAME}"
-  MAINT_NAME="dev-${WORKSPACE_BASENAME}-maint"
-  DIND_NAME="dev-${WORKSPACE_BASENAME}-dind"
-  PIND_NAME="dev-${WORKSPACE_BASENAME}-pind"
-  _resolve_home_volume
-}
-
-# Resolve the home volume name. Per-workspace by default so one project's
-# SSH keys / git creds / shell history are not exposed to the agent in
-# another project's container. DEV_SHARED_HOME=1 keeps the legacy single
-# volume. mise (tool cache) and dind (image cache) stay shared regardless.
-# Basename only (matches the dev-<dir> container-name convention and its
-# documented basename-collision caveat).
-_resolve_home_volume() {
-  if [[ "${DEV_SHARED_HOME:-}" == "1" ]]; then
-    # shellcheck disable=SC2034  # consumed by start_container/reset_workspace/cleanup_for_rebuild in lib/dev/*.sh
-    HOME_VOLUME="devcontainer-home"
-  else
-    # shellcheck disable=SC2034  # consumed by start_container/reset_workspace/cleanup_for_rebuild in lib/dev/*.sh
-    HOME_VOLUME="devcontainer-home-${WORKSPACE_BASENAME}"
-  fi
-}
-
-# resolve_agent_storage <want_dind> <want_pind>: shared storage routing for the
-# `dev agent` and `dev dotfile` subcommands, both of which inject host files
-# into the workspace home volume via a helper container. Runs runtime detection
-# + workspace-name resolution, then selects IMAGE_TAG + RUNTIME_ARGS for the
-# target home-volume storage and sets HOST_UID. On macOS+podman, where a
-# dind/pind container's home volume lives in a *separate* rootful podman
-# connection, it auto-detects a running dind/pind container when neither flag
-# was given (an explicit flag always wins) and, when nothing is running, warns
-# if the workspace has rootful storage so files don't land where the container
-# can't see them. Elsewhere DIND_RUNTIME_ARGS is empty and the split is a no-op.
-resolve_agent_storage() {
-  local want_dind="$1" want_pind="$2"
-  detect_runtime
-  ensure_runtime_ready
-  _resolve_workspace_names
-  if [[ "$want_dind" != true && "$want_pind" != true && -n "$DIND_RUNTIME_ARGS" ]]; then
-    resolve_managed_container
-    case "$MANAGED_TARGET" in
-      dind) want_dind=true
-            echo "Detected running ${DIND_NAME}; targeting its (dind) storage." >&2 ;;
-      pind) want_pind=true
-            echo "Detected running ${PIND_NAME}; targeting its (pind) storage." >&2 ;;
-      *)    # Nothing dind/pind running: default to rootless storage. If this
-            # workspace nonetheless has a rootful home volume, it has been used
-            # in dind/pind mode — warn so files don't silently miss it.
-            # shellcheck disable=SC2086  # intentional word-splitting of DIND_RUNTIME_ARGS
-            if [[ -z "$MANAGED_TARGET" ]] \
-               && $RUNTIME $DIND_RUNTIME_ARGS volume inspect "$HOME_VOLUME" >/dev/null 2>&1; then
-              echo "Note: this workspace also has dind/pind storage (separate rootful connection)." >&2
-              echo "      For a 'dev --dind'/'--pind' container, re-run with the matching flag so" >&2
-              echo "      the files reach that container's home volume." >&2
-            fi ;;
-    esac
-  fi
-  # Select the image variant + runtime connection the target container uses.
-  # shellcheck disable=SC2034  # IMAGE_TAG/RUNTIME_ARGS consumed by lib/dev/{agent,dotfile}.sh helpers
-  if [[ "$want_dind" == true ]]; then
-    IMAGE_TAG="${IMAGE_NAME}:dind"; RUNTIME_ARGS="$DIND_RUNTIME_ARGS"
-  elif [[ "$want_pind" == true ]]; then
-    IMAGE_TAG="${IMAGE_NAME}:pind"; RUNTIME_ARGS="$DIND_RUNTIME_ARGS"
-  else
-    IMAGE_TAG="$IMAGE_NAME"
-  fi
-  # shellcheck disable=SC2034  # consumed by migrate_volume_for_keepid in lib/dev/lifecycle.sh
-  HOST_UID=$(id -u)
-}
 
 case "$subcmd" in
   install)

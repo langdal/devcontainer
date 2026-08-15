@@ -136,7 +136,7 @@ cmd_start() {
   # Host identity. Used to (a) bake correct UID/GID into the image at
   # build time, and (b) detect when an existing image was built for a
   # different user.
-  # shellcheck disable=SC2034  # consumed by refuse_root_uid/image.sh's runtime_build/check_image_uid_match and migrate_volume_for_keepid in lib/dev/lifecycle.sh
+  # shellcheck disable=SC2034  # consumed by refuse_root_uid/image.sh's runtime_build/check_image_uid_match and migrate_volume_for_keepid in lib/dev/volumes.sh
   HOST_UID=$(id -u)
   # shellcheck disable=SC2034  # consumed by runtime_build/check_image_uid_match in lib/dev/image.sh
   HOST_GID=$(id -g)
@@ -169,35 +169,12 @@ cmd_start() {
     RUNTIME_ARGS="$DIND_RUNTIME_ARGS"
   fi
 
-  WORKSPACE_BASENAME="$(basename "$(pwd)")"
-  NORMAL_NAME="dev-${WORKSPACE_BASENAME}"
-  MAINT_NAME="dev-${WORKSPACE_BASENAME}-maint"
-  DIND_NAME="dev-${WORKSPACE_BASENAME}-dind"
-  PIND_NAME="dev-${WORKSPACE_BASENAME}-pind"
-  _resolve_home_volume
-
-  if [[ "$DIND" == true ]]; then
-    refuse_if_running "$NORMAL_NAME" "normal"
-    refuse_if_running "$MAINT_NAME" "maintenance"
-    refuse_if_running "$PIND_NAME" "pind" "$DIND_RUNTIME_ARGS"
-    CONTAINER_NAME="$DIND_NAME"
-  elif [[ "$PIND" == true ]]; then
-    CONTAINER_NAME="$PIND_NAME"
-    refuse_if_running "$NORMAL_NAME" "normal"
-    refuse_if_running "$MAINT_NAME" "maintenance"
-    refuse_if_running "$DIND_NAME" "dind" "$DIND_RUNTIME_ARGS"
-  elif [[ "$MAINTENANCE" == true ]]; then
-    refuse_if_running "$NORMAL_NAME" "normal"
-    refuse_if_running "$DIND_NAME" "dind" "$DIND_RUNTIME_ARGS"
-    refuse_if_running "$PIND_NAME" "pind" "$DIND_RUNTIME_ARGS"
-    CONTAINER_NAME="$MAINT_NAME"
-  else
-    refuse_if_running "$MAINT_NAME" "maintenance"
-    refuse_if_running "$DIND_NAME" "dind" "$DIND_RUNTIME_ARGS"
-    refuse_if_running "$PIND_NAME" "pind" "$DIND_RUNTIME_ARGS"
-    # shellcheck disable=SC2034  # consumed by start_container in lib/dev/lifecycle.sh
-    CONTAINER_NAME="$NORMAL_NAME"
-  fi
+  # Workspace container names + home volume, then this invocation's
+  # CONTAINER_NAME and the four-way mode-conflict guard (lib/dev/container.sh).
+  # _resolve_workspace_names re-applies the macOS+podman dind-storage override
+  # set above; the assignment is idempotent.
+  _resolve_workspace_names
+  resolve_container_name_and_guard
 
   ensure_state_dir
   check_github_token
