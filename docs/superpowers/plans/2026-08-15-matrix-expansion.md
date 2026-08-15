@@ -46,7 +46,7 @@ This is **increment 2 of 2**. Increment 1 (the check registry and `dev doctor`) 
 **Interfaces:**
 - Produces: `scenario_privilege()` → prints `root` / `user` / `any` (default `any` when the tag is absent); `require_privilege <want>` → `log_skip` + `exit 0` when the current run cannot satisfy it.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `scripts/test/unit/test-scenario-privilege.sh`:
 
@@ -101,12 +101,12 @@ echo "$out" | grep -q 'RAN' || fail "unset DEV_TEST_PRIVILEGE must run everythin
 echo "PASS: scenario privilege tag and guard"
 ```
 
-- [ ] **Step 2: Run it — must fail**
+- [x] **Step 2: Run it — must fail**
 
 Run: `bash scripts/test/unit/test-scenario-privilege.sh`
 Expected: `FAIL: scenario_privilege not defined`
 
-- [ ] **Step 3: Implement, in `scripts/test/lib/assert.sh` immediately after `require_platform`**
+- [x] **Step 3: Implement, in `scripts/test/lib/assert.sh` immediately after `require_platform`**
 
 ```bash
 # Read scenario front-matter privilege tag. Returns "root" / "user" / "any".
@@ -137,12 +137,12 @@ require_privilege() {
 }
 ```
 
-- [ ] **Step 4: Run it — must pass**
+- [x] **Step 4: Run it — must pass**
 
 Run: `bash scripts/test/unit/test-scenario-privilege.sh`
 Expected: `PASS: scenario privilege tag and guard`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 mise x shellcheck -- shellcheck -x scripts/test/lib/assert.sh scripts/test/unit/test-scenario-privilege.sh
@@ -172,11 +172,11 @@ This is mechanical. Do it as one batch, not one commit per file.
 
 **Everything else is `# privilege: user`** — but verify rather than assume, see Step 2.
 
-- [ ] **Step 1: Add the tag to every scenario**
+- [x] **Step 1: Add the tag to every scenario**
 
 Insert `# privilege: <root|user>` immediately after the existing `# platform:` line, so the front-matter block stays together. For a file with no `# platform:` line, put it after the `# scripts/test/scenarios/<name>.sh` comment.
 
-- [ ] **Step 2: Verify the classification rather than trusting the grep**
+- [x] **Step 2: Verify the classification rather than trusting the grep**
 
 `sudo` in the file is a strong signal but not proof: a scenario can need host privileges without the string appearing (for example by writing to `/proc` or `/etc` directly), and one can mention `sudo` inside a here-doc that never runs on the host.
 
@@ -187,7 +187,7 @@ grep -ln 'sudo \|/proc/sys\|sysctl\|apt-get\|modprobe\|/etc/subuid\|/etc/subgid\
 ```
 Reconcile that list against your tags and report any file where the two disagree, with your reasoning.
 
-- [ ] **Step 3: Every scenario is tagged, and only with legal values**
+- [x] **Step 3: Every scenario is tagged, and only with legal values**
 
 ```bash
 for f in scripts/test/scenarios/[0-9]*.sh; do
@@ -199,18 +199,18 @@ echo "user: $(grep -l '^# privilege: user' scripts/test/scenarios/[0-9]*.sh | wc
 ```
 Expected: no `UNTAGGED/BAD` lines, and the two counts sum to 39.
 
-- [ ] **Step 4: Add the guard call to the root scenarios only**
+- [x] **Step 4: Add the guard call to the root scenarios only**
 
 In each of the seven `privilege: root` scenarios, add `require_privilege root` immediately after the existing `require_platform linux` call. `user` scenarios need no call — the tag alone is what the orchestrator filters on, and an unnecessary guard is one more line to drift.
 
-- [ ] **Step 5: The suite still behaves identically under the default invocation**
+- [x] **Step 5: The suite still behaves identically under the default invocation**
 
 ```bash
 sudo bash scripts/test/run-all.sh
 ```
 Expected: **23 passed, 10 failed, 6 skipped**, with the failure set exactly `10, 13, 20, 21, 22, 23, 24, 25, 30, 31`. Tagging must change nothing yet — the filter does not exist until Task 3.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 bash scripts/lint.sh
@@ -230,7 +230,7 @@ git -c user.name='Jakob Langdal' -c user.email='jakob@langdal.dk' \
 - Consumes: `scenario_privilege` from Task 1; the tags from Task 2.
 - Produces: `DEV_TEST_PRIVILEGE=user` runs only `privilege: user` scenarios and requires no sudo; unset or `root` behaves exactly as today.
 
-- [ ] **Step 1: Make the sudo precondition conditional**
+- [x] **Step 1: Make the sudo precondition conditional**
 
 Replace the precondition block:
 
@@ -247,7 +247,7 @@ if [[ "${DEV_TEST_PRIVILEGE:-root}" == root ]]; then
 fi
 ```
 
-- [ ] **Step 2: Skip the privilege drop in an unprivileged run**
+- [x] **Step 2: Skip the privilege drop in an unprivileged run**
 
 `drop_privs_if_root` re-execs through `runuser` and needs root to do it. In a `user` run there is nothing to drop. Guard its call:
 
@@ -257,7 +257,7 @@ if [[ "${DEV_TEST_PRIVILEGE:-root}" == root ]]; then
 fi
 ```
 
-- [ ] **Step 3: Filter the scenario loop**
+- [x] **Step 3: Filter the scenario loop**
 
 Immediately after `name=$(basename "$scenario" .sh)` inside the loop:
 
@@ -273,7 +273,7 @@ Immediately after `name=$(basename "$scenario" .sh)` inside the loop:
     fi
 ```
 
-- [ ] **Step 4: Export the variable so scenarios see it**
+- [x] **Step 4: Export the variable so scenarios see it**
 
 Near the top, after the log setup:
 
@@ -282,7 +282,7 @@ Near the top, after the log setup:
 export DEV_TEST_PRIVILEGE="${DEV_TEST_PRIVILEGE:-root}"
 ```
 
-- [ ] **Step 5: Both modes behave**
+- [x] **Step 5: Both modes behave**
 
 ```bash
 # Unchanged default:
@@ -296,7 +296,7 @@ DEV_TEST_PRIVILEGE=user bash scripts/test/run-all.sh
 ```
 The second run may report failures. **Do not fix them here.** Record each one with its cause; they are the coverage this cell exists to add, and Task 5 decides which are real.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 mise x shellcheck -- shellcheck -x scripts/test/run-all.sh
@@ -315,7 +315,7 @@ git -c user.name='Jakob Langdal' -c user.email='jakob@langdal.dk' \
 
 Container-free: every check uses `dev doctor` output, exit codes, or `DEV_FAKE_*` stubs. It must not build an image or start a container.
 
-- [ ] **Step 1: Write the scenario**
+- [x] **Step 1: Write the scenario**
 
 ```bash
 #!/bin/bash
@@ -384,14 +384,14 @@ fi
 log_pass "dev doctor contract: tally, header, exit codes, severity split"
 ```
 
-- [ ] **Step 2: Run it**
+- [x] **Step 2: Run it**
 
 Run: `bash scripts/test/scenarios/51-doctor.sh`
 Expected: `[PASS] 51-doctor ...`
 
 If the `--dind` case fails on this host, that is the apparmor sysctl: the `DEV_SKIP_APPARMOR_CHECK=1` above exists for exactly that. If it still fails, report what you saw rather than weakening the assertion.
 
-- [ ] **Step 3: It runs in both modes**
+- [x] **Step 3: It runs in both modes**
 
 ```bash
 DEV_TEST_PRIVILEGE=user bash scripts/test/run-all.sh 2>&1 | grep 51-doctor
@@ -399,7 +399,7 @@ sudo bash scripts/test/run-all.sh 2>&1 | grep 51-doctor
 ```
 Expected: present and passing in both.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 bash scripts/lint.sh
@@ -420,7 +420,7 @@ git -c user.name='Jakob Langdal' -c user.email='jakob@langdal.dk' \
 
 This is the cell that covers the repo owner's daily driver, and the one no cell has ever covered. Expect it to find things.
 
-- [ ] **Step 1: Write the entry point**
+- [x] **Step 1: Write the entry point**
 
 ```bash
 #!/usr/bin/env bash
@@ -454,7 +454,7 @@ export DEV_TEST_PRIVILEGE=user
 exec bash scripts/test/run-all.sh "$@"
 ```
 
-- [ ] **Step 2: Run it and record what it finds**
+- [x] **Step 2: Run it and record what it finds**
 
 ```bash
 chmod +x scripts/test/run-rootless.sh
@@ -463,7 +463,7 @@ bash scripts/test/run-rootless.sh
 
 Record the tally AND the failure set. This is new coverage, so failures are expected and are the point.
 
-- [ ] **Step 3: Triage every failure — do not fix blindly**
+- [x] **Step 3: Triage every failure — do not fix blindly**
 
 For each failing scenario, decide and write down which it is:
 1. **A real bug in `dev` under rootless podman** — the cell is doing its job. Fix it if the fix is contained; otherwise record it precisely and move on.
@@ -472,13 +472,13 @@ For each failing scenario, decide and write down which it is:
 
 Known suspects from an earlier ad-hoc podman run: scenarios **41, 42, 43, 44, 46** failed with image-label and rebuild-detection errors, confirmed pre-existing rather than caused by any change. Start there, and note that run was *rootful* podman — under *rootless* they may behave differently.
 
-- [ ] **Step 4: Establish the documented baseline**
+- [x] **Step 4: Establish the documented baseline**
 
 Once every failure is triaged, run it twice and confirm the failure set is identical both times. A cell whose failures move between runs is not a baseline — investigate the instability before recording anything.
 
 Write the final tally and failure set into `docs/ci-testing.md` in Task 7.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 bash scripts/lint.sh
@@ -494,7 +494,7 @@ git -c user.name='Jakob Langdal' -c user.email='jakob@langdal.dk' \
 **Files:**
 - Modify: `.github/workflows/ci.yml`
 
-- [ ] **Step 1: Add the rootless Linux job**
+- [x] **Step 1: Add the rootless Linux job**
 
 After the existing `vm-matrix` job:
 
@@ -531,7 +531,7 @@ After the existing `vm-matrix` job:
           if-no-files-found: ignore
 ```
 
-- [ ] **Step 2: Add the macOS job**
+- [x] **Step 2: Add the macOS job**
 
 GitHub's macOS runners are themselves VMs with no nested virtualization, so `podman machine` cannot start there — confirmed on 2026-08-15 (`vfkit exited unexpectedly`). This cell therefore runs no containers: it verifies the logic that can be verified, which is the unit suite and `dev doctor`.
 
@@ -571,7 +571,7 @@ GitHub's macOS runners are themselves VMs with no nested virtualization, so `pod
           echo "$out" | grep -qE '[0-9]+ blocking' || { echo "no tally — doctor bailed"; exit 1; }
 ```
 
-- [ ] **Step 3: Add both to the required-jobs gate**
+- [x] **Step 3: Add both to the required-jobs gate**
 
 The `ci` job at the end of the file lists its dependencies. Extend it:
 
@@ -579,7 +579,7 @@ The `ci` job at the end of the file lists its dependencies. Extend it:
     needs: [lint, vm-matrix, rootless-linux, macos-checks]
 ```
 
-- [ ] **Step 4: Validate**
+- [x] **Step 4: Validate**
 
 ```bash
 mise x actionlint -- actionlint .github/workflows/ci.yml
@@ -589,7 +589,7 @@ Expected: both clean.
 
 You cannot run these jobs locally. **Do not claim they pass.** Say explicitly in your report that they are unverified until pushed, and that `test-cli-invalid-distro` needs qemu and may fail on the macOS runner — check whether that scenario is in the unit directory and whether the macOS job will therefore go red on a pre-existing condition. If it will, deal with it deliberately rather than letting the cell start life red.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add .github/workflows/ci.yml
@@ -604,19 +604,19 @@ git -c user.name='Jakob Langdal' -c user.email='jakob@langdal.dk' \
 **Files:**
 - Modify: `docs/ci-testing.md`, `CLAUDE.md` (its `## Tests` section)
 
-- [ ] **Step 1: Document the privilege axis and both cells in `docs/ci-testing.md`**
+- [x] **Step 1: Document the privilege axis and both cells in `docs/ci-testing.md`**
 
 Add a section covering: what the `# privilege:` tag means and its two values; how to run each cell (`sudo bash scripts/test/run-all.sh`, `bash scripts/test/run-rootless.sh`); the documented baseline for each, as a tally **and** a failure set; and the fact that the macOS cell runs no containers, with the reason (GitHub's macOS runners have no nested virtualization, confirmed 2026-08-15).
 
-- [ ] **Step 2: Update `CLAUDE.md`'s Tests section**
+- [x] **Step 2: Update `CLAUDE.md`'s Tests section**
 
 It currently describes only `sudo bash scripts/test/run-all.sh`. Add the rootless entry point and the privilege tag, matching the file's dense factual register — short declaratives, real commands, no adjectives.
 
-- [ ] **Step 3: Verify every command you documented actually runs**
+- [x] **Step 3: Verify every command you documented actually runs**
 
 Paste the output. A doc claiming a command that does not work is worse than no doc.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 bash scripts/lint.sh

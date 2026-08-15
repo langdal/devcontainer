@@ -424,6 +424,36 @@ first two MUST land before release gate 4.
    healthy state; the fix-text indenter leaves trailing whitespace on blank
    lines; the docs show no sample `dev doctor` transcript.
 
+## Increment 2 follow-ups
+
+Recorded on completion (2026-08-15). None block release.
+
+1. **Both new CI cells are `continue-on-error`.** `rootless-linux` and
+   `macos-checks` have never run — they cannot be exercised locally. Remove the
+   flag from each once it has one green run. Until then they report without
+   gating, which is deliberate: gating every PR on a cell nobody has seen pass
+   is an outage, not a gate.
+2. **Baselines assume GitHub API access.** Image builds fetch release metadata
+   for the baked tools; without `GITHUB_TOKEN` that is anonymous against a
+   60/hr per-IP limit. Exhausting it fails every build-dependent scenario
+   (41-44 in the rootless cell, 46 in the privileged one) for reasons unrelated
+   to the code. Set `GITHUB_TOKEN` before trusting a matrix result.
+3. **`13-apparmor-enforcing` is over-tagged `root`.** It needs privilege only
+   for a `sudo aa-status --enabled` probe; the behaviour under test does not.
+   Costs one scenario of rootless coverage. Worth a narrower guard.
+4. **Nothing enforces the scenario front-matter.** `scripts/lint.sh` checks
+   neither `# platform:` nor `# privilege:`. An untagged scenario defaults to
+   `any`, which is the fail-safe direction, but a one-line lint rule would
+   close it.
+5. **`run-in-vm.sh` validates host tooling before the distro conf.** A bad
+   distro name reports missing qemu rather than "Conf not found". Arguably the
+   checks should be the other way round; `test-cli-invalid-distro` now skips
+   without qemu rather than asserting into that gap.
+6. **Cosmetic:** `47-home-volume-isolation.sh` is mode 100644 where its 39
+   siblings are 100755 (harmless — the orchestrator invokes `bash "$scenario"`);
+   five `# shellcheck disable=SC2086` comments in `48-agent-inject.sh` claim
+   word-splitting that the quoted `${KEEPID_ARGS[@]+...}` expansion does not do.
+
 ## Release gates
 
 In order:
