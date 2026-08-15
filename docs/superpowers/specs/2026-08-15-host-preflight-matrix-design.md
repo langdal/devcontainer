@@ -299,6 +299,44 @@ failure mode that produced the truncated summary on 2026-08-15.
 
 Whether `podman machine` can start on GitHub's macOS runners is unverified.
 
+**Run 1 (2026-08-15, `macos-14`) did not answer it.** `podman machine init`
+succeeded in 44s, then `start` failed with:
+
+```
+Error: exec: "krunkit": executable file not found in $PATH
+```
+
+podman 6.0 on macOS defaults to the **libkrun** provider, which shells out to
+an external `krunkit` binary that `brew install podman` does not pull in. That
+is a packaging gap, not a statement about the runner's ability to host a VM.
+`applehv` is podman's built-in macOS provider and needs no extra binary. The
+probe now takes a `provider` input defaulting to `applehv`; re-run before
+concluding anything. Runner facts for sizing: Apple M1 (Virtual), 3 CPU,
+7 GiB RAM, 40 GiB free.
+
+**Run 1 was still worth it** — it found four real defects that had nothing to
+do with the question asked:
+
+1. `test-engine-identity` failed on macOS: `detect_runtime` branches on
+   `uname -s`, and its Linux-only cases inverted on Darwin. Fixed by routing
+   the branch through a `_host_os` indirection, which is the probe-indirection
+   constraint above arriving early. The suite now covers both platforms'
+   branches from either platform.
+2. `test-acquire-image` called `sha256sum`, which macOS does not ship, while
+   the file it sources already defines the portable `sha256_of` wrapper.
+3. Five "unit" tests shell out to `./dev`, which calls `ensure_runtime_ready`
+   and exits when no podman machine is running. **They are not unit tests on
+   macOS.** See below.
+4. `dev status` and `dev up --dry-run` both refuse when the machine is down.
+
+Findings 3 and 4 are a design input, not just bugs: `--dry-run` prints a
+command without executing it, and `dev status` and `dev doctor` must work on a
+machine where nothing is set up. Requiring a running VM for any of them
+defeats the purpose. **`ensure_runtime_ready` should gate only operations that
+actually touch the engine** — the doctor work should fix this, and
+`podman machine running` becomes a `block` check for operations that need it
+rather than a blanket precondition.
+
 `.github/workflows/macos-probe.yml` exists to answer it: a `workflow_dispatch`
 job that installs podman, times `machine init` and `machine start`, runs a
 nested container, exercises the `dev` CLI on a bare Mac, runs the unit suite,

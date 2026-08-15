@@ -88,9 +88,14 @@ STUBS="$WORK/bin"; mkdir -p "$STUBS"
 # $STUBS with the exact binary names.
 place() { make_stub "$1" "$2" "$3"; mv "$WORK/$1" "$STUBS/$1"; }
 
+# Cases A-D are about the LINUX branch of detect_runtime (docker preferred,
+# podman fallback). macOS has no such branch — it is podman or bail — so pin
+# the OS rather than inheriting the test machine's. Without this the whole
+# block inverts on a Mac, which is exactly how it failed on the macos-14
+# probe run: case A expected docker and got podman.
 detect_with_stubs() {
     RUNTIME=""; unset _ENGINE_IS_PODMAN
-    PATH="$STUBS:$PATH" DEV_RUNTIME="" detect_runtime
+    PATH="$STUBS:$PATH" DEV_RUNTIME="" DEV_FAKE_OS=Linux detect_runtime
 }
 
 # A. podman-docker shim: docker resolves to podman. Stay on 'docker'; the
@@ -119,8 +124,8 @@ place docker 'Docker version 29.1.3, build 29.1.3-0ubuntu4.1' \
 place podman 'podman version 5.7.0' ''
 unset CONTAINER_HOST
 RUNTIME=""; unset _ENGINE_IS_PODMAN
-PATH="$STUBS:$PATH" DEV_RUNTIME="" DOCKER_HOST=unix:///run/podman/podman.sock \
-    detect_runtime 2>/dev/null
+PATH="$STUBS:$PATH" DEV_RUNTIME="" DEV_FAKE_OS=Linux \
+    DOCKER_HOST=unix:///run/podman/podman.sock detect_runtime 2>/dev/null
 [ "${CONTAINER_HOST:-}" = "unix:///run/podman/podman.sock" ] \
     || fail "switch dropped DOCKER_HOST targeting; CONTAINER_HOST='${CONTAINER_HOST:-unset}'"
 unset CONTAINER_HOST
@@ -139,7 +144,28 @@ place docker 'Docker version 29.1.3, build 29.1.3-0ubuntu4.1' \
     '[{Podman Engine 5.7.0 map[APIVersion:5.7.0]}]'
 place podman 'podman version 5.7.0' ''
 RUNTIME=""; unset _ENGINE_IS_PODMAN
-PATH="$STUBS:$PATH" DEV_RUNTIME=docker detect_runtime
+PATH="$STUBS:$PATH" DEV_RUNTIME=docker DEV_FAKE_OS=Linux detect_runtime
 [ "$RUNTIME" = "docker" ] || fail "explicit DEV_RUNTIME=docker was overridden, got '$RUNTIME'"
+
+# E. The Darwin branch: podman only, docker never chosen even when present.
+#    Runs from Linux thanks to the _host_os indirection — the whole point.
+rm -f "$STUBS"/*
+place docker 'Docker version 29.1.3, build 29.1.3-0ubuntu4.1' '[{Engine 29.1.3}]'
+place podman 'podman version 5.7.0' ''
+RUNTIME=""; unset _ENGINE_IS_PODMAN
+PATH="$STUBS:$PATH" DEV_RUNTIME="" DEV_FAKE_OS=Darwin detect_runtime
+[ "$RUNTIME" = "podman" ] || fail "macOS must select podman, got '$RUNTIME'"
+
+# F. macOS with no podman is a hard error, not a silent fall back to docker.
+rm -f "$STUBS"/*
+place docker 'Docker version 29.1.3, build 29.1.3-0ubuntu4.1' '[{Engine 29.1.3}]'
+RUNTIME=""; unset _ENGINE_IS_PODMAN
+# PATH is $STUBS ALONE here: with the host's PATH appended, a real podman on
+# the machine running the tests satisfies the check and the case silently
+# passes for the wrong reason.
+if PATH="$STUBS" DEV_RUNTIME="" DEV_FAKE_OS=Darwin \
+     bash -c '. "'"$ROOT"'/lib/dev/runtime.sh"; RUNTIME_ARGS=""; detect_runtime' 2>/dev/null; then
+    fail "macOS without podman should exit non-zero, not fall back to docker"
+fi
 
 echo "PASS: engine identity classified from the server, not the CLI binary"

@@ -10,6 +10,14 @@ _runtime_works() {
   command -v "$1" >/dev/null 2>&1 && "$1" --version >/dev/null 2>&1
 }
 
+# Host OS, behind an indirection so unit tests can exercise the Darwin
+# branches from Linux and vice versa. Without this the runtime tests only
+# ever cover the branch matching the machine they run on — which is how a
+# macOS-only failure in test-engine-identity reached CI unnoticed.
+_host_os() {
+  echo "${DEV_FAKE_OS:-$(uname -s)}"
+}
+
 # A real Docker CLI can be pointed at a podman socket (DOCKER_HOST=.../
 # podman.sock). It talks to podman fine, but it cannot express
 # --userns=keep-id: that flag is podman-only and the Docker CLI rejects it
@@ -62,7 +70,7 @@ detect_runtime() {
     RUNTIME="$DEV_RUNTIME"
     return
   fi
-  case "$(uname -s)" in
+  case "$(_host_os)" in
     Darwin)
       if _runtime_works podman; then
         RUNTIME=podman
