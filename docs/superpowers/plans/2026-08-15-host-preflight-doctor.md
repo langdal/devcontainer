@@ -478,12 +478,14 @@ check_applies() {
 # caller under `set -e` keeps going. A probe that does not exist is 'na',
 # never 'pass' — an undetermined check must not read as a healthy host.
 run_check() {
-  local id="$1" rc
-  if ! command -v "_chk_$id" >/dev/null 2>&1; then
+  local id="$1" fn rc
+  # Registry ids are hyphenated; shell function names cannot be.
+  fn="_chk_$(echo "$id" | tr '-' '_')"
+  if ! command -v "$fn" >/dev/null 2>&1; then
     CHECK_STATE=na
     return 0
   fi
-  "_chk_$id"; rc=$?
+  "$fn"; rc=$?
   case "$rc" in
     0) CHECK_STATE=pass ;;
     1) CHECK_STATE=fail ;;
@@ -610,25 +612,11 @@ echo "PASS: phase-0 and blocking probes"
 Run: `bash scripts/test/unit/test-checks-catalog.sh`
 Expected: `FAIL: run_check did not map hyphens to underscores`
 
-- [ ] **Step 3: Add the hyphen mapping to `run_check` in `lib/dev/checks.sh`**
+- [ ] **Step 3: Append the probes to `lib/dev/checks.sh`**
 
-Replace the first two lines of `run_check`'s body:
-
-```bash
-run_check() {
-  local id="$1" fn rc
-  fn="_chk_$(echo "$id" | tr '-' '_')"
-  if ! command -v "$fn" >/dev/null 2>&1; then
-    CHECK_STATE=na
-    return 0
-  fi
-  "$fn"; rc=$?
-```
-
-and change the `_fix` lookup convention to match (used in Task 6):
-`_chk_$(echo "$id" | tr '-' '_')_fix`.
-
-- [ ] **Step 4: Append the probes to `lib/dev/checks.sh`**
+(The hyphen→underscore mapping `run_check` needs already shipped in Task 3;
+the assertion in Step 1 is its regression guard. The `_fix` lookup follows the
+same convention: `_chk_$(echo "$id" | tr '-' '_')_fix`.)
 
 ```bash
 # --- phase 0 --------------------------------------------------------------
@@ -709,12 +697,12 @@ _chk_workspace_not_root_fix() {
 }
 ```
 
-- [ ] **Step 5: Run it — must pass**
+- [ ] **Step 4: Run it — must pass**
 
 Run: `bash scripts/test/unit/test-checks-catalog.sh`
 Expected: `PASS: phase-0 and blocking probes`
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 mise x shellcheck -- shellcheck -x dev lib/dev/*.sh && bash scripts/lint.sh
@@ -745,6 +733,10 @@ _chk_userns_sysctl_fix | grep -q 'apparmor_restrict_unprivileged_userns=0' \
     || fail "userns fix lost its sysctl command"
 
 # --- subid-grant: 165535 is the image contract, not a round number ---
+# _chk_subid_grant short-circuits to 'na' on a rootful runtime, so pin
+# rootlessness here — otherwise this case is decided by whatever runtime the
+# machine running the tests happens to have.
+runtime_is_rootless() { return 0; }
 _subid_stub() { echo 200000; }
 subid_total() { _subid_stub; }
 DIND_MIN_SUBIDS=165535 run_check subid-grant; [ "$CHECK_STATE" = pass ] || fail "200000 ids is enough"
@@ -1048,8 +1040,12 @@ echo "$out" | grep -qi 'Host' || fail "no Host summary line: $out"
 # Exit code is 0 or 1 — never a stack trace or 2 — on a normal host.
 [ "$rc" -eq 0 ] || [ "$rc" -eq 1 ] || fail "unexpected exit $rc: $out"
 
-# Every check title in the registry that applies here should appear.
-echo "$out" | grep -q 'buildx' || fail "buildx check missing from report: $out"
+# Anchor on a check that applies EVERYWHERE. Do not anchor on buildx: it is
+# scoped to docker, and a host whose DOCKER_HOST points at a podman socket
+# resolves RUNTIME=podman, so buildx is correctly absent there. Asserting it
+# would make this test pass or fail on the tester's runtime.
+echo "$out" | grep -q 'supported platform' \
+    || fail "phase-0 checks missing from report: $out"
 
 # A summary line accounts for every check.
 echo "$out" | grep -qE '[0-9]+ (blocking|passed)' || fail "no summary tally: $out"
