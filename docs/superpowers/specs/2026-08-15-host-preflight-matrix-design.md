@@ -187,7 +187,7 @@ assumption. This is the part of the design most likely to bite.
 
 ## Check catalogue
 
-Sixteen checks, in four groups by origin:
+Fifteen checks, in four groups by origin:
 
 - **Seven migrate** logic that already exists but is scattered across
   `preflight.sh`, `runtime.sh` and `up.sh` (platform, runtime-exists,
@@ -195,8 +195,8 @@ Sixteen checks, in four groups by origin:
   `GITHUB_TOKEN` scopes).
 - **Three enforce requirements only the scenario suite tests today**, moving
   them to the point of use (not-Docker-Desktop, `/dev/fuse`, cgroup v2).
-- **Three are new**, each from a bug found on 2026-08-15 (buildx,
-  CLI-and-engine-agree, home-volume ownership).
+- **Two are new**, each from a bug found on 2026-08-15 (buildx,
+  CLI-and-engine-agree).
 - **Three are advisory conveniences** (SELinux enforcing, free disk, free RAM).
 
 ### Phase 0
@@ -229,7 +229,6 @@ Sixteen checks, in four groups by origin:
 | Check | Applies | Origin |
 |---|---|---|
 | CLI and engine agree | all | **new** — 2026-08-15 `DOCKER_HOST` bug |
-| home volume ownership matches uid | podman rootless | **new** — the EACCES wall |
 | SELinux enforcing | linux | Fedora cell; `dev` handles it, worth surfacing |
 | free disk >= 3 GB | all | `docs/ci-testing.md` image cache |
 | free RAM >= 6 GB when nested | all | `docs/ci-testing.md` OOM warning |
