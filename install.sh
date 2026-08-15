@@ -88,4 +88,4 @@ log "checked out $(git -C "$INSTALL_DIR" describe --tags --always)"
 echo
 echo "Installed. Run 'dev --help' to get started."
 echo "Source tree: ${INSTALL_DIR}"
-echo "Upgrade later by re-running this one-liner (or:  git -C ${INSTALL_DIR} pull && dev --build)."
+echo "Upgrade later by re-running this one-liner (or:  git -C ${INSTALL_DIR} pull && dev up --build)."

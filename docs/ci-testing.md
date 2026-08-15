@@ -54,14 +54,14 @@ bash scripts/test/run-e2e.sh fedora           # one distro
 bash scripts/test/run-e2e.sh ubuntu fedora    # subset
 ```
 
-### From inside `./dev --maintenance`
+### From inside `./dev up --maint`
 
 Maintenance containers passthrough `/dev/kvm` (when present on the host)
 and have sudo + no firewall, so the same command works without leaving
 the sandbox:
 
 ```
-./dev --maintenance
+./dev up --maint
 # inside the container:
 bash scripts/test/run-e2e.sh
 ```

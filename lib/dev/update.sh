@@ -81,5 +81,5 @@ self_update() {
 
   git -C "$SCRIPT_DIR" checkout --quiet --force "$latest"
   echo "Updated dev to $latest. The image will prompt for a rebuild on the"
-  echo "next 'dev' run (or run 'dev --build' now to rebuild immediately)."
+  echo "next 'dev' run (or run 'dev up --build' now to rebuild immediately)."
 }

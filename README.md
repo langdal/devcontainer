@@ -6,7 +6,7 @@ A portable, editor-agnostic dev environment. One Dockerfile, one bash wrapper, p
 
 - **A real dev container in one command.** Run `dev up` from any project folder and you land in a shell with your code mounted at `/workspace`. No per-project config files to write or maintain.
 - **Per-project tool versions, no clutter.** Drop a `mise.toml` in your repo to pin node/go/python/etc. Tools install on start and cache in a shared volume — not in your home directory.
-- **A network firewall built for AI agents.** Outbound traffic is default-deny and filtered to a curated allowlist. The design goal: an agent working inside the container **can freely read and edit your files, but cannot send your code to arbitrary hosts.**
+- **A network firewall built for AI agents.** Outbound traffic is default-deny and filtered to a curated allowlist. The design goal is containment, not exfiltration prevention: an agent working inside the container **cannot stumble onto host keys/secrets or reach outside the sandbox for a "helpful" fix**, even though every allowlisted host stays fully (bidirectionally) reachable by design. See [SECURITY.md](SECURITY.md) for the full threat model.
 - **State that stays isolated.** Shell history, git config, and dotfiles live in a per-project home volume, so one project's agent can't read another project's SSH keys or credentials.
 - **Escape hatches when you need them.** A maintenance mode (sudo, firewall off), nested Docker or Podman for testcontainers and builds, and scoped access to host services — each opt-in and clearly named.
 
@@ -112,7 +112,7 @@ dev up --pind             # rootless podman inside the container
 
 ## Firewall
 
-The container restricts outbound HTTP(S) to a curated allowlist. Threat model: an AI agent running as `vscode` cannot exfiltrate workspace contents to arbitrary hosts.
+The container restricts outbound HTTP(S) to a curated allowlist. Threat model: containment of agent reach — the agent must not find or use host keys/secrets by accident, or reach outside the sandbox in misguided loyalty to a task. Allowlisted hosts are reachable and bidirectional by design; this is **not** exfiltration prevention. For a security review, start at [SECURITY.md](SECURITY.md).
 
 - iptables defaults `OUTPUT` to DROP. Only the `proxy` user can reach :80/:443.
 - `tinyproxy` filters HTTPS by hostname (CONNECT). Clients honour `HTTPS_PROXY=http://127.0.0.1:8888`, exported by the entrypoint.
@@ -201,7 +201,7 @@ Registry pulls flow through tinyproxy and are filtered against the same allowlis
 A separate `devcontainer-dind` named volume preserves the nested image cache across rebuilds.
 
 ```bash
-dev exec --dind -- /workspace/scripts/verify-firewall.sh   # 12 checks
+dev exec --dind -- /workspace/scripts/verify-firewall.sh   # 13 checks
 dev exec --dind -- /workspace/scripts/verify-dind.sh       # heavier smoke tests
 ```
 
@@ -222,7 +222,7 @@ Registry pulls for podman's own images route through tinyproxy at `127.0.0.1:888
 A separate `devcontainer-pind` named volume (`/home/vscode/.local/share/containers`) preserves the nested image cache across rebuilds.
 
 ```bash
-dev exec --pind -- /workspace/scripts/verify-firewall.sh   # 12 checks
+dev exec --pind -- /workspace/scripts/verify-firewall.sh   # 13 checks
 dev exec --pind -- /workspace/scripts/verify-pind.sh       # heavier smoke tests
 ```
 
@@ -433,11 +433,6 @@ dev --help
 Highlights not covered above: `dev reset` removes this workspace's containers
 and prompts per named volume; `dev update` updates a git-checkout install
 to the latest tag.
-
-Note: the old flag spellings (`--disable-firewall`, `--enable-firewall`,
-`--monitor`, `--monitor-fw`, `--reset`, `--self-update`) still work as
-deprecated aliases — they print a warning to stderr and route to the
-subcommand above.
 
 ### Environment variables
 

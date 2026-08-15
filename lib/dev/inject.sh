@@ -33,7 +33,7 @@ resolve_agent_storage() {
             if [[ -z "$MANAGED_TARGET" ]] \
                && $RUNTIME $DIND_RUNTIME_ARGS volume inspect "$HOME_VOLUME" >/dev/null 2>&1; then
               echo "Note: this workspace also has dind/pind storage (separate rootful connection)." >&2
-              echo "      For a 'dev --dind'/'--pind' container, re-run with the matching flag so" >&2
+              echo "      For a 'dev up --dind'/'dev up --pind' container, re-run with the matching flag so" >&2
               echo "      the files reach that container's home volume." >&2
             fi ;;
     esac
@@ -68,7 +68,7 @@ _agent_keepid() {
 _agent_require_image() {
   # shellcheck disable=SC2086  # intentional word-splitting of RUNTIME_ARGS
   if ! $RUNTIME $RUNTIME_ARGS image inspect "$IMAGE_TAG" >/dev/null 2>&1; then
-    echo "Error: image '$IMAGE_TAG' is not built yet. Run './dev --build' (or start the container once with './dev') first." >&2
+    echo "Error: image '$IMAGE_TAG' is not built yet. Run './dev up --build' (or start the container once with './dev up') first." >&2
     exit 1
   fi
 }

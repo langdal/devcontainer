@@ -4,7 +4,7 @@
 #
 # Image built for a different UID/GID than the host: a non-interactive
 # `dev` invocation must refuse to attach and exit non-zero with a
-# diagnostic referencing the host's UID/GID and a `dev --build` hint.
+# diagnostic referencing the host's UID/GID and a `dev up --build` hint.
 set -u
 LIB="$(dirname "$0")/../lib"
 # shellcheck source=scripts/test/lib/assert.sh
@@ -40,7 +40,7 @@ if ! echo "$out" | grep -qE "${HOST_UID}|UID"; then
     ./dev exec --build -- true >/dev/null 2>&1 || true
     exit 1
 fi
-if ! echo "$out" | grep -q "dev --build"; then
+if ! echo "$out" | grep -q "dev up --build"; then
     log_fail "expected '--build' hint in diagnostic; got: $out"
     ./dev exec --build -- true >/dev/null 2>&1 || true
     exit 1

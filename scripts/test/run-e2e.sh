@@ -2,7 +2,7 @@
 # scripts/test/run-e2e.sh — single-command e2e runner.
 #
 # Designed to be the easy entry point from inside a dev container started
-# with `./dev --maintenance` (or any host with passwordless sudo). Installs
+# with `./dev up --maint` (or any host with passwordless sudo). Installs
 # QEMU + cloud-image-utils on first run, then walks the distro matrix
 # calling scripts/test/run-in-vm.sh per cell.
 #

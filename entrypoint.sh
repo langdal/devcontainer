@@ -47,7 +47,7 @@ EOF
     chmod 644 /etc/profile.d/proxy.sh
 
     # Opt-in: bring the container up with the firewall already open. Identical
-    # effect to starting normally and then running `dev --disable-firewall`:
+    # effect to starting normally and then running `dev fw off`:
     # firewall-init.sh above set up tinyproxy + iptables; this tears the egress
     # block down and flips tinyproxy to allow-all. The proxy env vars stay
     # exported (tinyproxy keeps running, just permissive), so HTTP_PROXY-

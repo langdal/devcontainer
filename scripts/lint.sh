@@ -102,4 +102,19 @@ else
     echo "(no workflows yet)"
 fi
 
+echo
+echo "=== line budgets ==="
+over=0
+[ "$(wc -l < dev)" -le 190 ] || { echo "dev exceeds 190 lines"; over=1; }
+for f in lib/dev/*.sh; do
+    case "$f" in
+        # agent.sh sanctioned over 300: further split breaks scenario 48's
+        # direct sourcing of this module. Give it its own, higher budget.
+        lib/dev/agent.sh) budget=550 ;;
+        *) budget=300 ;;
+    esac
+    [ "$(wc -l < "$f")" -le "$budget" ] || { echo "$f exceeds $budget lines"; over=1; }
+done
+[ "$over" -eq 0 ] || fail=1
+
 exit "$fail"

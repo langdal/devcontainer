@@ -81,7 +81,7 @@ tinyproxy_listening() {
 }
 
 # --- Start tinyproxy (daemonizes by default; skip if already running so this
-#     script is safe to re-run on a live container, e.g. `dev --enable-firewall`).
+#     script is safe to re-run on a live container, e.g. `dev fw on`).
 #     If already running, SIGHUP it so the just-rewritten filter is picked up. ---
 if tinyproxy_listening; then
     echo "firewall-init: tinyproxy already listening on 127.0.0.1:8888, reloading filter" >&2
@@ -149,7 +149,7 @@ fi
 
 # Log packets that fell through every ACCEPT above — i.e. exactly what the
 # default-DROP policy is about to discard. Rate-limited so a noisy app cannot
-# flood the netlink buffer. Read with `tcpdump -i nflog:1` (see `dev --monitor-fw`).
+# flood the netlink buffer. Read with `tcpdump -i nflog:1` (see `dev fw drops`).
 iptables -A OUTPUT -m limit --limit 60/min --limit-burst 20 \
                   -j NFLOG --nflog-group 1 --nflog-prefix "FW-DROP"
 

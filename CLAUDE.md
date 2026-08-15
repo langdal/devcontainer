@@ -74,10 +74,6 @@ docker build -t generic-devcontainer .
 ./dev update
 ```
 
-Note: the old flag spellings (`--disable-firewall`, `--enable-firewall`,
-`--monitor`, `--monitor-fw`, `--reset`, `--self-update`) still work as
-deprecated aliases — they warn to stderr and route to the subcommand above.
-
 Useful environment variables for `./dev`:
 
 - `DEV_RUNTIME=docker|podman` — force a runtime when both are installed (default: docker preferred on Linux; podman only on macOS).
@@ -134,6 +130,18 @@ Three components, each with a distinct role:
 - **entrypoint.sh** — Runs on every container start. Idempotently ensures `mise activate zsh` is in `.zshrc`, runs `mise install` if a project `mise.toml` exists in `/workspace`, sets git safe.directory, then execs into the shell.
 
 - **dev** — Host-side bash script managing the container lifecycle. Handles image auto-build, container reuse (attach to running/restart stopped), volume mounts, port forwarding, and `GITHUB_TOKEN` passthrough.
+
+`dev` itself is a thin subcommand router: it sources every file under
+`lib/dev/*.sh` and dispatches the first argument to a `cmd_*` function.
+Each verb (`up`/`exec`/`shell`, `down`/`status`, `fw`, `agent`, `dotfile`,
+`reset`, `update`, `install`) gets roughly one module, plus a handful of
+shared-concern modules split out of the old monolith: `container.sh` and
+`volumes.sh` (container lifecycle and mount/volume logic), `inject.sh`
+(shared plumbing behind `agent`/`dotfile`), `runtime.sh` (docker/podman
+detection), `approval.sh` (the project-allowlist diff/approve flow), and
+`usage.sh` (the `--help` text). `scripts/lint.sh` enforces a line-budget
+gate over `dev` and `lib/dev/*.sh` so this stays split rather than
+regrowing into one large file.
 
 ## Key Design Decisions
 
@@ -202,8 +210,11 @@ Three components, each with a distinct role:
 ## Firewall (security boundary)
 
 The firewall is the project's primary security feature — the threat model
-is "an AI agent running as `vscode` cannot exfiltrate workspace contents
-to arbitrary hosts." Two layers, enforced in the kernel and at L7:
+is containment of agent reach: the agent must not find or use host
+keys/secrets by accident, or reach outside the sandbox in misguided
+loyalty to a task. Allowlisted hosts are reachable and bidirectional by
+design; this is **not** exfiltration prevention (see SECURITY.md for the
+full write-up). Two layers, enforced in the kernel and at L7:
 
 - **iptables** defaults `OUTPUT` to DROP. DNS is allowed; only the `proxy`
   user can reach `:80`/`:443`. Raw-socket bypasses by `vscode` are dropped

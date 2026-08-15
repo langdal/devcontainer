@@ -127,7 +127,7 @@ cmd_start() {
         ;;
       --help)
         # Position-independent: the router only matches --help as the very
-        # first token, so e.g. `dev --dry-run --help` reaches here instead.
+        # first token, so e.g. `dev up --dry-run --help` reaches here instead.
         usage
         exit 0
         ;;

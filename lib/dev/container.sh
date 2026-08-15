@@ -187,7 +187,7 @@ attach_existing_container() {
     # `exec` bypasses the entrypoint, so the attached process inherits
     # neither the proxy env nor the nested-engine env that the container's
     # original process tree got (and /etc/profile.d only covers login
-    # shells — a plain `dev -- npm install` is not one). Without this a
+    # shells — a plain `dev exec -- npm install` is not one). Without this a
     # command in an attached session connects directly, the kernel silently
     # drops the packets, and the tool appears to hang. Mirror the
     # entrypoint's exports here; values must stay in sync with entrypoint.sh.

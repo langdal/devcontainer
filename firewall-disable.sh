@@ -5,7 +5,7 @@
 # Runs as root. Idempotent: safe to re-run.
 #
 # Two callers, one behaviour:
-#   - `dev --disable-firewall` on a running container (exec'd here)
+#   - `dev fw off` on a running container (exec'd here)
 #   - entrypoint.sh, when DEVCONTAINER_FW_DISABLED=1, after firewall-init.sh
 #     has set up tinyproxy + iptables (so a fresh container can come up with
 #     the firewall already open, identical to start-then-disable).
@@ -44,7 +44,7 @@ cat > /etc/profile.d/zz-fw-disabled-banner.sh <<'EOF'
 echo
 echo "=========================================================="
 echo "  FIREWALL DISABLED - all outbound traffic is allowed."
-echo "  Re-enable with:  dev --enable-firewall"
+echo "  Re-enable with:  dev fw on"
 echo "=========================================================="
 echo
 EOF
