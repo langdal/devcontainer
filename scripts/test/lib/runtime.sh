@@ -67,21 +67,36 @@ apt_remove_if_installed_by_test() {
     fi
 }
 
-# Build a scenario-specific image directly with `docker buildx build`,
-# forwarding GITHUB_TOKEN as a BuildKit secret when set, mirroring dev's
-# own runtime_build() — without it, `mise install` in the Dockerfile hits
-# GitHub's API anonymously, and the 60/hr unauthenticated limit is shared
-# across the whole CI runner IP pool, so it's easy to exhaust well before
-# these scenarios run. On failure, prints the captured build output via
-# the given failure message so the real error doesn't get silently lost.
-# Extra args (e.g. --build-arg, -t) are passed through as-is.
+# Build a scenario-specific image, forwarding GITHUB_TOKEN as a build secret
+# when set, mirroring dev's own runtime_build() — without it, `mise install`
+# in the Dockerfile hits GitHub's API anonymously, and the 60/hr
+# unauthenticated limit is shared across the whole CI runner IP pool, so
+# it's easy to exhaust well before these scenarios run. On failure, prints
+# the captured build output via the given failure message so the real error
+# doesn't get silently lost. Extra args (e.g. --build-arg, -t) are passed
+# through as-is.
+#
+# Branches on $RUNTIME the same way runtime_build() in lib/dev/image.sh
+# does: docker uses buildx, podman uses its built-in build. This is not
+# cosmetic — under a rootless-podman host where `docker` is a CLI shim
+# routed at the podman socket via DOCKER_HOST (see run-rootless.sh),
+# `docker buildx build --network=host` auto-provisions a docker-container
+# buildkit builder that refuses the network.host entitlement by default:
+#   "granting entitlement network.host is not allowed by build daemon
+#   configuration"
+# `podman build` has no such builder indirection and takes --network=host
+# and --secret id=...,env=... directly, so it isn't affected.
 build_scenario_image() {
     local fail_msg="$1"; shift
     local extra=() out rc
     if [ -n "${GITHUB_TOKEN:-}" ]; then
         extra+=(--secret "id=github_token,env=GITHUB_TOKEN")
     fi
-    out=$(docker buildx build --network=host "${extra[@]}" "$@" . 2>&1)
+    if [ "${RUNTIME:-docker}" = "podman" ]; then
+        out=$(podman build --network=host "${extra[@]}" "$@" . 2>&1)
+    else
+        out=$(docker buildx build --network=host "${extra[@]}" "$@" . 2>&1)
+    fi
     rc=$?
     if [ "$rc" -ne 0 ]; then
         log_fail "${fail_msg}: ${out}"

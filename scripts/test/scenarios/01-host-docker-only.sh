@@ -12,6 +12,16 @@ LIB="$(dirname "$0")/../lib"
 . "$LIB/restore.sh"
 require_platform linux
 
+# This scenario exercises dev's autodetection (no override present); an
+# externally pinned DEV_RUNTIME (e.g. the rootless-podman cell, which
+# forces DEV_RUNTIME=podman so every scenario targets rootless podman
+# regardless of PATH) short-circuits detect_runtime() before PATH masking
+# is ever consulted, making the assertion below vacuous rather than wrong.
+if [ -n "${DEV_RUNTIME:-}" ]; then
+    log_skip "DEV_RUNTIME=$DEV_RUNTIME is pinned by the environment; autodetection not exercised"
+    exit 0
+fi
+
 # Setup: mask podman if installed. mask_and_prepend mutates the shell's
 # PATH (and registers cleanup), so it MUST be called as a plain statement,
 # not via $(...) — the subshell would swallow the PATH export.
