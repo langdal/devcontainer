@@ -64,6 +64,6 @@ echo "$out" | grep -qi 'no such container' && fail "doctor touched a container"
     || { echo "FAIL: buildx row missing from mocked report: $bout"; exit 1; }
   [ "$brc" -eq 1 ] \
     || { echo "FAIL: missing buildx must exit 1 (block-in-doctor), got $brc: $bout"; exit 1; }
-) || fail "doctor block-if-building coverage failed"
+) || fail "doctor block-in-doctor coverage failed"
 
 echo "PASS: doctor report and exit contract"

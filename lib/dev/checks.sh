@@ -25,7 +25,7 @@ CHECKS=(
   "runtime-present|0|*:*|block|a container runtime is installed"
   "buildx|1|linux,darwin:docker|block-in-doctor|docker buildx present"
   "not-docker-desktop|1|darwin:*|block|not Docker Desktop"
-  "podman-machine|1|darwin:podman|block|podman machine running"
+  "podman-machine|1|darwin:podman|block-in-doctor|podman machine running"
   "workspace-not-root|1|*:*|block|workspace not root-owned"
   "userns-sysctl|1|linux:*|block-if-nested|unprivileged userns permitted"
   "subid-grant|1|linux:*|block-if-nested|subuid/subgid range >= 165535"

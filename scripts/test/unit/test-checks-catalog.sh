@@ -12,6 +12,8 @@ fail() { echo "FAIL: $1"; exit 1; }
 . "$ROOT/lib/dev/checks.sh"
 # shellcheck source=lib/dev/checks-catalog.sh
 . "$ROOT/lib/dev/checks-catalog.sh"
+# shellcheck source=lib/dev/checks-catalog-nested.sh
+. "$ROOT/lib/dev/checks-catalog-nested.sh"
 RUNTIME=docker; RUNTIME_ARGS=""
 
 # Registry ids use hyphens; shell functions use underscores. Pin the probe's
@@ -124,16 +126,25 @@ _free_disk_gb() { echo 1; };  run_check disk-space; [ "$CHECK_STATE" = fail ] ||
 _free_disk_gb() { echo ""; }; run_check disk-space; [ "$CHECK_STATE" = na ]   || fail "undeterminable free space must be na, not fail"
 # shellcheck disable=SC2329  # invoked indirectly via run_check -> _chk_memory
 _total_mem_gb() { echo 16; }; run_check memory;     [ "$CHECK_STATE" = pass ] || fail "16 GB is enough"
+# shellcheck disable=SC2329  # invoked indirectly via run_check -> _chk_memory
 _total_mem_gb() { echo 4; };  run_check memory;     [ "$CHECK_STATE" = fail ] || fail "4 GB is not"
+# shellcheck disable=SC2329  # invoked indirectly via run_check -> _chk_memory
+_total_mem_gb() { echo ""; }; run_check memory;     [ "$CHECK_STATE" = na ]   || fail "undeterminable memory must be na, not fail"
+_total_mem_gb() { echo garbage; }; run_check memory; [ "$CHECK_STATE" = na ]  || fail "garbage memory reading must be na, not fail"
 
 # --- github-token-scopes: a scoped token is power handed to the agent ---
 GITHUB_TOKEN="" run_check github-token-scopes
 [ "$CHECK_STATE" = na ] || fail "no token means not-applicable, not pass"
 # shellcheck disable=SC2329  # invoked indirectly via run_check -> _chk_github_token_scopes
-_token_scopes() { echo ""; }
-GITHUB_TOKEN=x run_check github-token-scopes; [ "$CHECK_STATE" = pass ] || fail "scopeless token is fine"
 _token_scopes() { echo "repo, workflow"; }
 GITHUB_TOKEN=x run_check github-token-scopes; [ "$CHECK_STATE" = fail ] || fail "scoped token must warn"
+# shellcheck disable=SC2329  # invoked indirectly via run_check -> _chk_github_token_scopes
+_token_scopes() { echo ""; return 0; }
+GITHUB_TOKEN=x run_check github-token-scopes; [ "$CHECK_STATE" = pass ] || fail "scopeless-and-verified token is fine"
+# curl/transport failure (offline host, proxy interception, timeout) must
+# read as na, never as a false pass: an unverified token is not a safe one.
+_token_scopes() { return 1; }
+GITHUB_TOKEN=x run_check github-token-scopes; [ "$CHECK_STATE" = na ] || fail "transport failure must be na, not pass"
 
 # --- selinux ---
 # shellcheck disable=SC2329  # invoked indirectly via run_check -> _chk_selinux_enforcing
