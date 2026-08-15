@@ -387,6 +387,43 @@ Note: `workflow_dispatch` only exposes the "Run workflow" button for workflows
 present on the repository's **default branch**, so the probe has to reach
 `main` before it can be run by hand.
 
+## Follow-ups from increment 1
+
+Recorded during implementation (2026-08-15) and deliberately deferred. The
+first two MUST land before release gate 4.
+
+1. **`detect_runtime` can exit from inside `cmd_doctor`.** On a macOS host with
+   only Docker Desktop, with `DEV_RUNTIME` pointing at something not on PATH,
+   or with a Docker CLI on a podman engine and no podman CLI, `detect_runtime`
+   calls `exit 1` mid-command. `dev doctor` then prints that error and nothing
+   else — no header, no phase-0 rows, no tally — and leaks its buffered temp
+   file. This breaks the design's central promise that doctor works on a
+   machine where nothing is set up, and makes `not-docker-desktop` unreachable
+   on the very host it exists for. The error text is good, so nobody is
+   stranded, but the contract is not met. Deferred because restructuring the
+   verb inside a final fix wave is how a regression lands.
+
+2. **Two implementations of the `GITHUB_TOKEN` scope check.**
+   `_chk_github_token_scopes` duplicates `check_github_token`
+   (`lib/dev/approval.sh`), which `dev up` still calls. The copy lacks the
+   `github_pat_*` short-circuit and the per-token cache. Two implementations of
+   one check is exactly the drift this increment set out to abolish. Unifying
+   them edits `dev up`'s live path and needs a full matrix run to trust, so it
+   belongs in increment 2 rather than a final fix wave.
+
+3. **Three untimed engine calls in `_doc_header`.** A hung socket would hang
+   `dev doctor`, the one command that must always answer. Not a one-liner:
+   stock macOS has no `timeout`.
+
+4. **`_chk_runtime_present` uses `_have_cmd` while `detect_runtime` uses
+   `_runtime_works`.** A non-answering stub on PATH passes the check and then
+   dies in `detect_runtime` — fix alongside follow-up 1.
+
+5. **Cosmetic:** `run_blocking_checks` prints `Error: <title>` where titles are
+   positive assertions (`Error: cgroup v2`), reading as a claim about the
+   healthy state; the fix-text indenter leaves trailing whitespace on blank
+   lines; the docs show no sample `dev doctor` transcript.
+
 ## Release gates
 
 In order:
