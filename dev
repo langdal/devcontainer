@@ -139,7 +139,7 @@ IMAGE_VERSION=""
 # explicit call from cmd_up/cmd_exec/cmd_shell.
 subcmd=""
 case "${1:-}" in
-  up|shell|exec|down|status|fw|reset|update|install|agent|dotfile|dotfiles) subcmd="$1"; shift ;;
+  up|shell|exec|down|status|fw|reset|update|install|agent|dotfile|dotfiles|doctor) subcmd="$1"; shift ;;
   --help)    usage; exit 0 ;;
   --version) echo "dev $(resolve_dev_version)"; exit 0 ;;
   '')
@@ -168,6 +168,7 @@ case "$subcmd" in
   reset)            cmd_reset "$@" ;;
   down)             cmd_down "$@" ;;
   status)           cmd_status "$@" ;;
+  doctor)           cmd_doctor "$@" ;;
   up)               cmd_up "$@" ;;
   exec)             cmd_exec "$@" ;;
   shell)            cmd_shell "$@" ;;

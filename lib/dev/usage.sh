@@ -28,6 +28,10 @@ VERBS:
   down            Stop this workspace's container(s). Takes no options.
   status          Show what is running for this workspace, its mode, and
                   firewall state. Takes no options.
+  doctor          Check this host for everything dev needs and print a
+                  report with fixes. Works before anything is set up.
+                  Options: --dind / --pind (also require nested-mode
+                  prerequisites). Exits 1 if anything blocking fails.
   fw off          Toggle the firewall off on the running workspace container
                   (normal or dind) in place: flush OUTPUT rules + ACCEPT
                   policy, and switch tinyproxy to an allow-all filter
