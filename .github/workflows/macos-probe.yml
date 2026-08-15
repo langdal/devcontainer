@@ -1,0 +1,186 @@
+# Manual probe: can a real macOS runner host the workstream-3 macOS cell?
+#
+# Answers the open question in
+# docs/superpowers/specs/2026-08-15-host-preflight-matrix-design.md: whether
+# `podman machine` can start on GitHub's macOS runners. If it can, the macOS
+# matrix cell can run a genuine smoke; if it cannot, that cell degrades to the
+# unit suite plus `dev doctor` without a VM, and the manual Apple Silicon
+# session carries proportionally more weight.
+#
+# Deliberately NOT wired into ci.yml. This is a one-off question, run by hand,
+# whose output is an answer rather than a gate. Delete it once the answer is
+# recorded in the spec.
+#
+# Every probe is continue-on-error so a single run collects every answer
+# instead of stopping at the first failure — the whole point is the report at
+# the end, not a red X.
+name: macos-probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: "Runner image to probe"
+        type: choice
+        default: macos-14
+        options: [macos-14, macos-15, macos-13]
+      build_image:
+        description: "Also try a full dev image build (slow, ~20-30 min)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Runner facts
+        id: facts
+        run: |
+          {
+            echo "arch=$(uname -m)"
+            echo "macos=$(sw_vers -productVersion)"
+            echo "cpus=$(sysctl -n hw.ncpu)"
+            echo "mem_gb=$(( $(sysctl -n hw.memsize) / 1073741824 ))"
+          } >> "$GITHUB_OUTPUT"
+          echo "=== hardware ==="
+          uname -a
+          sw_vers
+          echo "cpu: $(sysctl -n machdep.cpu.brand_string 2>/dev/null || echo '?')"
+          echo "mem: $(( $(sysctl -n hw.memsize) / 1073741824 )) GiB"
+          echo "disk:"; df -h / /Users 2>/dev/null | head -5
+          echo "=== nested virt / hypervisor ==="
+          # HVF is what podman machine's applehv provider needs.
+          sysctl -a 2>/dev/null | grep -Ei 'hv_support|hv\.' || echo "(no hv.* sysctls reported)"
+
+      - name: Install podman
+        id: install
+        continue-on-error: true
+        timeout-minutes: 20
+        run: |
+          if command -v podman >/dev/null 2>&1; then
+            echo "podman already present"
+          else
+            brew install podman
+          fi
+          podman --version
+          echo "provider default:"
+          podman info --format '{{.Host.OS}}' 2>/dev/null || true
+
+      - name: podman machine init
+        id: init
+        continue-on-error: true
+        timeout-minutes: 25
+        run: |
+          set -x
+          start=$(date +%s)
+          podman machine init --cpus 2 --memory 4096 --disk-size 30
+          echo "init_seconds=$(( $(date +%s) - start ))" >> "$GITHUB_OUTPUT"
+          podman machine list
+
+      - name: podman machine start   # THE question
+        id: start
+        continue-on-error: true
+        timeout-minutes: 20
+        run: |
+          set -x
+          start=$(date +%s)
+          podman machine start
+          echo "start_seconds=$(( $(date +%s) - start ))" >> "$GITHUB_OUTPUT"
+          podman machine list
+          podman info --format 'rootless={{.Host.Security.Rootless}} provider={{.Host.OS}}'
+
+      - name: Nested container smoke
+        id: smoke
+        continue-on-error: true
+        timeout-minutes: 15
+        run: |
+          set -x
+          podman run --rm docker.io/library/alpine:3 sh -c 'echo NESTED_OK; id'
+
+      - name: dev CLI on macOS (no container)
+        id: cli
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          set -x
+          # These must work on a bare Mac. dev doctor does not exist yet; when
+          # it lands this step becomes `./dev doctor` and asserts exit 0.
+          ./dev --help >/dev/null
+          ./dev status
+          ./dev up --dry-run
+
+      - name: Unit suite
+        id: units
+        continue-on-error: true
+        timeout-minutes: 15
+        run: |
+          fails=0
+          for t in scripts/test/unit/*.sh; do
+            n=$(basename "$t" .sh)
+            [ "$n" = "test-runner" ] && continue
+            if bash "$t" >/tmp/"$n".log 2>&1; then
+              echo "PASS $n"
+            else
+              echo "FAIL $n"; sed -n '1,15p' /tmp/"$n".log; fails=$((fails+1))
+            fi
+          done
+          echo "unit failures: $fails"
+          [ "$fails" -eq 0 ]
+
+      - name: Full image build (optional)
+        id: build
+        if: ${{ inputs.build_image }}
+        continue-on-error: true
+        timeout-minutes: 40
+        run: |
+          set -x
+          start=$(date +%s)
+          ./dev up --build --dry-run
+          podman build --tag generic-devcontainer .
+          echo "build_seconds=$(( $(date +%s) - start ))" >> "$GITHUB_OUTPUT"
+
+      - name: Report
+        if: always()
+        run: |
+          verdict() {
+            case "$1" in
+              success) echo "PASS" ;;
+              skipped) echo "skipped" ;;
+              "")      echo "not run" ;;
+              *)       echo "FAIL" ;;
+            esac
+          }
+          {
+            echo "# macOS probe — ${{ inputs.runner }}"
+            echo
+            echo "Runner: \`${{ steps.facts.outputs.arch }}\` · macOS ${{ steps.facts.outputs.macos }} · ${{ steps.facts.outputs.cpus }} CPU · ${{ steps.facts.outputs.mem_gb }} GiB"
+            echo
+            echo "| Probe | Result | Notes |"
+            echo "|---|---|---|"
+            echo "| install podman | $(verdict '${{ steps.install.outcome }}') | |"
+            echo "| machine init | $(verdict '${{ steps.init.outcome }}') | ${{ steps.init.outputs.init_seconds }}s |"
+            echo "| **machine start** | $(verdict '${{ steps.start.outcome }}') | ${{ steps.start.outputs.start_seconds }}s |"
+            echo "| nested container | $(verdict '${{ steps.smoke.outcome }}') | |"
+            echo "| dev CLI (bare) | $(verdict '${{ steps.cli.outcome }}') | |"
+            echo "| unit suite | $(verdict '${{ steps.units.outcome }}') | |"
+            echo "| image build | $(verdict '${{ steps.build.outcome }}') | ${{ steps.build.outputs.build_seconds }}s |"
+            echo
+            echo "## Answer to the spec's open question"
+            echo
+            if [ '${{ steps.start.outcome }}' = 'success' ]; then
+              echo "\`podman machine\` **starts** on \`${{ inputs.runner }}\`. A real macOS matrix cell is viable."
+              echo "Record this in docs/superpowers/specs/2026-08-15-host-preflight-matrix-design.md"
+              echo "and size the cell against the timings above."
+            else
+              echo "\`podman machine\` **does not start** on \`${{ inputs.runner }}\`."
+              echo "The macOS cell degrades to the unit suite plus \`dev doctor\` without a VM,"
+              echo "and the manual Apple Silicon session becomes the only real-hardware coverage."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          cat "$GITHUB_STEP_SUMMARY"
