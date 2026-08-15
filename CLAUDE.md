@@ -115,7 +115,7 @@ filters on it:
 ```
 
 `DEV_TEST_PRIVILEGE=user` runs only the `user` subset and requires no sudo;
-unset means "run everything". 9 of the 39 scenarios are `root`.
+unset means "run everything". 9 of the 40 scenarios are `root`.
 
 Two cells, two baselines on the dev host. Compare the failure SET, not just
 the tally — a run can hit the same count with a different set:

@@ -81,7 +81,8 @@ fi
 # ---- Auto-install runtimes if missing ----
 # The orchestrator needs at least docker (or podman) on PATH so the dev
 # script can build images. Install via apt on Debian/Ubuntu hosts.
-if ! command -v docker >/dev/null 2>&1 && ! command -v podman >/dev/null 2>&1; then
+if [ "$DEV_TEST_PRIVILEGE" = root ] \
+   && ! command -v docker >/dev/null 2>&1 && ! command -v podman >/dev/null 2>&1; then
     if command -v apt-get >/dev/null 2>&1; then
         echo "Installing docker.io + docker-buildx + podman..." | tee -a "$LAST_LOG"
         sudo apt-get update -qq >/dev/null 2>&1
@@ -103,7 +104,8 @@ fi
 # only fires when NO runtime exists at all — so a host with docker and no
 # buildx sailed past it, failed every image build, and still produced a
 # summary that read as clean (2026-08-15). Install it on its own terms.
-if command -v docker >/dev/null 2>&1 && ! docker buildx version >/dev/null 2>&1; then
+if [ "$DEV_TEST_PRIVILEGE" = root ] \
+   && command -v docker >/dev/null 2>&1 && ! docker buildx version >/dev/null 2>&1; then
     if command -v apt-get >/dev/null 2>&1; then
         echo "docker is present but 'docker buildx' is not; installing docker-buildx..." | tee -a "$LAST_LOG"
         sudo apt-get update -qq >/dev/null 2>&1

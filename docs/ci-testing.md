@@ -81,7 +81,7 @@ After the run, logs land at:
 The suite runs in two configurations, and they test different things.
 
 ```bash
-sudo bash scripts/test/run-all.sh     # rootful docker, all 39 scenarios
+sudo bash scripts/test/run-all.sh     # rootful docker, all 40 scenarios
 bash scripts/test/run-rootless.sh     # rootless podman, the user subset, no sudo
 ```
 
@@ -94,7 +94,7 @@ Scenarios declare the privilege they need alongside the platform they need:
 
 `root` means the scenario changes host state — sysctls, AppArmor profiles,
 package installs, device nodes — and cannot run where sudo is unavailable.
-`user` means it needs only a working container runtime. Nine of the 39 are
+`user` means it needs only a working container runtime. Nine of the 40 are
 `root`. `run-all.sh` filters on the tag via `DEV_TEST_PRIVILEGE`; unset means
 "run everything", so the existing invocation is unchanged.
 

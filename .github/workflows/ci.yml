@@ -87,6 +87,10 @@ jobs:
   rootless-linux:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
+    # UNVERIFIED: this cell has never run in CI — it cannot be exercised
+    # locally. Non-blocking until one green run exists, then remove this line.
+    # Leaving it blocking would gate every PR on a cell nobody has seen pass.
+    continue-on-error: true
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -99,6 +103,25 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends podman uidmap
+
+      - name: Prepare the host for rootless nested engines
+        # Two host preconditions dev's own preflights demand, neither of which
+        # a stock ubuntu-24.04 runner satisfies:
+        #   - subuid/subgid >= 165535. The default useradd grant is 65536, and
+        #     rootless dockerd/podman inside --dind/--pind must map the image's
+        #     vscode range (container ids 100000-165535) or rootlesskit dies.
+        #   - apparmor_restrict_unprivileged_userns=0. Ubuntu 23.10+ ships it
+        #     at 1, which blocks the unprivileged user namespace those nested
+        #     engines create. It is the single largest source of failures on
+        #     the maintainer's own machine (10 of them).
+        # Without both, every --dind/--pind scenario in the user subset refuses
+        # at preflight and this cell is red for host reasons rather than code.
+        run: |
+          sudo usermod --add-subuids 200000-265535 --add-subgids 200000-265535 "$USER"
+          podman system migrate
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          echo "subuid: $(grep "^$USER:" /etc/subuid || echo none)"
+          sysctl kernel.apparmor_restrict_unprivileged_userns || true
 
       - name: Confirm the runtime really is rootless
         run: |
@@ -131,6 +154,8 @@ jobs:
     # `dev doctor` reports on a machine where nothing is set up.
     runs-on: macos-14
     timeout-minutes: 20
+    # UNVERIFIED, same reasoning as rootless-linux. Remove once green.
+    continue-on-error: true
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
