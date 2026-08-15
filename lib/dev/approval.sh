@@ -94,29 +94,14 @@ approve_project_allowlist() {
 # re-printed from cache each run so it isn't missed. Probe failures are
 # silent and uncached (retried next run).
 check_github_token() {
-  if [[ -z "${GITHUB_TOKEN:-}" ]]; then
-    return 0
-  fi
-  case "$GITHUB_TOKEN" in
-    github_pat_*) return 0 ;;   # fine-grained PAT: scoped by construction
-  esac
-  if ! command -v curl >/dev/null 2>&1; then
-    return 0
-  fi
-  local hash cache scopes headers
-  hash=$(printf '%s' "$GITHUB_TOKEN" | sha256_portable | cut -c1-16)
-  cache="$STATE_DIR/github-token-$hash"
-  if [[ ! -f "$cache" ]]; then
-    if ! headers=$(curl -fsS -D - -o /dev/null -m 5 \
-        -H "Authorization: Bearer $GITHUB_TOKEN" \
-        https://api.github.com/rate_limit 2>/dev/null); then
-      return 0
-    fi
-    scopes=$(printf '%s' "$headers" | tr -d '\r' \
-        | awk -F': ' 'tolower($1)=="x-oauth-scopes" {print $2; exit}')
-    printf '%s\n' "$scopes" > "$cache"
-  fi
-  scopes=$(cat "$cache")
+  # The probe itself lives in lib/dev/checks-catalog.sh as _token_scopes, so
+  # this warning and `dev doctor`'s github-token-scopes check can never
+  # disagree about a token again. They used to be separate implementations,
+  # and the newer one had already lost the fine-grained-PAT short-circuit and
+  # the cache. Non-zero means "no token, a fine-grained PAT, or undeterminable"
+  # — all cases where dev up stays quiet.
+  local scopes
+  scopes="$(_token_scopes)" || return 0
   if [[ -n "$scopes" ]]; then
     echo "Warning: GITHUB_TOKEN carries OAuth scopes: ${scopes}" >&2
     echo "         Rate-limit identification needs NO scopes — consider a" >&2

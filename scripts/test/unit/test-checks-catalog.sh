@@ -146,6 +146,22 @@ GITHUB_TOKEN=x run_check github-token-scopes; [ "$CHECK_STATE" = pass ] || fail 
 _token_scopes() { return 1; }
 GITHUB_TOKEN=x run_check github-token-scopes; [ "$CHECK_STATE" = na ] || fail "transport failure must be na, not pass"
 
+# A fine-grained PAT is scoped by construction, so there is nothing to probe
+# and no network call to make. That short-circuit lived only in approval.sh's
+# copy before the two were unified; this exercises the REAL _token_scopes to
+# prove the unified one kept it. Run it in a child shell so re-sourcing the
+# catalogue does not shadow the stubs this file installed above.
+pat_state=$(bash -c '
+  set -u
+  . "'"$ROOT"'/lib/dev/runtime.sh"
+  . "'"$ROOT"'/lib/dev/checks.sh"
+  . "'"$ROOT"'/lib/dev/checks-catalog.sh"
+  RUNTIME=docker; RUNTIME_ARGS=""
+  GITHUB_TOKEN=github_pat_11ABCDEFG_notarealtoken run_check github-token-scopes
+  echo "$CHECK_STATE"')
+[ "$pat_state" = na ] \
+    || fail "fine-grained PAT needs no probe — expected na, got $pat_state"
+
 # --- selinux ---
 # shellcheck disable=SC2329  # invoked indirectly via run_check -> _chk_selinux_enforcing
 _selinux_mode() { echo Enforcing; }; run_check selinux-enforcing; [ "$CHECK_STATE" = fail ] || fail "enforcing"

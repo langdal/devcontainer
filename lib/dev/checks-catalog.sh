@@ -155,13 +155,45 @@ _total_mem_gb() {
 # "verified scopeless" apart from "learned nothing". --max-time bounds this:
 # an offline host or a firewall that silently drops (rather than rejects) the
 # connection must not hang the probe.
+# The single source of truth for "what scopes does GITHUB_TOKEN carry".
+# Consumed by _chk_github_token_scopes (dev doctor) AND check_github_token
+# (lib/dev/approval.sh, the warning dev up prints). Those were two separate
+# implementations that had already drifted: the registry copy lacked the
+# fine-grained-PAT short-circuit and the per-token cache, so it made a network
+# call on every doctor run and flagged tokens the other one correctly ignored.
+#
+# Prints the scopes string (possibly empty) and returns:
+#   0  determined
+#   1  undeterminable — no curl, or the request never completed. NEVER treat
+#      this as "no scopes": that asserts the token is safe without checking.
+#   2  not applicable — no token, or a fine-grained PAT, scoped by construction
 _token_scopes() {
-  local headers rc
-  headers="$(curl -sS --max-time 5 -I -H "Authorization: bearer ${GITHUB_TOKEN}" \
-      https://api.github.com/ 2>/dev/null)"
+  [[ -z "${GITHUB_TOKEN:-}" ]] && return 2
+  case "$GITHUB_TOKEN" in
+    github_pat_*) return 2 ;;
+  esac
+  _have_cmd curl || return 1
+  local cache="" hash headers rc scopes
+  # Cache per token when a state dir exists (dev up path). doctor may run
+  # before ensure_state_dir, so the cache is optional, not required.
+  if [[ -n "${STATE_DIR:-}" ]] && command -v sha256_portable >/dev/null 2>&1; then
+    hash=$(printf '%s' "$GITHUB_TOKEN" | sha256_portable | cut -c1-16)
+    cache="$STATE_DIR/github-token-$hash"
+    if [[ -f "$cache" ]]; then
+      cat "$cache"
+      return 0
+    fi
+  fi
+  headers="$(curl -fsS -D - -o /dev/null -m 5 \
+      -H "Authorization: Bearer $GITHUB_TOKEN" \
+      https://api.github.com/rate_limit 2>/dev/null)"
   rc=$?
   [[ $rc -eq 0 ]] || return 1
-  echo "$headers" | tr -d '\r' | awk -F': ' 'tolower($1)=="x-oauth-scopes"{print $2}'
+  scopes=$(printf '%s' "$headers" | tr -d '\r' \
+      | awk -F': ' 'tolower($1)=="x-oauth-scopes" {print $2; exit}')
+  [[ -n "$cache" ]] && printf '%s\n' "$scopes" > "$cache"
+  printf '%s\n' "$scopes"
+  return 0
 }
 _selinux_mode() { command -v getenforce >/dev/null 2>&1 && getenforce 2>/dev/null || echo ""; }
 
@@ -233,9 +265,11 @@ _chk_memory_fix() {
 }
 
 _chk_github_token_scopes() {
-  [[ -z "${GITHUB_TOKEN:-}" ]] && return 2
-  local scopes
-  scopes="$(_token_scopes)" || return 2
+  local scopes rc
+  scopes="$(_token_scopes)"; rc=$?
+  # rc 1 (undeterminable) maps to not-applicable, never to pass: reporting
+  # "carries no scopes" after a failed probe asserts something unverified.
+  [[ "$rc" -ne 0 ]] && return 2
   [[ -n "$scopes" ]] && return 1
   return 0
 }
