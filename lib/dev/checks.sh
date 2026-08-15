@@ -107,3 +107,80 @@ checks_select() {
     echo "$id"
   done
 }
+
+# --- phase 0 --------------------------------------------------------------
+
+_chk_platform_supported() {
+  case "$(_host_os)" in
+    Linux|Darwin) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+_chk_platform_supported_fix() {
+  echo "dev supports Linux and macOS only; this host reports $(_host_os)."
+}
+
+_chk_runtime_present() {
+  _have_cmd docker && return 0
+  _have_cmd podman && return 0
+  return 1
+}
+_chk_runtime_present_fix() {
+  if [[ "$(_host_os)" == "Darwin" ]]; then
+    echo "Install podman (Docker Desktop is not supported):"
+    echo "    brew install podman && podman machine init && podman machine start"
+  else
+    echo "Install a container runtime, e.g.:"
+    echo "    sudo apt-get install -y docker.io docker-buildx"
+  fi
+}
+
+# --- phase 1, blocking ----------------------------------------------------
+
+# The Dockerfile uses BuildKit's RUN --mount=type=secret, which the legacy
+# builder cannot handle. Missing buildx therefore fails EVERY image build.
+# On 2026-08-15 this went undetected: the test orchestrator installs buildx
+# only when no runtime is present at all, so a host with docker and no buildx
+# failed every scenario and still wrote a summary that read as clean.
+_chk_buildx() {
+  _have_cmd docker-buildx && return 0
+  _have_cmd buildx && return 0
+  return 1
+}
+_chk_buildx_fix() {
+  echo "The Dockerfile uses RUN --mount=type=secret, which the legacy builder"
+  echo "cannot handle, so buildx is mandatory."
+  echo "    Debian/Ubuntu:  sudo apt-get install -y docker-buildx"
+  echo "    other:          https://docs.docker.com/go/buildx/"
+  echo "Or force podman instead:  DEV_RUNTIME=podman"
+}
+
+_chk_not_docker_desktop() {
+  _runtime_version | grep -qi podman && return 0
+  _runtime_version | grep -qi docker && return 1
+  return 2
+}
+_chk_not_docker_desktop_fix() {
+  echo "Docker Desktop is not supported on macOS; dev targets podman."
+  echo "    brew install podman && podman machine init && podman machine start"
+  echo "Then pin it:  DEV_RUNTIME=podman"
+}
+
+_chk_podman_machine() {
+  _machine_running && return 0
+  return 1
+}
+_chk_podman_machine_fix() {
+  echo "Start the VM that backs podman on macOS:"
+  echo "    podman machine start"
+  echo "(First time:  podman machine init)"
+}
+
+_chk_workspace_not_root() {
+  [[ "${HOST_UID:-$(id -u)}" == "0" ]] && return 1
+  return 0
+}
+_chk_workspace_not_root_fix() {
+  echo "Run dev as your normal user. The image creates a non-root 'vscode'"
+  echo "user; UID 0 would collide with the image's existing root."
+}
