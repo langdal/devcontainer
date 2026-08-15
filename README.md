@@ -4,7 +4,7 @@ A portable, editor-agnostic dev environment. One Dockerfile, one bash wrapper, p
 
 ## What you get
 
-- **A real dev container in one command.** Run `dev` from any project folder and you land in a shell with your code mounted at `/workspace`. No per-project config files to write or maintain.
+- **A real dev container in one command.** Run `dev up` from any project folder and you land in a shell with your code mounted at `/workspace`. No per-project config files to write or maintain.
 - **Per-project tool versions, no clutter.** Drop a `mise.toml` in your repo to pin node/go/python/etc. Tools install on start and cache in a shared volume — not in your home directory.
 - **A network firewall built for AI agents.** Outbound traffic is default-deny and filtered to a curated allowlist. The design goal: an agent working inside the container **can freely read and edit your files, but cannot send your code to arbitrary hosts.**
 - **State that stays isolated.** Shell history, git config, and dotfiles live in a per-project home volume, so one project's agent can't read another project's SSH keys or credentials.
@@ -64,7 +64,7 @@ git clone https://github.com/langdal/devcontainer.git ~/devcontainer
 
 ```bash
 cd ~/projects/my-project
-dev
+dev up
 ```
 
 The first run builds the image. You land in a Zsh shell at `/workspace` with your project mounted.
@@ -91,7 +91,7 @@ dev up --default-ports    # forward 5173, 5174, 8080, 2345, 3000
 dev up --host-port 8080   # allow egress to host.docker.internal:8080
 ```
 
-Multiple terminals: just run `dev` again — it `exec`s into the running container.
+Multiple terminals: run `dev shell` to attach another shell to the running container (`dev up` also attaches when one is already running).
 
 ## Container Modes
 
