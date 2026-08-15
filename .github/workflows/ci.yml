@@ -84,9 +84,87 @@ jobs:
             scripts/test/cloud-init-output-${{ matrix.distro }}.log
           if-no-files-found: ignore
 
+  rootless-linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install podman
+        # Installed here, in a privileged workflow step, BEFORE the cell runs.
+        # run-all.sh's auto-install fallback still shells out to sudo when no
+        # runtime is present, and the whole point of this cell is that it needs
+        # none — so the runtime must already exist when it starts. Do not
+        # reorder this after the run step.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends podman uidmap
+
+      - name: Confirm the runtime really is rootless
+        run: |
+          echo "uid: $(id -u)"
+          podman info --format 'rootless={{.Host.Security.Rootless}}'
+
+      - name: Unprivileged subset under rootless podman
+        env:
+          # Without a token the image build fetches release metadata from the
+          # GitHub API anonymously, against a 60/hr limit shared per runner IP.
+          # That is what makes the uid-gid scenarios fail on a cold cache.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/test/run-rootless.sh
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: logs-rootless-linux
+          path: |
+            scripts/test/last-run.log
+            scripts/test/last-summary.log
+          if-no-files-found: ignore
+
+  macos-checks:
+    # GitHub's macOS runners are themselves VMs with no nested virtualization,
+    # so `podman machine` cannot start there — confirmed 2026-08-15, vfkit
+    # exits immediately. This cell therefore runs NO containers. It verifies
+    # the logic that can be verified without one: the unit suite, and that
+    # `dev doctor` reports on a machine where nothing is set up.
+    runs-on: macos-14
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Unit suite
+        run: |
+          fails=0
+          for t in scripts/test/unit/*.sh; do
+            n=$(basename "$t" .sh)
+            [ "$n" = "test-runner" ] && continue
+            if bash "$t" >/tmp/"$n".log 2>&1; then
+              echo "PASS $n"
+            else
+              echo "FAIL $n"; sed -n '1,20p' /tmp/"$n".log; fails=$((fails+1))
+            fi
+          done
+          echo "unit failures: $fails"
+          [ "$fails" -eq 0 ]
+
+      - name: dev doctor reports on a bare Mac
+        # No podman, no machine, no image. Doctor's whole promise is that it
+        # still produces a report. Exit 1 is legitimate — it will flag the
+        # missing runtime. A crash, a hang, or an empty report is not.
+        run: |
+          set +e
+          out=$(./dev doctor 2>&1); rc=$?
+          set -e
+          echo "$out"
+          echo "exit=$rc"
+          [ "$rc" -eq 0 ] || [ "$rc" -eq 1 ] || { echo "doctor exited $rc"; exit 1; }
+          echo "$out" | grep -qE '[0-9]+ blocking' || { echo "no tally — doctor bailed"; exit 1; }
+
   ci:
     if: always()
-    needs: [lint, vm-matrix]
+    needs: [lint, vm-matrix, rootless-linux, macos-checks]
     runs-on: ubuntu-24.04
     timeout-minutes: 1
     steps:
