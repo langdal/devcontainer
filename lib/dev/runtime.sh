@@ -133,15 +133,33 @@ detect_runtime() {
   esac
 }
 
-# On macOS with podman, the VM must be running.
-ensure_runtime_ready() {
-  if [[ "$(uname -s)" == "Darwin" && "$RUNTIME" == "podman" ]]; then
-    if ! podman machine list --format '{{.Running}}' 2>/dev/null | grep -q '^true$'; then
-      echo "Error: podman machine is not running." >&2
-      echo "       Start it with:  podman machine start" >&2
-      exit 1
-    fi
+# Is the macOS podman machine running? Overridable for tests.
+_machine_running() {
+  if [[ -n "${DEV_FAKE_MACHINE_RUNNING:-}" ]]; then
+    [[ "$DEV_FAKE_MACHINE_RUNNING" == true ]]
+    return
   fi
+  podman machine list --format '{{.Running}}' 2>/dev/null | grep -q '^true$'
+}
+
+# Refuse: this operation genuinely needs a live engine.
+require_engine() {
+  echo "Error: podman machine is not running." >&2
+  echo "       Start it with:  podman machine start" >&2
+  exit 1
+}
+
+# On macOS with podman the VM must be running — but ONLY for operations that
+# actually talk to the engine. `dev status` reads what is running, `dev up
+# --dry-run` prints a command without executing it, and `dev doctor` exists to
+# diagnose a host where nothing is set up: gating those on a live VM makes
+# them useless exactly when they are needed. Callers opt in with
+# NEEDS_ENGINE=true. (Confirmed on GitHub macOS runners 2026-08-15: four unit
+# tests and two verbs failed here for no good reason.)
+ensure_runtime_ready() {
+  [[ "${NEEDS_ENGINE:-false}" == true ]] || return 0
+  [[ "$(_host_os)" == "Darwin" && "$RUNTIME" == "podman" ]] || return 0
+  _machine_running || require_engine
 }
 
 # Whether the engine we are talking to is podman. The CLI binary does not

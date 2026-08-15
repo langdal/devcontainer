@@ -21,6 +21,8 @@ cmd_shell() {
     exit 2
   fi
   detect_runtime
+  # shellcheck disable=SC2034  # consumed by ensure_runtime_ready
+  NEEDS_ENGINE=true
   ensure_runtime_ready
   _resolve_workspace_names
   resolve_managed_container

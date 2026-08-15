@@ -167,6 +167,12 @@ cmd_start() {
   preflight_apparmor_userns
 
   detect_runtime
+  # The start path creates or attaches a container: it needs a live engine.
+  # --dry-run only prints the command, so it does not.
+  # shellcheck disable=SC2034  # consumed by ensure_runtime_ready
+  NEEDS_ENGINE=true
+  # shellcheck disable=SC2034  # consumed by ensure_runtime_ready
+  [[ "$DRY_RUN" == true ]] && NEEDS_ENGINE=false
   ensure_runtime_ready
 
   # Resolve the dind storage location once detect_runtime has settled on a

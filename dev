@@ -85,6 +85,11 @@ IMAGE_NAME="generic-devcontainer"
 # not follow the module loader's glob) cannot see the uses from here.
 # shellcheck disable=SC2034  # consumed by cmd_start/self_update/approve_project_allowlist and start_container
 DRY_RUN=false
+# Whether the current operation talks to the engine. Read by
+# ensure_runtime_ready (lib/dev/runtime.sh); verbs that only read state or
+# print a command leave it false.
+# shellcheck disable=SC2034  # consumed by ensure_runtime_ready
+NEEDS_ENGINE=false
 # shellcheck disable=SC2034  # consumed by cmd_start in lib/dev/up.sh
 FORCE_BUILD=false
 # shellcheck disable=SC2034  # consumed by start_container in lib/dev/lifecycle.sh

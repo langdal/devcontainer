@@ -7,7 +7,10 @@ cmd_down() {
   if [[ $# -gt 0 ]]; then
     echo "Error: 'dev down' takes no arguments." >&2; exit 2
   fi
-  detect_runtime; ensure_runtime_ready; _resolve_workspace_names
+  detect_runtime
+  # shellcheck disable=SC2034  # consumed by ensure_runtime_ready
+  NEEDS_ENGINE=false
+  ensure_runtime_ready; _resolve_workspace_names
   down_workspace
   exit 0
 }
@@ -17,7 +20,10 @@ cmd_status() {
   if [[ $# -gt 0 ]]; then
     echo "Error: 'dev status' takes no arguments." >&2; exit 2
   fi
-  detect_runtime; ensure_runtime_ready; _resolve_workspace_names
+  detect_runtime
+  # shellcheck disable=SC2034  # consumed by ensure_runtime_ready
+  NEEDS_ENGINE=false
+  ensure_runtime_ready; _resolve_workspace_names
   status_workspace
   exit 0
 }
