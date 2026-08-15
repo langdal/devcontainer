@@ -2,6 +2,26 @@
 # lib/dev/status.sh — `dev down` and `dev status` handlers.
 # Sourced by dev; not executed directly.
 
+# cmd_down: the `dev down` verb.
+cmd_down() {
+  if [[ $# -gt 0 ]]; then
+    echo "Error: 'dev down' takes no arguments." >&2; exit 2
+  fi
+  detect_runtime; ensure_runtime_ready; _resolve_workspace_names
+  down_workspace
+  exit 0
+}
+
+# cmd_status: the `dev status` verb.
+cmd_status() {
+  if [[ $# -gt 0 ]]; then
+    echo "Error: 'dev status' takes no arguments." >&2; exit 2
+  fi
+  detect_runtime; ensure_runtime_ready; _resolve_workspace_names
+  status_workspace
+  exit 0
+}
+
 # Stop this workspace's container(s), whatever mode is running. Containers
 # run with --rm, so stopping also removes them. Volumes are untouched
 # ('dev reset' handles those).

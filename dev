@@ -60,128 +60,6 @@ if ! declare -F start_container >/dev/null 2>&1; then
   exit 1
 fi
 
-# --- Per-workspace host-side state -----------------------------------------
-# Holds the approved copy of the project allowlist and the GITHUB_TOKEN
-# scope-check cache. Mounted read-only into the container so nothing the
-# agent can write inside /workspace is consumed directly by the firewall.
-
-# Portable sha256 of stdin (Linux: sha256sum, macOS: shasum -a 256).
-sha256_portable() {
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum | awk '{print $1}'
-  else
-    shasum -a 256 | awk '{print $1}'
-  fi
-}
-
-# Resolve + create the state dir. Basename plus a 4-char path hash so two
-# same-named workspaces at different paths don't share approval state.
-STATE_DIR=""
-ensure_state_dir() {
-  local hash
-  hash=$(printf '%s' "$(pwd)" | sha256_portable | cut -c1-4)
-  STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/devcontainer/${WORKSPACE_BASENAME}-${hash}"
-  mkdir -p "$STATE_DIR"
-}
-
-# Approval gate for the workspace allowlist. The workspace file is
-# agent-writable, so it is never given to the firewall unreviewed: dev
-# diffs it against the approved snapshot in STATE_DIR and asks. Decline or
-# non-interactive => start WITHOUT the project allowlist (fail-safe, never
-# blocks). Sets MOUNT_PROJECT_ALLOWLIST=true when the snapshot is current.
-MOUNT_PROJECT_ALLOWLIST=false
-approve_project_allowlist() {
-  local src=".devcontainer-allowlist"
-  local snap="$STATE_DIR/allowlist.approved"
-  if [[ "$MAINTENANCE" == true ]]; then
-    return 0   # maintenance mode has no firewall; nothing to approve
-  fi
-  if [[ -L "$src" ]]; then
-    echo "Warning: $src is a symlink; refusing to follow it. Starting WITHOUT the project allowlist." >&2
-    rm -f "$snap"
-    return 0
-  fi
-  if [[ ! -f "$src" ]]; then
-    rm -f "$snap"   # allowlist absent (or not a regular file): drop the stale approval
-    return 0
-  fi
-  if [[ -f "$snap" ]] && cmp -s "$src" "$snap"; then
-    MOUNT_PROJECT_ALLOWLIST=true
-    return 0
-  fi
-  local old=/dev/null
-  if [[ -f "$snap" ]]; then
-    old="$snap"
-  fi
-  echo "Project allowlist ${src} is new or changed since last approval:" >&2
-  diff -u "$old" "$src" 2>&1 | head -n 200 >&2 || true
-  if [[ "${DEV_ASSUME_YES:-0}" == "1" ]]; then
-    echo "DEV_ASSUME_YES set — approving project allowlist." >&2
-    cp "$src" "$snap"
-    MOUNT_PROJECT_ALLOWLIST=true
-    return 0
-  fi
-  if [[ "$DRY_RUN" == true ]]; then
-    echo "Would prompt to approve ${src}; continuing without it for --dry-run." >&2
-    return 0
-  fi
-  if [[ ! -t 0 ]]; then
-    echo "Warning: stdin is not a TTY; starting WITHOUT the project allowlist." >&2
-    echo "         Run 'dev' interactively (or set DEV_ASSUME_YES=1) to approve it." >&2
-    return 0
-  fi
-  local reply=""
-  read -r -p "Approve project allowlist changes? [y/N] " reply || reply=""
-  case "$reply" in
-    y|Y|yes|YES)
-      cp "$src" "$snap"
-      # shellcheck disable=SC2034  # consumed by start_container in lib/dev/lifecycle.sh
-      MOUNT_PROJECT_ALLOWLIST=true
-      ;;
-    *)
-      echo "Starting WITHOUT the project allowlist (approval declined)." >&2
-      ;;
-  esac
-}
-
-# --- GITHUB_TOKEN scope guidance --------------------------------------------
-# The passthrough exists for rate-limit identification; a no-permission
-# fine-grained PAT is enough. Warn (never block) when a classic/OAuth token
-# carries scopes an agent inside the container could misuse. Probed once per
-# distinct token; the scopes string is cached in STATE_DIR and the warning
-# re-printed from cache each run so it isn't missed. Probe failures are
-# silent and uncached (retried next run).
-check_github_token() {
-  if [[ -z "${GITHUB_TOKEN:-}" ]]; then
-    return 0
-  fi
-  case "$GITHUB_TOKEN" in
-    github_pat_*) return 0 ;;   # fine-grained PAT: scoped by construction
-  esac
-  if ! command -v curl >/dev/null 2>&1; then
-    return 0
-  fi
-  local hash cache scopes headers
-  hash=$(printf '%s' "$GITHUB_TOKEN" | sha256_portable | cut -c1-16)
-  cache="$STATE_DIR/github-token-$hash"
-  if [[ ! -f "$cache" ]]; then
-    if ! headers=$(curl -fsS -D - -o /dev/null -m 5 \
-        -H "Authorization: Bearer $GITHUB_TOKEN" \
-        https://api.github.com/rate_limit 2>/dev/null); then
-      return 0
-    fi
-    scopes=$(printf '%s' "$headers" | tr -d '\r' \
-        | awk -F': ' 'tolower($1)=="x-oauth-scopes" {print $2; exit}')
-    printf '%s\n' "$scopes" > "$cache"
-  fi
-  scopes=$(cat "$cache")
-  if [[ -n "$scopes" ]]; then
-    echo "Warning: GITHUB_TOKEN carries OAuth scopes: ${scopes}" >&2
-    echo "         Rate-limit identification needs NO scopes — consider a" >&2
-    echo "         no-permission fine-grained PAT. See README.md > 'GitHub token'." >&2
-  fi
-}
-
 # Container-runtime extra args. On macOS+podman, the rootless connection
 # cannot pass /dev/net/tun into a container (rootless podman silently drops
 # the device even with --device=/dev/net/tun), which makes the nested
@@ -205,30 +83,40 @@ IMAGE_NAME="generic-devcontainer"
 # Start-flow defaults. All of these are set by cmd_start (lib/dev/up.sh) and
 # read there and in the lib/dev/* helpers it calls, so shellcheck (which does
 # not follow the module loader's glob) cannot see the uses from here.
+# shellcheck disable=SC2034  # consumed by cmd_start/self_update/approve_project_allowlist and start_container
 DRY_RUN=false
 # shellcheck disable=SC2034  # consumed by cmd_start in lib/dev/up.sh
 FORCE_BUILD=false
 # shellcheck disable=SC2034  # consumed by start_container in lib/dev/lifecycle.sh
 DEFAULT_PORTS=false
+# shellcheck disable=SC2034  # consumed by cmd_start, approve_project_allowlist and start_container
 MAINTENANCE=false
 # shellcheck disable=SC2034  # consumed by cmd_start/preflights and start_container
 DIND=false
 # shellcheck disable=SC2034  # consumed by cmd_start/preflights and start_container
 PIND=false
-# shellcheck disable=SC2034  # consumed by start_container in lib/dev/lifecycle.sh (Task 3)
+# shellcheck disable=SC2034  # consumed by attach_existing_container in lib/dev/container.sh
 SHELL_ONLY=false
 # shellcheck disable=SC2034  # consumed by start_container in lib/dev/lifecycle.sh
 EXTRA_PORTS=()
 # shellcheck disable=SC2034  # consumed by start_container in lib/dev/lifecycle.sh
 HOST_PORTS=()
-# shellcheck disable=SC2034  # consumed by start_container in lib/dev/lifecycle.sh
+# shellcheck disable=SC2034  # consumed by start_container/attach_existing_container (lib/dev/{lifecycle,container}.sh)
 CMD_ARGS=()
 
-# Set true by the up/exec verb arms' `--open` flag: a fresh container should
-# come up with the firewall already torn down (DEVCONTAINER_FW_DISABLED=1 in
+# Set true by cmd_up/cmd_exec's `--open` flag: a fresh container should come up
+# with the firewall already torn down (DEVCONTAINER_FW_DISABLED=1 in
 # start_container).
 # shellcheck disable=SC2034  # consumed by start_container (lib/dev/lifecycle.sh)
 FW_DISABLED_START=false
+
+# Per-workspace host-side state (lib/dev/approval.sh): the state dir holding the
+# approved project allowlist + the GITHUB_TOKEN scope cache, and whether that
+# approved allowlist is current enough to mount into the container.
+# shellcheck disable=SC2034  # set by ensure_state_dir, read by approve_project_allowlist/check_github_token/append_volume_mounts
+STATE_DIR=""
+# shellcheck disable=SC2034  # set by approve_project_allowlist, read by append_volume_mounts (lib/dev/volumes.sh)
+MOUNT_PROJECT_ALLOWLIST=false
 
 # Populated by check_image_uid_match's single `image inspect` call so that
 # check_image_version_match doesn't need to re-inspect, and the build path
@@ -238,84 +126,12 @@ IMAGE_EXISTS=false
 # shellcheck disable=SC2034  # set/read by check_image_uid_match/check_image_version_match in lib/dev/image.sh
 IMAGE_VERSION=""
 
-install_self() {
-  local script_path
-  script_path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
-
-  local target_dir=""
-  local candidates=("$HOME/.local/bin" "$HOME/bin" "/usr/local/bin")
-  for dir in "${candidates[@]}"; do
-    case ":$PATH:" in
-      *":$dir:"*)
-        if [[ -d "$dir" && -w "$dir" ]]; then
-          target_dir="$dir"
-          break
-        fi
-        ;;
-    esac
-  done
-
-  if [[ -z "$target_dir" ]]; then
-    echo "Error: No writable bin directory found on PATH." >&2
-    echo "Expected one of: ${candidates[*]}" >&2
-    echo "Create one and add it to PATH, then retry." >&2
-    exit 1
-  fi
-
-  local link="$target_dir/dev"
-  if [[ -L "$link" ]]; then
-    local current
-    current="$(readlink "$link")"
-    if [[ "$current" == "$script_path" ]]; then
-      echo "Already installed: $link -> $script_path"
-    else
-      echo "Error: $link already exists and points to $current" >&2
-      echo "Remove it first: rm $link" >&2
-      exit 1
-    fi
-  elif [[ -e "$link" ]]; then
-    echo "Error: $link exists and is not a symlink. Refusing to overwrite." >&2
-    exit 1
-  else
-    ln -s "$script_path" "$link"
-    echo "Installed: $link -> $script_path"
-  fi
-
-  local zshrc="$HOME/.zshrc"
-  local compdef_line='compdef _gnu_generic dev'
-  if [[ -f "$zshrc" ]] && grep -qxF -- "$compdef_line" "$zshrc"; then
-    echo "zsh completion already configured in ~/.zshrc"
-    return
-  fi
-
-  if [[ ! -t 0 ]]; then
-    echo "To enable tab-completion, add this line to ~/.zshrc:  $compdef_line"
-    return
-  fi
-
-  local reply
-  read -r -p "Add '$compdef_line' to ~/.zshrc to enable tab-completion? [y/N] " reply
-  case "$reply" in
-    y|Y|yes|YES)
-      {
-        echo ""
-        echo "# Added by 'dev install': enable tab-completion for the dev script"
-        echo "$compdef_line"
-      } >> "$zshrc"
-      echo "Added compdef line to ~/.zshrc. Run 'exec zsh' to activate."
-      ;;
-    *)
-      echo "Skipped. You can add it later with: echo '$compdef_line' >> ~/.zshrc"
-      ;;
-  esac
-}
-
 # --- Subcommand router ------------------------------------------------------
 # First non-flag token selects a subcommand. Each subcommand parses only its
 # own flags, so invalid cross-command combinations are simply unrepresentable
-# — no companion guard. Nothing falls through: every arm exits (or execs), and
-# the shared start flow (cmd_start, lib/dev/up.sh) is reached only by an
-# explicit call from the up/exec/shell arms below.
+# — no companion guard. Nothing falls through: every cmd_* exits (or execs),
+# and the shared start flow (cmd_start, lib/dev/up.sh) is reached only by an
+# explicit call from cmd_up/cmd_exec/cmd_shell.
 subcmd=""
 case "${1:-}" in
   up|shell|exec|down|status|fw|reset|update|install|agent|dotfile|dotfiles) subcmd="$1"; shift ;;
@@ -337,229 +153,20 @@ case "${1:-}" in
     ;;
 esac
 
+# Every arm below is a thin call into the verb's module; each cmd_* exits (or
+# execs) on its own, so nothing falls through past this case.
 case "$subcmd" in
-  install)
-    install_self
-    exit 0
-    ;;
-  update)
-    while [[ $# -gt 0 ]]; do
-      case $1 in
-        --dry-run) DRY_RUN=true; shift ;;
-        *)
-          echo "Error: dev update: unknown option: $1" >&2
-          exit 1
-          ;;
-      esac
-    done
-    self_update
-    exit 0
-    ;;
-  reset)
-    if [[ $# -gt 0 ]]; then
-      echo "Error: dev reset does not take options: $*" >&2
-      exit 1
-    fi
-    detect_runtime
-    ensure_runtime_ready
-    _resolve_workspace_names
-    reset_workspace
-    exit 0
-    ;;
-  down)
-    if [[ $# -gt 0 ]]; then
-      echo "Error: 'dev down' takes no arguments." >&2; exit 2
-    fi
-    detect_runtime; ensure_runtime_ready; _resolve_workspace_names
-    down_workspace
-    exit 0
-    ;;
-  status)
-    if [[ $# -gt 0 ]]; then
-      echo "Error: 'dev status' takes no arguments." >&2; exit 2
-    fi
-    detect_runtime; ensure_runtime_ready; _resolve_workspace_names
-    status_workspace
-    exit 0
-    ;;
-  up)
-    # Translate this verb's own spellings (--maint, --) into the shared start
-    # flow's, then hand off to cmd_start (lib/dev/up.sh).
-    UP_ARGS=()
-    while [[ $# -gt 0 ]]; do
-      case "$1" in
-        --maint) UP_ARGS+=(--maintenance); shift ;;
-        --open)
-          # shellcheck disable=SC2034  # consumed by start_container (lib/dev/lifecycle.sh)
-          FW_DISABLED_START=true; shift ;;
-        --)
-          echo "Error: 'dev up' does not take a command; use 'dev exec' -- CMD [ARGS...]." >&2
-          exit 2 ;;
-        *) UP_ARGS+=("$1"); shift ;;
-      esac
-    done
-    cmd_start ${UP_ARGS[@]+"${UP_ARGS[@]}"}
-    exit $?
-    ;;
-  exec)
-    EXEC_ARGS=(); _saw_ddash=false
-    while [[ $# -gt 0 ]]; do
-      case "$1" in
-        --maint) EXEC_ARGS+=(--maintenance); shift ;;
-        --open)
-          # shellcheck disable=SC2034  # consumed by start_container (lib/dev/lifecycle.sh)
-          FW_DISABLED_START=true; shift ;;
-        --)      _saw_ddash=true; EXEC_ARGS+=("$@"); break ;;
-        *)       EXEC_ARGS+=("$1"); shift ;;
-      esac
-    done
-    if [[ "$_saw_ddash" != true ]]; then
-      echo "Error: 'dev exec' requires '-- CMD [ARGS...]'." >&2
-      exit 2
-    fi
-    unset _saw_ddash
-    cmd_start ${EXEC_ARGS[@]+"${EXEC_ARGS[@]}"}
-    exit $?
-    ;;
-  shell)
-    if [[ $# -gt 0 ]]; then
-      echo "Error: 'dev shell' takes no arguments." >&2
-      exit 2
-    fi
-    # shellcheck disable=SC2034  # consumed by start_container (lib/dev/lifecycle.sh)
-    SHELL_ONLY=true
-    cmd_start
-    exit $?
-    ;;
-  fw)
-    fw_action="${1:-}"
-    case "$fw_action" in
-      log|drops|on)
-        shift
-        # These share a strict no-extra-args branch (consistent with
-        # reset/update). `on` is an alias for `enable`: map it after
-        # validation so the dispatch below only needs to handle `enable`.
-        if [[ $# -gt 0 ]]; then
-          echo "Error: dev fw $fw_action does not take extra arguments: $*" >&2
-          exit 1
-        fi
-        [[ "$fw_action" == on ]] && fw_action=enable
-        ;;
-      off)
-        shift
-        # `off` never cold-starts: it only toggles an already-running
-        # container's firewall off, and errors instead of falling through to
-        # the default start path.
-        if [[ $# -gt 0 ]]; then
-          echo "Error: dev fw off does not take extra arguments: $*" >&2
-          echo "       To start a fresh container with the firewall open, use 'dev up --open'." >&2
-          exit 1
-        fi
-        ;;
-      disable)
-        echo "Error: 'fw disable' was renamed: use 'dev fw off' (running container) or 'dev up --open' (fresh)." >&2
-        exit 1
-        ;;
-      enable)
-        echo "Error: 'fw enable' was renamed: use 'dev fw on'." >&2
-        exit 1
-        ;;
-      *)
-        echo "Error: dev fw: expected an action (off|on|log|drops), got '${fw_action:-<none>}'" >&2
-        echo "Run 'dev --help' for usage information" >&2
-        exit 1
-        ;;
-    esac
-    detect_runtime
-    ensure_runtime_ready
-    _resolve_workspace_names
-    case "$fw_action" in
-      log)     fw_log ;;
-      drops)   fw_drops ;;
-      enable)  fw_enable ;;
-      off)     fw_off_running_only ;;
-    esac
-    ;;
-  agent)
-    agent_action="${1:-}"
-    case "$agent_action" in
-      add|list|rm) shift ;;
-      ''|-h|--help|help) _agent_usage; exit 0 ;;
-      *)
-        echo "Error: dev agent: expected an action (add|list|rm), got '${agent_action:-<none>}'" >&2
-        echo "Run 'dev --help' for usage information" >&2
-        exit 1
-        ;;
-    esac
-    # --dind/--pind route the helper containers at the storage the target
-    # container actually uses. On macOS+podman the dind/pind container and its
-    # home volume live in a *separate* rootful podman connection; without this
-    # routing, `agent add` writes into the default rootless home volume that the
-    # dind/pind container never mounts (creds silently never appear inside).
-    # Extract the flags here so they apply uniformly to add/list/rm, then pass
-    # the remaining args (agent names, --dry-run) through untouched.
-    AGENT_DIND=false
-    AGENT_PIND=false
-    agent_args=()
-    while [[ $# -gt 0 ]]; do
-      case "$1" in
-        --dind) AGENT_DIND=true; shift ;;
-        --pind) AGENT_PIND=true; shift ;;
-        *) agent_args+=("$1"); shift ;;
-      esac
-    done
-    if [[ "$AGENT_DIND" == true && "$AGENT_PIND" == true ]]; then
-      echo "Error: dev agent: --dind and --pind are mutually exclusive." >&2
-      exit 1
-    fi
-    # The handlers validate their args before calling resolve_agent_storage
-    # themselves (and skip it entirely for `add --dry-run`, which needs no
-    # runtime), so bad input fails without the storage-detection hint. Pass the
-    # storage flags through for that deferred resolution.
-    set -- ${agent_args[@]+"${agent_args[@]}"}
-    case "$agent_action" in
-      add)  _agent_add  "$AGENT_DIND" "$AGENT_PIND" "$@" ;;
-      list) _agent_list "$AGENT_DIND" "$AGENT_PIND" "$@" ;;
-      rm)   _agent_rm   "$AGENT_DIND" "$AGENT_PIND" "$@" ;;
-    esac
-    exit 0
-    ;;
-  dotfile|dotfiles)
-    dotfile_action="${1:-}"
-    case "$dotfile_action" in
-      add|rm) shift ;;
-      ''|-h|--help|help) _dotfile_usage; exit 0 ;;
-      *)
-        echo "Error: dev dotfile: expected an action (add|rm), got '${dotfile_action:-<none>}'" >&2
-        echo "Run 'dev --help' for usage information" >&2
-        exit 1
-        ;;
-    esac
-    # Pull out --dind/--pind (storage routing, same semantics as `dev agent`)
-    # so they apply regardless of position; leave everything else (paths and
-    # add's --secret) for the action handler.
-    DOTFILE_DIND=false
-    DOTFILE_PIND=false
-    dotfile_args=()
-    while [[ $# -gt 0 ]]; do
-      case "$1" in
-        --dind) DOTFILE_DIND=true; shift ;;
-        --pind) DOTFILE_PIND=true; shift ;;
-        *) dotfile_args+=("$1"); shift ;;
-      esac
-    done
-    if [[ "$DOTFILE_DIND" == true && "$DOTFILE_PIND" == true ]]; then
-      echo "Error: dev dotfile: --dind and --pind are mutually exclusive." >&2
-      exit 1
-    fi
-    # The handlers validate their path args before calling resolve_agent_storage
-    # themselves, so a bad path fails without the storage-detection hint. Pass
-    # the storage flags through for that deferred resolution.
-    set -- ${dotfile_args[@]+"${dotfile_args[@]}"}
-    case "$dotfile_action" in
-      add) _dotfile_add "$DOTFILE_DIND" "$DOTFILE_PIND" "$@" ;;
-      rm)  _dotfile_rm  "$DOTFILE_DIND" "$DOTFILE_PIND" "$@" ;;
-    esac
-    exit 0
-    ;;
+  # ${BASH_SOURCE[0]} is dev's own path: cmd_install needs the file the PATH
+  # symlink must point at, which BASH_SOURCE inside the module would not give.
+  install)          cmd_install "${BASH_SOURCE[0]}" ;;
+  update)           cmd_update "$@" ;;
+  reset)            cmd_reset "$@" ;;
+  down)             cmd_down "$@" ;;
+  status)           cmd_status "$@" ;;
+  up)               cmd_up "$@" ;;
+  exec)             cmd_exec "$@" ;;
+  shell)            cmd_shell "$@" ;;
+  fw)               cmd_fw "$@" ;;
+  agent)            cmd_agent "$@" ;;
+  dotfile|dotfiles) cmd_dotfile "$@" ;;
 esac

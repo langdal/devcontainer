@@ -19,6 +19,53 @@ AGENT_KNOWN=(claude opencode pi)
 CLAUDE_KEYCHAIN_SERVICE='Claude Code-credentials'
 AGENT_KEYCHAIN_CLAUDE_SRC='keychain:claude-credentials'
 
+# cmd_agent <action> [args]: the `dev agent` verb. Validates the action, pulls
+# out the storage-routing flags, and calls the matching handler.
+cmd_agent() {
+  agent_action="${1:-}"
+  case "$agent_action" in
+    add|list|rm) shift ;;
+    ''|-h|--help|help) _agent_usage; exit 0 ;;
+    *)
+      echo "Error: dev agent: expected an action (add|list|rm), got '${agent_action:-<none>}'" >&2
+      echo "Run 'dev --help' for usage information" >&2
+      exit 1
+      ;;
+  esac
+  # --dind/--pind route the helper containers at the storage the target
+  # container actually uses. On macOS+podman the dind/pind container and its
+  # home volume live in a *separate* rootful podman connection; without this
+  # routing, `agent add` writes into the default rootless home volume that the
+  # dind/pind container never mounts (creds silently never appear inside).
+  # Extract the flags here so they apply uniformly to add/list/rm, then pass
+  # the remaining args (agent names, --dry-run) through untouched.
+  AGENT_DIND=false
+  AGENT_PIND=false
+  agent_args=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --dind) AGENT_DIND=true; shift ;;
+      --pind) AGENT_PIND=true; shift ;;
+      *) agent_args+=("$1"); shift ;;
+    esac
+  done
+  if [[ "$AGENT_DIND" == true && "$AGENT_PIND" == true ]]; then
+    echo "Error: dev agent: --dind and --pind are mutually exclusive." >&2
+    exit 1
+  fi
+  # The handlers validate their args before calling resolve_agent_storage
+  # themselves (and skip it entirely for `add --dry-run`, which needs no
+  # runtime), so bad input fails without the storage-detection hint. Pass the
+  # storage flags through for that deferred resolution.
+  set -- ${agent_args[@]+"${agent_args[@]}"}
+  case "$agent_action" in
+    add)  _agent_add  "$AGENT_DIND" "$AGENT_PIND" "$@" ;;
+    list) _agent_list "$AGENT_DIND" "$AGENT_PIND" "$@" ;;
+    rm)   _agent_rm   "$AGENT_DIND" "$AGENT_PIND" "$@" ;;
+  esac
+  exit 0
+}
+
 # _agent_macos_keychain_has_creds: 0 if Claude Code's OAuth token is present in
 # the macOS login Keychain. Non-macOS (no `security`) returns non-zero, so the
 # fallback is inert on Linux where the credential file exists on disk instead.

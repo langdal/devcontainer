@@ -2,6 +2,21 @@
 # lib/dev/update.sh — `dev update` (self-update the git checkout to latest tag).
 # Sourced by dev; not executed directly.
 
+# cmd_update [--dry-run]: the `dev update` verb.
+cmd_update() {
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      --dry-run) DRY_RUN=true; shift ;;
+      *)
+        echo "Error: dev update: unknown option: $1" >&2
+        exit 1
+        ;;
+    esac
+  done
+  self_update
+  exit 0
+}
+
 # --self-update: pull the latest tag in the script's git checkout in place.
 # Detection model: we treat "installed via install.sh OR manual git clone" as
 # the same case — both produce a git checkout at SCRIPT_DIR. The git checkout

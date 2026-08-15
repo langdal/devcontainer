@@ -2,6 +2,59 @@
 # lib/dev/fw.sh — `dev fw` handlers (log, drops, enable, disable).
 # Sourced by dev; not executed directly.
 
+# cmd_fw <action> [args]: the `dev fw` verb. Validates the action (each takes no
+# extra arguments), then dispatches to the fw_* handler, all of which exec or
+# exit.
+cmd_fw() {
+  fw_action="${1:-}"
+  case "$fw_action" in
+    log|drops|on)
+      shift
+      # These share a strict no-extra-args branch (consistent with
+      # reset/update). `on` is an alias for `enable`: map it after
+      # validation so the dispatch below only needs to handle `enable`.
+      if [[ $# -gt 0 ]]; then
+        echo "Error: dev fw $fw_action does not take extra arguments: $*" >&2
+        exit 1
+      fi
+      [[ "$fw_action" == on ]] && fw_action=enable
+      ;;
+    off)
+      shift
+      # `off` never cold-starts: it only toggles an already-running
+      # container's firewall off, and errors instead of falling through to
+      # the default start path.
+      if [[ $# -gt 0 ]]; then
+        echo "Error: dev fw off does not take extra arguments: $*" >&2
+        echo "       To start a fresh container with the firewall open, use 'dev up --open'." >&2
+        exit 1
+      fi
+      ;;
+    disable)
+      echo "Error: 'fw disable' was renamed: use 'dev fw off' (running container) or 'dev up --open' (fresh)." >&2
+      exit 1
+      ;;
+    enable)
+      echo "Error: 'fw enable' was renamed: use 'dev fw on'." >&2
+      exit 1
+      ;;
+    *)
+      echo "Error: dev fw: expected an action (off|on|log|drops), got '${fw_action:-<none>}'" >&2
+      echo "Run 'dev --help' for usage information" >&2
+      exit 1
+      ;;
+  esac
+  detect_runtime
+  ensure_runtime_ready
+  _resolve_workspace_names
+  case "$fw_action" in
+    log)     fw_log ;;
+    drops)   fw_drops ;;
+    enable)  fw_enable ;;
+    off)     fw_off_running_only ;;
+  esac
+}
+
 # fw_log: stream tinyproxy's log from the running workspace firewall
 # container. Requires a firewall-capable container (normal or dind) to
 # already be running; never returns (execs into `tail`).

@@ -100,6 +100,19 @@ remove_volume_if_exists() {
   fi
 }
 
+# cmd_reset: the `dev reset` verb.
+cmd_reset() {
+  if [[ $# -gt 0 ]]; then
+    echo "Error: dev reset does not take options: $*" >&2
+    exit 1
+  fi
+  detect_runtime
+  ensure_runtime_ready
+  _resolve_workspace_names
+  reset_workspace
+  exit 0
+}
+
 # --reset: remove this workspace's container(s) and prompt per existing
 # named volume. The mise and dind volumes are global (shared across all
 # dev workspaces); the home volume is per-workspace by default

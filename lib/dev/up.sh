@@ -4,6 +4,64 @@
 # name resolution, image build check, and the container start itself.
 # Sourced by dev; not executed directly.
 
+# cmd_up [options...]: the `dev up` verb. Translates this verb's own spellings
+# (--maint, --open) into the shared start flow's and rejects a command payload,
+# then hands off to cmd_start.
+cmd_up() {
+  UP_ARGS=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --maint) UP_ARGS+=(--maintenance); shift ;;
+      --open)
+        # shellcheck disable=SC2034  # consumed by start_container (lib/dev/lifecycle.sh)
+        FW_DISABLED_START=true; shift ;;
+      --)
+        echo "Error: 'dev up' does not take a command; use 'dev exec' -- CMD [ARGS...]." >&2
+        exit 2 ;;
+      *) UP_ARGS+=("$1"); shift ;;
+    esac
+  done
+  cmd_start ${UP_ARGS[@]+"${UP_ARGS[@]}"}
+  exit $?
+}
+
+# cmd_exec [options...] -- CMD [ARGS...]: the `dev exec` verb. Same translation
+# as cmd_up, but `--` is mandatory: without a command this would silently become
+# an interactive attach.
+cmd_exec() {
+  EXEC_ARGS=(); _saw_ddash=false
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --maint) EXEC_ARGS+=(--maintenance); shift ;;
+      --open)
+        # shellcheck disable=SC2034  # consumed by start_container (lib/dev/lifecycle.sh)
+        FW_DISABLED_START=true; shift ;;
+      --)      _saw_ddash=true; EXEC_ARGS+=("$@"); break ;;
+      *)       EXEC_ARGS+=("$1"); shift ;;
+    esac
+  done
+  if [[ "$_saw_ddash" != true ]]; then
+    echo "Error: 'dev exec' requires '-- CMD [ARGS...]'." >&2
+    exit 2
+  fi
+  unset _saw_ddash
+  cmd_start ${EXEC_ARGS[@]+"${EXEC_ARGS[@]}"}
+  exit $?
+}
+
+# cmd_shell: the `dev shell` verb — attach a shell to an already-running
+# container for this workspace (never creates one; see attach_existing_container).
+cmd_shell() {
+  if [[ $# -gt 0 ]]; then
+    echo "Error: 'dev shell' takes no arguments." >&2
+    exit 2
+  fi
+  # shellcheck disable=SC2034  # consumed by attach_existing_container (lib/dev/container.sh)
+  SHELL_ONLY=true
+  cmd_start
+  exit $?
+}
+
 # cmd_start [start-options...] [-- CMD ...]
 # The shared flag engine for `dev up`/`dev exec`/`dev shell`: those verb arms
 # in `dev` translate their own spellings (--maint, --open, --) and call this
