@@ -10,6 +10,8 @@ fail() { echo "FAIL: $1"; exit 1; }
 . "$ROOT/lib/dev/runtime.sh"
 # shellcheck source=lib/dev/checks.sh
 . "$ROOT/lib/dev/checks.sh"
+# shellcheck source=lib/dev/checks-catalog.sh
+. "$ROOT/lib/dev/checks-catalog.sh"
 RUNTIME=docker; RUNTIME_ARGS=""
 
 # Registry ids use hyphens; shell functions use underscores. Pin the probe's
