@@ -1,15 +1,22 @@
 # Manual probe: can a real macOS runner host the workstream-3 macOS cell?
 #
-# Answers the open question in
-# docs/superpowers/specs/2026-08-15-host-preflight-matrix-design.md: whether
-# `podman machine` can start on GitHub's macOS runners. If it can, the macOS
-# matrix cell can run a genuine smoke; if it cannot, that cell degrades to the
-# unit suite plus `dev doctor` without a VM, and the manual Apple Silicon
-# session carries proportionally more weight.
+# ANSWERED 2026-08-15 on macos-14 (image 20260629.0180.1): NO.
+#   --provider applehv  -> init OK in 33s, then
+#                          "Error: vfkit exited unexpectedly with exit code 1"
+#   --provider libkrun  -> "exec: krunkit: executable file not found in $PATH"
+#                          (krunkit is not a podman dependency in brew)
+# The runner reports `Apple M1 (Virtual)`, kernel RELEASE_ARM64_VMAPPLE, and no
+# hv.* sysctls: GitHub's macOS ARM runners are themselves VMs and do not expose
+# nested virtualization, so Virtualization.framework has nothing to build on.
+# The macOS matrix cell is therefore unit-suite + `dev doctor` only, and the
+# manual Apple Silicon session is the project's only real-hardware coverage.
 #
-# Deliberately NOT wired into ci.yml. This is a one-off question, run by hand,
-# whose output is an answer rather than a gate. Delete it once the answer is
-# recorded in the spec.
+# RETAINED rather than deleted, deliberately: that answer is a property of
+# GitHub's runner images, not of this repo, and can change when they do.
+# Re-dispatch after a runner-image bump to see whether the cell can be
+# upgraded. Costs nothing while undispatched.
+#
+# Deliberately NOT wired into ci.yml — its output is an answer, not a gate.
 #
 # Every probe is continue-on-error so a single run collects every answer
 # instead of stopping at the first failure — the whole point is the report at
