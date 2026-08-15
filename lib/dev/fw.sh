@@ -32,36 +32,10 @@ fw_enable() {
   exec $RUNTIME $MANAGED_RUNTIME_ARGS exec --user root "$MANAGED_NAME" /usr/local/sbin/firewall-init.sh
 }
 
-# fw_disable: toggle a running firewall container's iptables off in place,
-# or — if no firewall-capable container is running for this workspace —
-# fall through to a fresh start with the firewall disabled from the start.
-#
-# Unlike the other three handlers this does NOT always exec: in the
-# no-container case it sets the global FW_DISABLED_START=true and returns 0
-# so the caller (dev's main flow) continues on into the normal startup path
-# with DEVCONTAINER_FW_DISABLED=1, producing the same end state as
-# start-then-disable. The toggle case (a container is already running)
-# still execs into firewall-disable.sh and never returns.
-fw_disable() {
-  resolve_managed_container
-  if [[ "$MANAGED_TARGET" == "maint" ]]; then
-    echo "Error: maintenance container ${MAINT_NAME} has no firewall — --disable-firewall is meaningless in maintenance mode." >&2
-    exit 1
-  elif [[ -n "$MANAGED_TARGET" ]]; then
-    # shellcheck disable=SC2086  # intentional word-splitting of $MANAGED_RUNTIME_ARGS
-    exec $RUNTIME $MANAGED_RUNTIME_ARGS exec --user root "$MANAGED_NAME" /usr/local/sbin/firewall-disable.sh
-  else
-    # shellcheck disable=SC2034  # consumed by start_container in lib/dev/lifecycle.sh
-    FW_DISABLED_START=true
-    return 0
-  fi
-}
-
 # fw_off_running_only: toggle a running firewall container's iptables off in
-# place, same as fw_disable's running-container branch. Unlike fw_disable,
-# this NEVER cold-starts: if nothing is running for this workspace, it
-# errors instead of falling through to the default start path (that
-# fallthrough is being replaced by 'dev up --open').
+# place. Never cold-starts: if nothing is running for this workspace, it
+# errors and points at 'dev up --open' instead of falling through to a
+# fresh start.
 fw_off_running_only() {
   resolve_managed_container
   if [[ "$MANAGED_TARGET" == "maint" ]]; then

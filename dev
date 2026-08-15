@@ -212,11 +212,10 @@ EXTRA_PORTS=()
 HOST_PORTS=()
 CMD_ARGS=()
 
-# Set true by fw_disable (lib/dev/fw.sh) when `dev fw disable`/the deprecated
-# `--disable-firewall` alias finds no running container and falls through to
-# the start path: a fresh container should come up with the firewall already
-# torn down (DEVCONTAINER_FW_DISABLED=1 in start_container).
-# shellcheck disable=SC2034  # consumed by fw_disable (lib/dev/fw.sh) and start_container (lib/dev/lifecycle.sh)
+# Set true by the up/exec verb arms' `--open` flag: a fresh container should
+# come up with the firewall already torn down (DEVCONTAINER_FW_DISABLED=1 in
+# start_container).
+# shellcheck disable=SC2034  # consumed by start_container (lib/dev/lifecycle.sh)
 FW_DISABLED_START=false
 
 # Populated by check_image_uid_match's single `image inspect` call so that
@@ -230,71 +229,42 @@ usage() {
   cat <<EOF
 Usage: dev <verb> [options]
 
-VERBS:
-  up       Build image if needed, start the container, attach a shell.
-           Options: --dind | --pind | --maint (mode), --open (firewall off),
-           --build, --dry-run, --port P, --host-port P, --default-ports
-  shell    Attach another shell to the running container.
-  exec     Run one command inside (starts the container if needed):
-           dev exec [up-options] -- CMD [ARGS...]
-  down     Stop this workspace's container(s).
-  status   dev status — show what is running, its mode, and firewall state.
-  fw       off|on|log|drops — firewall toggle and observability.
-  agent    add|list|rm — inject AI-agent credentials (claude|opencode|pi).
-  dotfile  add|rm — inject an arbitrary host dotfile/dir.
-  reset    Remove containers and prompt per named volume.
-  update   Update this git checkout to the latest released tag.
-  install  Symlink dev onto PATH.
-
 Run or attach to the generic devcontainer.
 
-START OPTIONS (default command):
-  --help          Show this help message
-  --version       Print the dev script version and exit
-  --dry-run       Print docker command without executing
-  --build         Force rebuild the image
-  --port PORT     Add additional port forwarding (repeatable)
-  --default-ports Forward the default development ports (5173, 5174, 8080,
-                  2345, 3000). Off by default.
-  --host-port PORT
-                  Allow egress from the container to host.docker.internal:PORT
-                  (repeatable). Maps the host.docker.internal hostname and
-                  punches a single-port iptables ACCEPT through the firewall
-                  for the host gateway only. Use to reach host-side services
-                  (e.g. a local llama server at localhost:8080) without
-                  disabling the firewall.
-  --maintenance   Start with firewall disabled and sudo enabled.
-                  Container name is suffixed with -maint to avoid
-                  clashing with the normal container.
-  --dind          Start with rootless Docker daemon available inside.
-                  Uses generic-devcontainer:dind, suffixes container
-                  name with -dind, mounts /dev/fuse, and uses a
-                  dedicated image cache volume. Mutually exclusive
-                  with --maintenance.
-  --force         Accepted here for parser-surface parity; only 'dev
-                  scaffold --force' actually consumes it. A bare
-                  'dev --force' is a harmless no-op.
-  --              Pass remaining arguments as command to container
-
-SUBCOMMANDS:
-  fw disable      Bring the workspace up with the firewall open. If a
-                  container (normal or dind) is already running, toggle it
-                  in place: flush OUTPUT rules + ACCEPT policy, and switch
-                  tinyproxy to an allow-all filter (SIGHUP reload); existing
-                  shells keep working whether or not HTTPS_PROXY is set. If
-                  none is running, start a *fresh* container with the
-                  firewall already disabled (same end state). Re-enable
-                  later with 'dev fw enable'.
-  fw enable       Re-run firewall-init.sh on the running workspace container
-                  (normal or dind) to rebuild the allowlist filter and
-                  restore the default-deny iptables policy.
+VERBS:
+  up              Build image if needed, start the container, attach a shell.
+                  --dind | --pind | --maint   Container mode (mutually
+                                               exclusive).
+                  --open           Start with the firewall already disabled.
+                  --build          Force rebuild the image.
+                  --dry-run        Print the run command without executing.
+                  --port PORT      Add additional port forwarding (repeatable).
+                  --default-ports  Forward the default dev ports (5173,
+                                   5174, 8080, 2345, 3000). Off by default.
+                  --host-port PORT Allow egress from the container to
+                                   host.docker.internal:PORT (repeatable),
+                                   without disabling the firewall.
+                  --force          Accepted for parser-surface parity only.
+  shell           Attach another shell to the running container. Takes no
+                  options; errors if nothing is running for this workspace.
+  exec            Run one command inside (starts the container if needed):
+                    dev exec [up-options] -- CMD [ARGS...]
+  down            Stop this workspace's container(s). Takes no options.
+  status          Show what is running for this workspace, its mode, and
+                  firewall state. Takes no options.
+  fw off          Toggle the firewall off on the running workspace container
+                  (normal or dind) in place: flush OUTPUT rules + ACCEPT
+                  policy, and switch tinyproxy to an allow-all filter
+                  (SIGHUP reload). Errors if nothing is running — use
+                  'dev up --open' to start a fresh container with the
+                  firewall already open.
+  fw on           Re-run firewall-init.sh on the running workspace container
+                  to rebuild the allowlist filter and restore the
+                  default-deny iptables policy.
   fw log          Tail the firewall proxy log of the running workspace
-                  container (/var/log/tinyproxy.log). Targets the normal
-                  *or* dind container, whichever is running. Does not
-                  start a container.
+                  container (/var/log/tinyproxy.log). Does not start one.
   fw drops        Stream packets dropped by iptables in the running workspace
-                  container (tcpdump on NFLOG group 1). Targets normal or
-                  dind. Does not start a container.
+                  container (tcpdump on NFLOG group 1). Does not start one.
   agent add NAME  Copy a curated set of an agent's credentials + settings
                   (claude|opencode|pi, or 'all') from the host into this
                   workspace's home volume. One-way snapshot — never a host
@@ -335,16 +305,8 @@ SUBCOMMANDS:
                   --dry-run        Show what update would do.
   install         Symlink this script into a writable directory on PATH
 
-DEPRECATED FLAGS:
-  The old flag-based spellings below still work but print a deprecation
-  warning to stderr and route to the subcommand shown:
-    --disable-firewall      -> dev fw disable
-    --enable-firewall       -> dev fw enable
-    --monitor               -> dev fw log
-    --monitor-fw            -> dev fw drops
-    --reset                 -> dev reset
-    --create-dev-container  -> dev scaffold
-    --self-update           -> dev update
+  --help          Show this help message
+  --version       Print the dev script version and exit
 
 ENVIRONMENT:
   DEV_RUNTIME=docker|podman
@@ -378,25 +340,29 @@ ENVIRONMENT:
                      API authenticated (avoids the 60/hr anonymous limit).
 
 EXAMPLES:
-  dev                           # Start or attach to container with default shell
-  dev --build                   # Rebuild image and start container
-  dev --dry-run                 # Show docker command without running
-  dev --port 9000 --port 9001   # Add custom port forwarding
-  dev --default-ports           # Forward the default dev ports
-  dev --host-port 8080          # Reach host service at host.docker.internal:8080
-  dev --maintenance             # Start in maintenance mode (no firewall, sudo enabled)
-  dev --dind                    # Start with rootless docker available inside
-  dev -- npm run dev            # Run custom command in container
-  dev fw log                    # Tail firewall proxy log of running container
-  dev fw drops                  # Stream iptables-dropped packets of running container
-  dev fw disable                # Toggle off a running container, or start fresh with fw off
-  dev fw enable                 # Restore the firewall on the running container
-  dev reset                     # Remove containers + prompt per volume
-  dev scaffold                  # Scaffold .devcontainer/ for VS Code
-  dev scaffold --dind           # Scaffold dind-mode .devcontainer/
-  dev update                    # Update the checkout to the latest tag
-  dev update --dry-run          # Show what update would do
-  dev install                   # Install 'dev' onto your PATH
+  dev up                         # Start or attach to container with default shell
+  dev up --build                 # Rebuild image and start container
+  dev up --dry-run                # Show run command without running
+  dev up --port 9000 --port 9001  # Add custom port forwarding
+  dev up --default-ports          # Forward the default dev ports
+  dev up --host-port 8080         # Reach host service at host.docker.internal:8080
+  dev up --maint                  # Start in maintenance mode (no firewall, sudo enabled)
+  dev up --dind                   # Start with rootless docker available inside
+  dev up --open                   # Start fresh with the firewall already off
+  dev exec -- npm run dev         # Run a custom command in the container
+  dev shell                       # Attach another shell to the running container
+  dev down                        # Stop this workspace's container(s)
+  dev status                      # Show what is running and its firewall state
+  dev fw log                      # Tail firewall proxy log of running container
+  dev fw drops                    # Stream iptables-dropped packets of running container
+  dev fw off                      # Toggle the firewall off on the running container
+  dev fw on                       # Restore the firewall on the running container
+  dev reset                       # Remove containers + prompt per volume
+  dev scaffold                    # Scaffold .devcontainer/ for VS Code
+  dev scaffold --dind             # Scaffold dind-mode .devcontainer/
+  dev update                      # Update the checkout to the latest tag
+  dev update --dry-run            # Show what update would do
+  dev install                     # Install 'dev' onto your PATH
 
 EOF
 }
@@ -474,28 +440,24 @@ install_self() {
 }
 
 # --- Subcommand router ------------------------------------------------------
-# First non-flag token selects a subcommand. Bare flags (or --) fall through
-# to the default "start" command. Deprecated flags map to subcommands with a
-# one-line warning. Each subcommand parses only its own flags, so invalid
-# cross-command combinations are simply unrepresentable — no companion guard.
-_deprecated() { echo "Warning: '$1' is deprecated; use 'dev $2'." >&2; }
-
+# First non-flag token selects a subcommand. Each subcommand parses only its
+# own flags, so invalid cross-command combinations are simply unrepresentable
+# — no companion guard. There is no bare/flag-first fallthrough to the start
+# parser any more: it is reached only via the up/exec/shell verb arms below.
 subcmd=""
 case "${1:-}" in
   up|shell|exec|down|status|fw|reset|scaffold|update|install|agent|dotfile|dotfiles) subcmd="$1"; shift ;;
-  --help)       usage; exit 0 ;;
-  --version)    echo "dev $(resolve_dev_version)"; exit 0 ;;
-  # Deprecated flag aliases -> subcommands. Note the ordering for the fw
-  # aliases: shift FIRST to drop the old flag, THEN inject the fw action word,
-  # so `dev --monitor` becomes `dev fw log` (not `dev fw log --monitor`).
-  --self-update)          _deprecated --self-update "update"; subcmd="update"; shift ;;
-  --reset)                _deprecated --reset "reset"; subcmd="reset"; shift ;;
-  --create-dev-container) _deprecated --create-dev-container "scaffold"; subcmd="scaffold"; shift ;;
-  --monitor)              _deprecated --monitor "fw log"; subcmd="fw"; shift; set -- "log" "$@" ;;
-  --monitor-fw)           _deprecated --monitor-fw "fw drops"; subcmd="fw"; shift; set -- "drops" "$@" ;;
-  --disable-firewall)     _deprecated --disable-firewall "fw disable"; subcmd="fw"; shift; set -- "disable" "$@" ;;
-  --enable-firewall)      _deprecated --enable-firewall "fw enable"; subcmd="fw"; shift; set -- "enable" "$@" ;;
-  ''|-*) ;; # no verb, or a legacy/start flag: fall through to the default start parser below
+  --help)    usage; exit 0 ;;
+  --version) echo "dev $(resolve_dev_version)"; exit 0 ;;
+  '')
+    usage
+    exit 0
+    ;;
+  -*)
+    echo "Error: unknown option: '$1'" >&2
+    echo "Run 'dev --help' for usage information" >&2
+    exit 2
+    ;;
   *)
     echo "Error: unknown verb: '$1'" >&2
     echo "Run 'dev --help' for usage information" >&2
@@ -690,7 +652,7 @@ case "$subcmd" in
   fw)
     fw_action="${1:-}"
     case "$fw_action" in
-      log|drops|enable|on)
+      log|drops|on)
         shift
         # These share a strict no-extra-args branch (consistent with
         # reset/scaffold/update). `on` is an alias for `enable`: map it after
@@ -703,9 +665,9 @@ case "$subcmd" in
         ;;
       off)
         shift
-        # Unlike `disable`, `off` never cold-starts: it only toggles an
-        # already-running container's firewall off, and errors instead of
-        # falling through to the default start path.
+        # `off` never cold-starts: it only toggles an already-running
+        # container's firewall off, and errors instead of falling through to
+        # the default start path.
         if [[ $# -gt 0 ]]; then
           echo "Error: dev fw off does not take extra arguments: $*" >&2
           echo "       To start a fresh container with the firewall open, use 'dev up --open'." >&2
@@ -713,28 +675,12 @@ case "$subcmd" in
         fi
         ;;
       disable)
-        shift
-        # Deliberately lenient (unlike log/drops/enable above): the
-        # deprecated `--disable-firewall` alias re-injects trailing args via
-        # `set -- disable "$@"`, and when no container is running fw_disable
-        # falls through into the default start parser below, which needs to
-        # see those args (e.g. --dry-run -- echo hi). Rejecting them here
-        # would break that fallthrough.
-        #
-        # --maintenance is a mode conflict, though: a maintenance container
-        # has no firewall to disable, and silently discarding the flag would
-        # drop the firewall on the normal container instead of starting the
-        # maintenance shell the user asked for. Reject it explicitly, for
-        # both the running-container toggle case and the no-container
-        # fall-through case below.
-        for _a in "$@"; do
-          if [[ "$_a" == "--maintenance" ]]; then
-            echo "Error: 'fw disable' (and --disable-firewall) cannot be combined with --maintenance." >&2
-            echo "       Maintenance mode has no firewall; use 'dev --maintenance' for a maintenance shell." >&2
-            exit 1
-          fi
-        done
-        unset _a
+        echo "Error: 'fw disable' was renamed: use 'dev fw off' (running container) or 'dev up --open' (fresh)." >&2
+        exit 1
+        ;;
+      enable)
+        echo "Error: 'fw enable' was renamed: use 'dev fw on'." >&2
+        exit 1
         ;;
       *)
         echo "Error: dev fw: expected an action (off|on|log|drops), got '${fw_action:-<none>}'" >&2
@@ -750,14 +696,6 @@ case "$subcmd" in
       drops)   fw_drops ;;
       enable)  fw_enable ;;
       off)     fw_off_running_only ;;
-      disable)
-        fw_disable
-        # No container was running: fw_disable set FW_DISABLED_START=true and
-        # returned instead of exec'ing (it has no exit/exec on that code
-        # path). Fall through to the default start path below (with
-        # whatever flags/command follow) so a fresh container comes up
-        # with the firewall already disabled.
-        ;;
     esac
     ;;
   agent)
@@ -845,9 +783,10 @@ case "$subcmd" in
 esac
 
 # --- Default "start" command ------------------------------------------------
-# Reached when no subcommand was typed, or when `fw disable` fell through
-# with no running container (fw_disable returned instead of exec'ing;
-# FW_DISABLED_START is set — see the `disable)` case above).
+# The shared flag engine for `dev up`/`dev exec`/`dev shell`: those verb arms
+# above translate their own spellings (--maint, --open, --) and fall through
+# to this parser. There is no other route in — bare `dev` and flag-first
+# invocations are rejected by the router above.
 while [[ $# -gt 0 ]]; do
   case $1 in
     --dry-run)
