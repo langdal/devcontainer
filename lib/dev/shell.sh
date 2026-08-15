@@ -29,11 +29,13 @@ cmd_shell() {
     exit 1
   fi
   CONTAINER_NAME="$MANAGED_NAME"
+  # shellcheck disable=SC2034  # consumed by attach_existing_container
   RUNTIME_ARGS="$MANAGED_RUNTIME_ARGS"
   # shellcheck disable=SC2034  # consumed by attach_existing_container
   SHELL_ONLY=true
   # shellcheck disable=SC2034  # consumed by attach_existing_container
   DRY_RUN=false
+  # shellcheck disable=SC2034  # consumed by attach_existing_container
   CMD_ARGS=()
   # shellcheck disable=SC2034  # consumed by attach_existing_container
   TTY_FLAGS=(-i)
