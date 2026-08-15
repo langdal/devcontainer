@@ -8,7 +8,12 @@
 # Entry format:  id|phase|applies-to|severity|title
 #   phase      0 = answerable before detect_runtime; 1 = needs $RUNTIME
 #   applies-to platform[,platform]:runtime[,runtime], '*' = any
-#   severity   block | block-if-nested | block-if-building | advise
+#   severity   block            — refuses in both `dev up` and `dev doctor`
+#              block-if-nested  — conditional in BOTH: blocks only under
+#                                 --dind/--pind ($NESTED)
+#              block-in-doctor  — blocks `dev doctor` (readiness) but never
+#                                 `dev up`; image.sh guards the real build site
+#              advise           — reported by doctor, never blocks anything
 #
 # Each id has a `_chk_<id>` probe returning 0 pass / 1 fail / 2 not-applicable,
 # and a `_chk_<id>_fix` printing remediation. Probes MUST reach the outside
@@ -18,7 +23,7 @@
 CHECKS=(
   "platform-supported|0|*:*|block|supported platform (linux/darwin)"
   "runtime-present|0|*:*|block|a container runtime is installed"
-  "buildx|1|linux,darwin:docker|block-if-building|docker buildx present"
+  "buildx|1|linux,darwin:docker|block-in-doctor|docker buildx present"
   "not-docker-desktop|1|darwin:*|block|not Docker Desktop"
   "podman-machine|1|darwin:podman|block|podman machine running"
   "workspace-not-root|1|*:*|block|workspace not root-owned"
@@ -85,8 +90,10 @@ run_check() {
 
 # Print the ids matching <phase> and <severity-filter> for <os>/<runtime>,
 # one per line, in registry order. severity-filter is 'all' or 'blocking';
-# 'blocking' includes block-if-nested only when $NESTED is true, and
-# block-if-building only when $BUILDING is true.
+# 'blocking' (used only by cmd_start) includes block-if-nested only when
+# $NESTED is true, and never includes block-in-doctor — that severity is a
+# consumer split (doctor blocks on it, cmd_start never does), not a runtime
+# condition, so it is excluded here exactly like advise.
 checks_select() {
   local want_phase="$1" filter="$2" os="$3" rt="$4"
   local entry id phase spec sev
@@ -101,7 +108,7 @@ checks_select() {
       case "$sev" in
         block) ;;
         block-if-nested) [[ "${NESTED:-false}" == true ]] || continue ;;
-        block-if-building) [[ "${BUILDING:-false}" == true ]] || continue ;;
+        block-in-doctor) continue ;;
         *) continue ;;
       esac
     fi

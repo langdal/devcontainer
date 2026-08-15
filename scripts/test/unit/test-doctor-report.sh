@@ -39,8 +39,8 @@ echo "$out" | LC_ALL=C grep -q '[^ -~]' && fail "non-ASCII leaked into non-tty o
 # Nothing here required a running container or a built image.
 echo "$out" | grep -qi 'no such container' && fail "doctor touched a container"
 
-# block-if-building must still be blocking FOR DOCTOR regardless of $BUILDING
-# (cmd_start never sets it; lib/dev/image.sh guards the real build site
+# block-in-doctor (buildx) must still be blocking FOR DOCTOR even though
+# cmd_start never blocks on it (lib/dev/image.sh guards the real build site
 # instead) — a host that cannot build is never "ready". Fully mocked so this
 # does not depend on the test host's actual runtime/buildx situation: real
 # detect_runtime/_chk_runtime_present are shadowed so nothing here shells out.
@@ -63,7 +63,7 @@ echo "$out" | grep -qi 'no such container' && fail "doctor touched a container"
   echo "$bout" | grep -q 'docker buildx present' \
     || { echo "FAIL: buildx row missing from mocked report: $bout"; exit 1; }
   [ "$brc" -eq 1 ] \
-    || { echo "FAIL: missing buildx must exit 1 regardless of \$BUILDING, got $brc: $bout"; exit 1; }
+    || { echo "FAIL: missing buildx must exit 1 (block-in-doctor), got $brc: $bout"; exit 1; }
 ) || fail "doctor block-if-building coverage failed"
 
 echo "PASS: doctor report and exit contract"

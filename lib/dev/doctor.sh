@@ -112,11 +112,14 @@ cmd_doctor() {
     elif [[ "$CHECK_STATE" == fail && "$sev" == block-if-nested && "$NESTED" != true ]]; then
       shown=advise; advisories=$((advisories + 1))
     elif [[ "$CHECK_STATE" == fail ]]; then
-      # Covers plain 'block' and 'block-if-building' alike: unlike
-      # block-if-nested (only relevant under --dind/--pind), a host that
-      # cannot build an image is never "ready" here, whether or not this
-      # particular invocation was about to build one. $BUILDING is cmd_start's
-      # concern, not doctor's.
+      # Covers plain 'block' and 'block-in-doctor' alike: doctor is a
+      # readiness report, so a host that cannot build an image is never
+      # "ready" here — unlike cmd_start, which never blocks on this severity
+      # because lib/dev/image.sh's runtime_build already guards the real
+      # build site with the same probe. checks_select's 'blocking' filter
+      # (cmd_start's only consumer) drops block-in-doctor entirely; doctor
+      # calls checks_select with filter=all, so it reaches this generic
+      # fail branch instead of either special case above.
       blocking=$((blocking + 1))
     elif [[ "$CHECK_STATE" == pass ]]; then
       passed=$((passed + 1))
