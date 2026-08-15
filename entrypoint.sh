@@ -1,4 +1,12 @@
 #!/bin/bash
+# --- Threat model (see SECURITY.md) ---
+# May: run firewall-init.sh as root before anything else and fail closed
+# (abort container startup) if it errors; seed rc files/git identity/JVM
+# proxy config only when absent, never overwriting a value already in the
+# home volume.
+# Must never: start the payload command (gosu vscode "$@") if
+# firewall-init.sh/firewall-disable.sh/dind-init.sh/pind-init.sh reported
+# failure, or fall through to an unfirewalled shell on any error.
 set -u
 
 # --- Suppress AAAA lookups ---

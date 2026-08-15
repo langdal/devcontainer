@@ -3,6 +3,13 @@
 #
 # Configure tinyproxy and iptables to enforce a hostname allowlist.
 # Runs as root at container startup.  Fail-closed: any error => non-zero exit.
+#
+# --- Threat model (see SECURITY.md) ---
+# May: program iptables/ip6tables to default-DROP OUTPUT (v4+v6), write the
+# tinyproxy config/filter from BAKED (allowlist.base) and APPROVED
+# (/etc/devcontainer/project/allowlist.approved) allowlist material only.
+# Must never: read allowlist material from /workspace (agent-writable), or
+# weaken/skip any rule based on an env var an in-container process can set.
 set -euo pipefail
 
 BASE=/etc/devcontainer/allowlist.base

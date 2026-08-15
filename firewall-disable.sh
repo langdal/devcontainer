@@ -13,6 +13,12 @@
 # Opens the kernel egress AND switches tinyproxy to allow-all (permissive
 # filter + SIGHUP) so HTTP_PROXY-honouring clients also get through, not just
 # direct / --noproxy traffic. This requires tinyproxy to already be running.
+#
+# --- Threat model (see SECURITY.md) ---
+# May: tear down the egress firewall — this IS the explicit, documented,
+# opt-in escape hatch (dev fw off / dev up --open / DEVCONTAINER_FW_DISABLED).
+# Must never: run implicitly as a side effect of any other code path, or
+# leave no visible signal (the banner file below) that egress is now open.
 set -eu
 
 # Open the kernel egress (both families; ip6tables tolerated missing on

@@ -1,3 +1,10 @@
+# --- Threat model (see SECURITY.md) ---
+# May: strip vscode's sudo, stage the firewall scripts + base allowlist
+# read-only, rename the tinyproxy binary so no host AppArmor profile
+# attaches to it, create the unprivileged 'proxy' user iptables keys off.
+# Must never: leave vscode with sudo/root in the default (non-maintenance,
+# non-dind, non-pind) image, or bake host secrets/credentials into a layer.
+#
 # Pinned to a sha256 digest so the same image is reproduced byte-for-byte.
 # Bump the digest deliberately by re-running:
 #     docker manifest inspect mcr.microsoft.com/devcontainers/base:ubuntu \

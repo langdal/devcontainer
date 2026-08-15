@@ -1,3 +1,10 @@
+# --- Threat model (see SECURITY.md) ---
+# May: list hostnames the firewall's tinyproxy filter allows on 80/443.
+# Every entry here is reachable bidirectionally (allowlisting is not
+# exfiltration-proofing — see SECURITY.md §4).
+# Must never: contain a wildcard broader than a vendor's own registry/CDN
+# subdomain set, or a destination this project's tooling does not need.
+
 # Alexandra
 *.alx.dk
 *.alexandra.dk
