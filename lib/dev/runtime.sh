@@ -18,6 +18,39 @@ _host_os() {
   echo "${DEV_FAKE_OS:-$(uname -s)}"
 }
 
+# Is a command available? DEV_FAKE_CMDS (space-separated) REPLACES the real
+# lookup when set, so a unit test's host binaries cannot leak into a case.
+_have_cmd() {
+  if [[ -n "${DEV_FAKE_CMDS:-}" ]]; then
+    case " $DEV_FAKE_CMDS " in
+      *" $1 "*) return 0 ;;
+      *)        return 1 ;;
+    esac
+  fi
+  command -v "$1" >/dev/null 2>&1
+}
+
+# The selected runtime's --version banner, or empty when it cannot answer.
+_runtime_version() {
+  if [[ -n "${DEV_FAKE_RUNTIME_VERSION:-}" ]]; then
+    echo "$DEV_FAKE_RUNTIME_VERSION"
+    return 0
+  fi
+  # shellcheck disable=SC2086  # intentional word-splitting of RUNTIME_ARGS
+  $RUNTIME ${RUNTIME_ARGS:-} --version 2>/dev/null || true
+}
+
+# Contents of a sysfs/procfs entry, or empty when unreadable. Overridable so
+# Linux-only /proc checks can be exercised from macOS.
+_read_sysfs() {
+  if [[ -n "${DEV_FAKE_SYSFS_VALUE:-}" ]]; then
+    echo "$DEV_FAKE_SYSFS_VALUE"
+    return 0
+  fi
+  [[ -r "$1" ]] || return 0
+  cat "$1" 2>/dev/null || true
+}
+
 # A real Docker CLI can be pointed at a podman socket (DOCKER_HOST=.../
 # podman.sock). It talks to podman fine, but it cannot express
 # --userns=keep-id: that flag is podman-only and the Docker CLI rejects it
