@@ -64,7 +64,7 @@ Each check is a declaration line plus a probe function:
 # id|applies-to|severity|title
 CHECKS=(
   "buildx|linux,darwin:docker|block|docker buildx present"
-  "engine-cli-match|linux,darwin:*|advise|CLI and engine agree"
+  "engine-cli-match|linux,darwin:*|advise|no CLI/engine redirect needed"
   "userns-sysctl|linux:*|block-if-nested|unprivileged userns permitted"
   "subid-grant|linux:podman|block-if-nested|subuid/subgid range >= 165535"
   "podman-machine|darwin:podman|block|podman machine running"
@@ -123,7 +123,7 @@ Workspace devcontainer  (image: not built)
        The Dockerfile uses RUN --mount=type=secret, which the legacy
        builder cannot handle.
        Fix:  sudo apt-get install docker-buildx
-  !  CLI and engine agree
+  !  no CLI/engine redirect needed
        DOCKER_HOST points at a podman socket; dev will drive podman
        directly. Set DEV_RUNTIME to pin this.
   –  podman machine running                              (macOS only)
@@ -228,7 +228,7 @@ Fifteen checks, in four groups by origin:
 
 | Check | Applies | Origin |
 |---|---|---|
-| CLI and engine agree | all | **new** — 2026-08-15 `DOCKER_HOST` bug |
+| no CLI/engine redirect needed | all | **new** — 2026-08-15 `DOCKER_HOST` bug |
 | SELinux enforcing | linux | Fedora cell; `dev` handles it, worth surfacing |
 | free disk >= 3 GB | all | `docs/ci-testing.md` image cache |
 | free RAM >= 6 GB when nested | all | `docs/ci-testing.md` OOM warning |

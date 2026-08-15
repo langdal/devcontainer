@@ -438,7 +438,7 @@ CHECKS=(
   "subid-grant|1|linux:podman|block-if-nested|subuid/subgid range >= 165535"
   "fuse-device|1|linux:*|block-if-nested|/dev/fuse accessible"
   "cgroup2|1|linux:*|block-if-nested|cgroup v2"
-  "engine-cli-match|1|*:*|advise|CLI and engine agree"
+  "engine-cli-match|1|*:*|advise|no CLI/engine redirect needed"
   "home-volume-owner|1|*:podman|advise|home volume ownership matches uid"
   "selinux-enforcing|1|linux:*|advise|SELinux not enforcing"
   "disk-space|1|*:*|advise|at least 3 GB free"
