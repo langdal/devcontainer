@@ -12,9 +12,10 @@ fail() { echo "FAIL: $1"; exit 1; }
 . "$ROOT/lib/dev/checks.sh"
 RUNTIME=docker; RUNTIME_ARGS=""
 
-# Registry ids use hyphens; shell functions use underscores.
-run_check not-docker-desktop
-[ "$CHECK_STATE" != "na" ] || fail "run_check did not map hyphens to underscores"
+# Registry ids use hyphens; shell functions use underscores. Pin the probe's
+# input so this asserts the MAPPING and not the test host's runtime.
+DEV_FAKE_RUNTIME_VERSION='podman version 5.7.0' run_check not-docker-desktop
+[ "$CHECK_STATE" = pass ] || fail "run_check did not map hyphens to underscores (got $CHECK_STATE)"
 
 # --- platform-supported ---
 DEV_FAKE_OS=Linux  run_check platform-supported; [ "$CHECK_STATE" = pass ] || fail "Linux unsupported?"
