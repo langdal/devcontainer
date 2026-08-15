@@ -23,7 +23,7 @@ CHECKS=(
   "podman-machine|1|darwin:podman|block|podman machine running"
   "workspace-not-root|1|*:*|block|workspace not root-owned"
   "userns-sysctl|1|linux:*|block-if-nested|unprivileged userns permitted"
-  "subid-grant|1|linux:podman|block-if-nested|subuid/subgid range >= 165535"
+  "subid-grant|1|linux:*|block-if-nested|subuid/subgid range >= 165535"
   "fuse-device|1|linux:*|block-if-nested|/dev/fuse accessible"
   "cgroup2|1|linux:*|block-if-nested|cgroup v2"
   "engine-cli-match|1|*:*|advise|CLI and engine agree"
@@ -223,8 +223,11 @@ _chk_userns_sysctl() {
 }
 _chk_userns_sysctl_fix() {
   cat <<'EOF'
-Rootless dockerd/podman inside --dind/--pind must create a user namespace;
---security-opt apparmor=unconfined does NOT bypass this kernel restriction.
+kernel.apparmor_restrict_unprivileged_userns=1 on this host.
+
+This blocks rootless dockerd/podman inside --dind/--pind from creating
+its user namespace. --security-opt apparmor=unconfined does not bypass
+this kernel-level restriction.
 
 Allow it on this host:
     sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
@@ -233,7 +236,8 @@ Persist across reboots:
     echo 'kernel.apparmor_restrict_unprivileged_userns=0' \
       | sudo tee /etc/sysctl.d/99-rootless-userns.conf
 
-Set DEV_SKIP_APPARMOR_CHECK=1 to bypass this check.
+Set DEV_SKIP_APPARMOR_CHECK=1 to bypass this check (e.g. if you have a
+custom AppArmor profile that grants `userns,`).
 EOF
 }
 
@@ -248,13 +252,20 @@ _chk_subid_grant() {
   return 0
 }
 _chk_subid_grant_fix() {
-  local u next
+  local u g next
   u=$(subid_total /etc/subuid)
+  g=$(subid_total /etc/subgid)
   next=$((100000 + u))
+  echo "--dind/--pind on a rootless runtime needs a larger subuid/subgid grant."
+  echo
   echo "Rootless runtimes give the container only the ids granted to $(id -un)"
-  echo "in /etc/subuid + /etc/subgid. The image maps container ids"
-  echo "100000-165535, so at least ${DIND_MIN_SUBIDS:-165535} are needed or"
-  echo "rootlesskit dies with 'newuidmap: write to uid_map failed'."
+  echo "in /etc/subuid and /etc/subgid (currently $u uids / $g gids). rootless"
+  echo "dockerd/podman inside the container must map container ids"
+  echo "100000-165535 (the image's vscode subuid range), so at least"
+  echo "${DIND_MIN_SUBIDS:-165535} are needed or it fails at startup with:"
+  echo "    newuidmap: write to uid_map failed: Operation not permitted"
+  echo
+  echo "Grant more ids (any range not colliding with other users), e.g.:"
   echo "    sudo usermod --add-subuids ${next}-365535 --add-subgids ${next}-365535 $(id -un)"
   _runtime_version | grep -qi podman && \
     echo "    podman system migrate    # restart podman's userns with the new grant"
