@@ -24,8 +24,7 @@ start_container() {
   # reuse guard and the create path agree, and recorded as the dev.keepid label
   # so a later run can tell how an existing container was created.
   EXPECT_KEEPID=false
-  # shellcheck disable=SC2086  # intentional word-splitting of RUNTIME_ARGS
-  if $RUNTIME $RUNTIME_ARGS --version 2>/dev/null | grep -qi podman && runtime_is_rootless; then
+  if engine_is_podman && runtime_is_rootless; then
     EXPECT_KEEPID=true
   fi
 

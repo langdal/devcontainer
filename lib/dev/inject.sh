@@ -54,8 +54,7 @@ resolve_agent_storage() {
 # container with --userns=keep-id (rootless podman only), matching the logic
 # in start_container. Otherwise "false".
 _agent_keepid() {
-  # shellcheck disable=SC2086  # intentional word-splitting of RUNTIME_ARGS
-  if $RUNTIME $RUNTIME_ARGS --version 2>/dev/null | grep -qi podman && runtime_is_rootless; then
+  if engine_is_podman && runtime_is_rootless; then
     echo true
   else
     echo false
