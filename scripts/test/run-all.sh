@@ -191,8 +191,17 @@ for scenario in "$LOG_DIR"/scenarios/[0-9]*.sh; do
         echo "=== $name ==="
     } >> "$LAST_LOG"
     if out=$(bash "$scenario" 2>&1); then
-        # Scenario exited 0 — last log line tells us PASS or SKIP.
-        if echo "$out" | grep -q '^\[PASS\]'; then
+        # Exit 0 is necessary but NOT sufficient. A scenario that calls
+        # log_fail and keeps going still exits 0, and the old test — "any
+        # [PASS] line present" — counted it as passing. 48-agent-inject did
+        # exactly that under the rootless cell: 10 [FAIL] lines, 18 [PASS]
+        # lines, exit 0, reported PASS. Any [FAIL] line means the scenario
+        # failed, whatever else it printed.
+        if echo "$out" | grep -q '^\[FAIL\]'; then
+            FAIL=$((FAIL+1))
+            FAIL_NAMES+=("$name")
+            echo "${RED}FAIL${RESET}  $name"
+        elif echo "$out" | grep -q '^\[PASS\]'; then
             PASS=$((PASS+1))
             echo "${GREEN}PASS${RESET}  $name"
             tail -1 <<< "$out" >> "$SUMMARY_LOG"
