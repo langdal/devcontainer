@@ -36,6 +36,15 @@ DEV_FAKE_CMDS="docker" run_check buildx
 [ "$CHECK_STATE" = fail ] || fail "missing buildx must FAIL — this is the check that would have saved a whole session"
 _chk_buildx_fix | grep -qi 'docker-buildx' || fail "buildx fix does not name the package"
 
+# --- buildx: the 2026-08-15 false-negative ---
+# Debian/Ubuntu's docker-buildx package (and Docker Desktop) installs the
+# plugin under docker's cli-plugins dir, never as a standalone docker-buildx
+# or buildx binary on PATH. A host in exactly that (extremely common) shape
+# must still pass: this is the bug that inverted the full test matrix the
+# day this check was wired into `dev up`.
+DEV_FAKE_CMDS="docker" DEV_FAKE_BUILDX=true run_check buildx
+[ "$CHECK_STATE" = pass ] || fail "buildx installed as a CLI plugin (no standalone binary) must still pass"
+
 # --- not-docker-desktop ---
 DEV_FAKE_RUNTIME_VERSION='Docker version 27.0.0, build abc' run_check not-docker-desktop
 [ "$CHECK_STATE" = fail ] || fail "Docker Desktop must fail on macOS"

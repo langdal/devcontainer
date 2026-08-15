@@ -112,6 +112,11 @@ cmd_doctor() {
     elif [[ "$CHECK_STATE" == fail && "$sev" == block-if-nested && "$NESTED" != true ]]; then
       shown=advise; advisories=$((advisories + 1))
     elif [[ "$CHECK_STATE" == fail ]]; then
+      # Covers plain 'block' and 'block-if-building' alike: unlike
+      # block-if-nested (only relevant under --dind/--pind), a host that
+      # cannot build an image is never "ready" here, whether or not this
+      # particular invocation was about to build one. $BUILDING is cmd_start's
+      # concern, not doctor's.
       blocking=$((blocking + 1))
     elif [[ "$CHECK_STATE" == pass ]]; then
       passed=$((passed + 1))

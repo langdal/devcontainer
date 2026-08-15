@@ -41,9 +41,13 @@ _chk_runtime_present_fix() {
 # On 2026-08-15 this went undetected: the test orchestrator installs buildx
 # only when no runtime is present at all, so a host with docker and no buildx
 # failed every scenario and still wrote a summary that read as clean.
+# Severity is block-if-building (checks.sh), not block: this only refuses an
+# invocation that is actually about to build; lib/dev/image.sh's
+# runtime_build guards the build site itself with the same underlying probe.
 _chk_buildx() {
   _have_cmd docker-buildx && return 0
   _have_cmd buildx && return 0
+  _docker_buildx_present && return 0
   return 1
 }
 _chk_buildx_fix() {

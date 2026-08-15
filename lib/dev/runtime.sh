@@ -30,6 +30,26 @@ _have_cmd() {
   command -v "$1" >/dev/null 2>&1
 }
 
+# Is `docker buildx` actually usable? Debian/Ubuntu's docker-buildx package
+# (and Docker Desktop) installs the plugin as
+# /usr/libexec/docker/cli-plugins/docker-buildx (or ~/.docker/cli-plugins/),
+# discovered by the docker CLI itself — never as a standalone `docker-buildx`
+# or `buildx` binary on PATH. A PATH-only check therefore false-negatives on
+# the single most common install path, which is worse than not checking at
+# all: it blocked every `dev up` on a stock Ubuntu host once this check
+# started gating cmd_start (2026-08-15). DEV_FAKE_CMDS puts us in a unit-test
+# sandbox with no real docker to shell out to, so it short-circuits this to
+# 'absent' there; DEV_FAKE_BUILDX overrides that for a test that wants to
+# exercise the plugin-present path specifically.
+_docker_buildx_present() {
+  if [[ -n "${DEV_FAKE_BUILDX:-}" ]]; then
+    [[ "$DEV_FAKE_BUILDX" == true ]]
+    return
+  fi
+  [[ -n "${DEV_FAKE_CMDS:-}" ]] && return 1
+  docker buildx version >/dev/null 2>&1
+}
+
 # The selected runtime's --version banner, or empty when it cannot answer.
 _runtime_version() {
   if [[ -n "${DEV_FAKE_RUNTIME_VERSION:-}" ]]; then

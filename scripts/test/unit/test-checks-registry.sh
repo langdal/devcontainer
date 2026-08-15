@@ -46,10 +46,10 @@ rm -f "$tmp"
 . "$ROOT/lib/dev/checks.sh"
 
 # Field extraction is 1-indexed and tolerates a title containing spaces.
-e="buildx|1|linux,darwin:docker|block|docker buildx present"
+e="buildx|1|linux,darwin:docker|block-if-building|docker buildx present"
 [ "$(check_field "$e" 1)" = "buildx" ]                || fail "field 1"
 [ "$(check_field "$e" 2)" = "1" ]                     || fail "field 2"
-[ "$(check_field "$e" 4)" = "block" ]                 || fail "field 4"
+[ "$(check_field "$e" 4)" = "block-if-building" ]     || fail "field 4"
 [ "$(check_field "$e" 5)" = "docker buildx present" ] || fail "field 5 lost its spaces"
 
 # Applicability: platform list, runtime list, and '*' wildcards.
@@ -95,10 +95,12 @@ sel=$(checks_select 0 all Linux docker)
 echo "$sel" | grep -q '^platform-supported$' || fail "phase 0 lost platform-supported"
 echo "$sel" | grep -q '^buildx$'             && fail "phase 1 check leaked into phase 0"
 
-# Bare (not nested): block-if-nested is advisory, so it is NOT in 'blocking'.
+# Bare (not nested, not building): block-if-nested and block-if-building are
+# both advisory here, so neither is in 'blocking'.
 NESTED=false
+BUILDING=false
 sel=$(checks_select 1 blocking Linux docker)
-echo "$sel" | grep -q '^buildx$'        || fail "blocking filter dropped buildx"
+echo "$sel" | grep -q '^buildx$'        && fail "buildx must not block when BUILDING=false"
 echo "$sel" | grep -q '^userns-sysctl$' && fail "block-if-nested must not block when bare"
 echo "$sel" | grep -q '^engine-cli-match$' && fail "advisory must never be in blocking"
 
@@ -106,5 +108,14 @@ echo "$sel" | grep -q '^engine-cli-match$' && fail "advisory must never be in bl
 NESTED=true
 sel=$(checks_select 1 blocking Linux podman)
 echo "$sel" | grep -q '^userns-sysctl$' || fail "block-if-nested not promoted under --dind"
+
+# Building: block-if-building is promoted. cmd_start never sets BUILDING=true
+# itself (lib/dev/image.sh guards the actual build site instead), but the
+# selection machinery must still honor it — this is what lets `dev doctor`
+# and any future caller that IS about to build opt in.
+BUILDING=true
+sel=$(checks_select 1 blocking Linux docker)
+echo "$sel" | grep -q '^buildx$' || fail "block-if-building not promoted when BUILDING=true"
+BUILDING=false
 
 echo "PASS: check registry indirections"

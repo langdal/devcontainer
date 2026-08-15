@@ -140,8 +140,8 @@ cmd_start() {
 
   # Restored mode-conflict guard: --dind, --pind, and --maintenance are
   # mutually exclusive (four-way: normal / maintenance / dind / pind). Must
-  # run before detect_runtime/preflight_subid_grant below so this error wins
-  # over the (also-fatal) --dind subid preflight when both flags are given
+  # run before the blocking checks below so this error wins over the
+  # (also-fatal) --dind subid-grant check when both flags are given
   # together.
   if [[ "$DIND" == true && "$MAINTENANCE" == true ]]; then
     echo "Error: --dind and --maintenance are mutually exclusive." >&2
@@ -164,7 +164,12 @@ cmd_start() {
     exit 2
   fi
 
-  preflight_apparmor_userns
+  # block-if-nested checks apply only to --dind/--pind.
+  # shellcheck disable=SC2034  # consumed by checks_select in lib/dev/checks.sh
+  NESTED=false
+  # shellcheck disable=SC2034  # consumed by checks_select in lib/dev/checks.sh
+  [[ "$DIND" == true || "$PIND" == true ]] && NESTED=true
+  run_blocking_checks 0
 
   detect_runtime
   # The start path creates or attaches a container: it needs a live engine.
@@ -197,18 +202,17 @@ cmd_start() {
   # The 165536 floor is the image contract: Dockerfile writes
   # "vscode:100000:65536" into the image's /etc/subuid, and 100000+65536
   # container ids must exist for rootless dockerd's two-line map.
-  # shellcheck disable=SC2034  # consumed by preflight_subid_grant() in lib/dev/preflight.sh
+  # shellcheck disable=SC2034  # consumed by _chk_subid_grant() in lib/dev/checks-catalog.sh
   DIND_MIN_SUBIDS=165535 # ids beyond id 0; namespace size = subids + 1
-  preflight_subid_grant
+  run_blocking_checks 1
 
   # Host identity. Used to (a) bake correct UID/GID into the image at
   # build time, and (b) detect when an existing image was built for a
   # different user.
-  # shellcheck disable=SC2034  # consumed by refuse_root_uid/image.sh's runtime_build/check_image_uid_match and migrate_volume_for_keepid in lib/dev/volumes.sh
+  # shellcheck disable=SC2034  # consumed by image.sh's runtime_build/check_image_uid_match and migrate_volume_for_keepid in lib/dev/volumes.sh
   HOST_UID=$(id -u)
   # shellcheck disable=SC2034  # consumed by runtime_build/check_image_uid_match in lib/dev/image.sh
   HOST_GID=$(id -g)
-  refuse_root_uid
 
   # Read the host's git identity so a fresh per-workspace home volume gets a
   # usable identity without manual setup. Empty when the host has none; the
