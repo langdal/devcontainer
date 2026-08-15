@@ -93,7 +93,9 @@ refuse_if_running() {
   if container_running "$other_name" "$extra_args"; then
     echo "Error: ${other_label} container ${other_name} is running for this workspace." >&2
     # shellcheck disable=SC2086  # intentional word-splitting of $extra_args
-    echo "       Stop it first:  $RUNTIME $extra_args stop ${other_name}" >&2
+    # ${extra_args:+ } keeps the spacing right when there are no extra args;
+    # a bare "$RUNTIME $extra_args stop" prints "podman  stop" otherwise.
+    echo "       Stop it first:  $RUNTIME${extra_args:+ $extra_args} stop ${other_name}" >&2
     exit 1
   fi
 }

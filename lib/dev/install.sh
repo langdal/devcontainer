@@ -6,7 +6,12 @@
 # is passed in by the router because ${BASH_SOURCE[0]} inside this module would
 # resolve to the module file instead of the dev script the symlink must target.
 cmd_install() {
-  install_self "$1"
+  local self="$1"; shift
+  if [[ $# -gt 0 ]]; then
+    echo "Error: 'dev install' takes no arguments." >&2
+    exit 2
+  fi
+  install_self "$self"
   exit 0
 }
 

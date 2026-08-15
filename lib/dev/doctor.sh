@@ -131,7 +131,9 @@ cmd_doctor() {
       local fixfn
       fixfn="_chk_$(echo "$id" | tr '-' '_')_fix"
       if command -v "$fixfn" >/dev/null 2>&1; then
-        "$fixfn" | sed 's/^/       /'
+        # `s/^./       &/` not `s/^/       /`: the latter indents blank
+        # lines too, leaving trailing whitespace in every gap.
+        "$fixfn" | sed 's/^./       &/'
       fi
     fi
   }

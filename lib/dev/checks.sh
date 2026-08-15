@@ -132,11 +132,14 @@ run_blocking_checks() {
     failed=1
     for entry in "${CHECKS[@]}"; do
       [[ "$(check_field "$entry" 1)" == "$id" ]] || continue
-      echo "Error: $(check_field "$entry" 5)" >&2
+      # "check failed:" matters — the titles are positive assertions, so a
+      # bare `Error: cgroup v2` reads as a claim ABOUT cgroup v2 rather than
+      # a report that the check for it failed.
+      echo "Error: check failed: $(check_field "$entry" 5)" >&2
     done
     local fixfn
     fixfn="_chk_$(echo "$id" | tr '-' '_')_fix"
-    command -v "$fixfn" >/dev/null 2>&1 && "$fixfn" | sed 's/^/       /' >&2
+    command -v "$fixfn" >/dev/null 2>&1 && "$fixfn" | sed 's/^./       &/' >&2
     echo >&2
   done
   if [[ "$failed" -eq 1 ]]; then

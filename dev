@@ -169,7 +169,7 @@ esac
 case "$subcmd" in
   # ${BASH_SOURCE[0]} is dev's own path: cmd_install needs the file the PATH
   # symlink must point at, which BASH_SOURCE inside the module would not give.
-  install)          cmd_install "${BASH_SOURCE[0]}" ;;
+  install)          cmd_install "${BASH_SOURCE[0]}" "$@" ;;
   update)           cmd_update "$@" ;;
   reset)            cmd_reset "$@" ;;
   down)             cmd_down "$@" ;;

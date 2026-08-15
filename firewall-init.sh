@@ -124,7 +124,7 @@ iptables -A OUTPUT -m owner --uid-owner "$PROXY_UID" \
 iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
 
 # Optional: punch a hole to specific ports on the host gateway. Set by
-# `dev --host-port PORT`, which also adds --add-host=host.docker.internal:host-gateway
+# `dev up --host-port PORT`, which also adds --add-host=host.docker.internal:host-gateway
 # at run time. Scoped to the gateway IP only so the firewall still default-drops
 # every other destination. Fail-closed: if the hostname doesn't resolve or any
 # port is invalid, the firewall does not come up.
