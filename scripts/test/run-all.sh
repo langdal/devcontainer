@@ -31,7 +31,13 @@ fi
 # that touches the workspace path.
 # shellcheck source=scripts/test/lib/privilege.sh
 . "$(dirname "$0")/lib/privilege.sh"
-drop_privs_if_root "$@"
+# Scenarios read this through require_privilege. Unset means "run
+# everything", so the existing `sudo bash run-all.sh` invocation is
+# untouched.
+export DEV_TEST_PRIVILEGE="${DEV_TEST_PRIVILEGE:-root}"
+if [ "$DEV_TEST_PRIVILEGE" = root ]; then
+    drop_privs_if_root "$@"
+fi
 
 # shellcheck source=scripts/test/lib/runtime.sh
 . "$(dirname "$0")/lib/runtime.sh"
@@ -61,9 +67,15 @@ echo "Log:       $LAST_LOG"
 echo
 
 # ---- Preconditions ----
-if ! sudo -n true 2>/dev/null; then
-    echo "FATAL: this orchestrator needs passwordless sudo (or run as root)." | tee -a "$LAST_LOG"
-    exit 1
+# The unprivileged subset manipulates no host state, so it must run without
+# sudo — that is the whole point of the rootless cell. Only the full run
+# needs it.
+if [ "$DEV_TEST_PRIVILEGE" = root ]; then
+    if ! sudo -n true 2>/dev/null; then
+        echo "FATAL: this orchestrator needs passwordless sudo (or run as root)." | tee -a "$LAST_LOG"
+        echo "       For the unprivileged subset instead: DEV_TEST_PRIVILEGE=user bash $0" | tee -a "$LAST_LOG"
+        exit 1
+    fi
 fi
 
 # ---- Auto-install runtimes if missing ----
@@ -163,6 +175,15 @@ declare -a SKIP_NAMES=()
 
 for scenario in "$LOG_DIR"/scenarios/[0-9]*.sh; do
     name=$(basename "$scenario" .sh)
+    # Skip scenarios this run cannot satisfy. The scenario's own
+    # require_privilege call would also skip, but filtering here keeps them
+    # out of the tally entirely — a cell should report what it ran, not pad
+    # its skip count with work it was never going to attempt.
+    scen_priv=$(awk '/^# privilege:/{print $3; exit}' "$scenario")
+    scen_priv="${scen_priv:-any}"
+    if [ "$DEV_TEST_PRIVILEGE" != root ] && [ "$scen_priv" = root ]; then
+        continue
+    fi
     echo
     echo "=== Running $name ==="
     {
