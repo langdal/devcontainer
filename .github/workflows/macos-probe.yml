@@ -1,22 +1,15 @@
 # Manual probe: can a real macOS runner host the workstream-3 macOS cell?
 #
-# ANSWERED 2026-08-15 on macos-14 (image 20260629.0180.1): NO.
-#   --provider applehv  -> init OK in 33s, then
-#                          "Error: vfkit exited unexpectedly with exit code 1"
-#   --provider libkrun  -> "exec: krunkit: executable file not found in $PATH"
-#                          (krunkit is not a podman dependency in brew)
-# The runner reports `Apple M1 (Virtual)`, kernel RELEASE_ARM64_VMAPPLE, and no
-# hv.* sysctls: GitHub's macOS ARM runners are themselves VMs and do not expose
-# nested virtualization, so Virtualization.framework has nothing to build on.
-# The macOS matrix cell is therefore unit-suite + `dev doctor` only, and the
-# manual Apple Silicon session is the project's only real-hardware coverage.
+# Answers the open question in
+# docs/superpowers/specs/2026-08-15-host-preflight-matrix-design.md: whether
+# `podman machine` can start on GitHub's macOS runners. If it can, the macOS
+# matrix cell can run a genuine smoke; if it cannot, that cell degrades to the
+# unit suite plus `dev doctor` without a VM, and the manual Apple Silicon
+# session carries proportionally more weight.
 #
-# RETAINED rather than deleted, deliberately: that answer is a property of
-# GitHub's runner images, not of this repo, and can change when they do.
-# Re-dispatch after a runner-image bump to see whether the cell can be
-# upgraded. Costs nothing while undispatched.
-#
-# Deliberately NOT wired into ci.yml — its output is an answer, not a gate.
+# Deliberately NOT wired into ci.yml. This is a one-off question, run by hand,
+# whose output is an answer rather than a gate. Delete it once the answer is
+# recorded in the spec.
 #
 # Every probe is continue-on-error so a single run collects every answer
 # instead of stopping at the first failure — the whole point is the report at
@@ -31,16 +24,6 @@ on:
         type: choice
         default: macos-14
         options: [macos-14, macos-15, macos-13]
-      provider:
-        # podman 6 on macOS defaults to libkrun, which needs an EXTERNAL
-        # `krunkit` binary that `brew install podman` does not pull in — the
-        # 2026-08-15 run failed on exactly that, which says nothing about
-        # whether the runner can host a VM. applehv is podman's built-in
-        # macOS provider and needs no extra binary.
-        description: "podman machine provider"
-        type: choice
-        default: applehv
-        options: [applehv, libkrun]
       build_image:
         description: "Also try a full dev image build (slow, ~20-30 min)"
         type: boolean
@@ -86,15 +69,8 @@ jobs:
             brew install podman
           fi
           podman --version
-          echo "=== default provider (what podman picks unaided) ==="
-          podman info 2>/dev/null | grep -Ei 'provider|buildOrigin' || true
-          if [ "${{ inputs.provider }}" = "libkrun" ]; then
-            # libkrun is a thin shim over the external krunkit binary; without
-            # it `podman machine start` dies with
-            # `exec: "krunkit": executable file not found in $PATH`.
-            brew install krunkit || echo "krunkit unavailable via brew"
-          fi
-          echo "krunkit on PATH: $(command -v krunkit || echo 'no')"
+          echo "provider default:"
+          podman info --format '{{.Host.OS}}' 2>/dev/null || true
 
       - name: podman machine init
         id: init
@@ -103,8 +79,7 @@ jobs:
         run: |
           set -x
           start=$(date +%s)
-          podman machine init --provider '${{ inputs.provider }}' \
-            --cpus 2 --memory 4096 --disk-size 30
+          podman machine init --cpus 2 --memory 4096 --disk-size 30
           echo "init_seconds=$(( $(date +%s) - start ))" >> "$GITHUB_OUTPUT"
           podman machine list
 
@@ -184,7 +159,7 @@ jobs:
           {
             echo "# macOS probe — ${{ inputs.runner }}"
             echo
-            echo "Runner: \`${{ steps.facts.outputs.arch }}\` · macOS ${{ steps.facts.outputs.macos }} · ${{ steps.facts.outputs.cpus }} CPU · ${{ steps.facts.outputs.mem_gb }} GiB · provider \`${{ inputs.provider }}\`"
+            echo "Runner: \`${{ steps.facts.outputs.arch }}\` · macOS ${{ steps.facts.outputs.macos }} · ${{ steps.facts.outputs.cpus }} CPU · ${{ steps.facts.outputs.mem_gb }} GiB"
             echo
             echo "| Probe | Result | Notes |"
             echo "|---|---|---|"

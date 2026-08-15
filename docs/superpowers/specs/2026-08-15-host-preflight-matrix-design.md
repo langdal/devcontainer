@@ -298,9 +298,23 @@ failure mode that produced the truncated summary on 2026-08-15.
 ### Open question, to resolve during implementation
 
 Whether `podman machine` can start on GitHub's macOS runners is unverified.
-Resolve with a throwaway workflow before committing to the macOS cell. If it
-cannot, that cell degrades to unit-suite plus `dev doctor` without a VM, and
-the manual Apple Silicon session below carries proportionally more weight.
+
+`.github/workflows/macos-probe.yml` exists to answer it: a `workflow_dispatch`
+job that installs podman, times `machine init` and `machine start`, runs a
+nested container, exercises the `dev` CLI on a bare Mac, runs the unit suite,
+and writes a verdict to the job summary. Every probe is `continue-on-error`, so
+one manual run collects every answer rather than stopping at the first failure.
+
+Run it against `macos-14` before the matrix work in increment 2 begins, record
+the answer here, and delete the workflow — its output is an answer, not a gate.
+
+If `machine start` fails, the macOS cell degrades to unit-suite plus
+`dev doctor` without a VM, and the manual Apple Silicon session below becomes
+the only real-hardware coverage.
+
+Note: `workflow_dispatch` only exposes the "Run workflow" button for workflows
+present on the repository's **default branch**, so the probe has to reach
+`main` before it can be run by hand.
 
 ## Release gates
 
