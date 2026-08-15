@@ -61,6 +61,7 @@ _chk_userns_sysctl_fix | grep -q 'apparmor_restrict_unprivileged_userns=0' \
 # _chk_subid_grant short-circuits to 'na' on a rootful runtime, so pin
 # rootlessness here — otherwise this case is decided by whatever runtime the
 # machine running the tests happens to have.
+# shellcheck disable=SC2329  # invoked indirectly via run_check -> _chk_subid_grant
 runtime_is_rootless() { return 0; }
 # shellcheck disable=SC2329  # invoked indirectly via subid_total override below
 _subid_stub() { echo 200000; }
@@ -79,5 +80,49 @@ _have_dev_fuse() { return 1; }; run_check fuse-device; [ "$CHECK_STATE" = fail ]
 # shellcheck disable=SC2329  # invoked indirectly via run_check -> _chk_cgroup2
 _cgroup_version() { echo 2; }; run_check cgroup2; [ "$CHECK_STATE" = pass ] || fail "cgroup v2"
 _cgroup_version() { echo 1; }; run_check cgroup2; [ "$CHECK_STATE" = fail ] || fail "cgroup v1 must fail"
+
+# --- engine-cli-match: the 2026-08-15 DOCKER_HOST bug ---
+RUNTIME=docker
+DEV_FAKE_RUNTIME_VERSION='podman version 5.7.0' run_check engine-cli-match
+[ "$CHECK_STATE" = pass ] || fail "podman CLI + podman engine agree"
+# shellcheck disable=SC2329  # invoked indirectly via run_check -> _chk_engine_cli_match
+_engine_server_name() { echo "Podman Engine"; }
+DEV_FAKE_RUNTIME_VERSION='Docker version 29.1.3' run_check engine-cli-match
+[ "$CHECK_STATE" = fail ] || fail "docker CLI on a podman socket must be flagged"
+_engine_server_name() { echo "Engine"; }
+DEV_FAKE_RUNTIME_VERSION='Docker version 29.1.3' run_check engine-cli-match
+[ "$CHECK_STATE" = pass ] || fail "docker CLI + dockerd agree"
+
+# --- disk-space / memory: thresholds from docs/ci-testing.md ---
+# shellcheck disable=SC2329  # invoked indirectly via run_check -> _chk_disk_space
+_free_disk_gb() { echo 10; }; run_check disk-space; [ "$CHECK_STATE" = pass ] || fail "10 GB is enough"
+_free_disk_gb() { echo 1; };  run_check disk-space; [ "$CHECK_STATE" = fail ] || fail "1 GB is not"
+# shellcheck disable=SC2329  # invoked indirectly via run_check -> _chk_memory
+_total_mem_gb() { echo 16; }; run_check memory;     [ "$CHECK_STATE" = pass ] || fail "16 GB is enough"
+_total_mem_gb() { echo 4; };  run_check memory;     [ "$CHECK_STATE" = fail ] || fail "4 GB is not"
+
+# --- github-token-scopes: a scoped token is power handed to the agent ---
+GITHUB_TOKEN="" run_check github-token-scopes
+[ "$CHECK_STATE" = na ] || fail "no token means not-applicable, not pass"
+# shellcheck disable=SC2329  # invoked indirectly via run_check -> _chk_github_token_scopes
+_token_scopes() { echo ""; }
+GITHUB_TOKEN=x run_check github-token-scopes; [ "$CHECK_STATE" = pass ] || fail "scopeless token is fine"
+_token_scopes() { echo "repo, workflow"; }
+GITHUB_TOKEN=x run_check github-token-scopes; [ "$CHECK_STATE" = fail ] || fail "scoped token must warn"
+
+# --- selinux ---
+# shellcheck disable=SC2329  # invoked indirectly via run_check -> _chk_selinux_enforcing
+_selinux_mode() { echo Enforcing; }; run_check selinux-enforcing; [ "$CHECK_STATE" = fail ] || fail "enforcing"
+_selinux_mode() { echo ""; };        run_check selinux-enforcing; [ "$CHECK_STATE" = na ]   || fail "absent = na"
+
+# --- home-volume-owner: rootless-podman posture only ---
+# shellcheck disable=SC2329  # invoked indirectly via run_check -> _chk_home_volume_owner
+runtime_is_rootless() { return 1; }
+run_check home-volume-owner
+[ "$CHECK_STATE" = na ] || fail "rootful runtimes never remap ids — must be na, got $CHECK_STATE"
+runtime_is_rootless() { return 0; }
+run_check home-volume-owner
+[ "$CHECK_STATE" = pass ] || fail "rootless posture should report pass, got $CHECK_STATE"
+_chk_home_volume_owner_fix | grep -q 'dev down' || fail "home-volume fix lost its remediation"
 
 echo "PASS: phase-0 and blocking probes"

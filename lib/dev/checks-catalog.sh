@@ -183,3 +183,85 @@ _chk_cgroup2_fix() {
   echo "Nested rootless engines require cgroup v2 (unified hierarchy)."
   echo "Boot with:  systemd.unified_cgroup_hierarchy=1"
 }
+
+# --- phase 1, advisory ----------------------------------------------------
+
+# The server's own component name, e.g. "Podman Engine" or "Engine".
+_engine_server_name() {
+  # shellcheck disable=SC2086  # intentional word-splitting of RUNTIME_ARGS
+  $RUNTIME ${RUNTIME_ARGS:-} version --format '{{.Server.Components}}' 2>/dev/null || true
+}
+_free_disk_gb() { df -Pg . 2>/dev/null | awk 'NR==2{print $4}' || echo 0; }
+_total_mem_gb() {
+  if [[ "$(_host_os)" == "Darwin" ]]; then
+    echo $(( $(sysctl -n hw.memsize 2>/dev/null || echo 0) / 1073741824 ))
+  else
+    awk '/MemTotal/{print int($2/1048576)}' /proc/meminfo 2>/dev/null || echo 0
+  fi
+}
+_token_scopes() {
+  # --max-time bounds this: an offline host or a firewall that silently
+  # drops (rather than rejects) the connection must not hang the probe.
+  curl -sS --max-time 5 -I -H "Authorization: bearer ${GITHUB_TOKEN}" \
+      https://api.github.com/ 2>/dev/null \
+    | tr -d '\r' | awk -F': ' 'tolower($1)=="x-oauth-scopes"{print $2}'
+}
+_selinux_mode() { command -v getenforce >/dev/null 2>&1 && getenforce 2>/dev/null || echo ""; }
+
+# A real Docker CLI can be pointed at a podman socket via DOCKER_HOST. dev
+# auto-switches to the podman CLI (runtime.sh), but the user should know why
+# their commands are being rewritten. Advisory, never blocking.
+_chk_engine_cli_match() {
+  _runtime_version | grep -qi podman && return 0     # CLI is podman: agrees
+  _engine_server_name | grep -qi podman && return 1  # CLI docker, engine podman
+  return 0
+}
+_chk_engine_cli_match_fix() {
+  echo "DOCKER_HOST=${DOCKER_HOST:-unset} points at a podman engine while the"
+  echo "CLI is Docker. dev drives podman directly, because --userns=keep-id is"
+  echo "podman-only and the Docker CLI rejects it."
+  echo "Pin it explicitly to silence this:  DEV_RUNTIME=podman"
+}
+
+_chk_home_volume_owner() {
+  runtime_is_rootless || return 2
+  return 0   # dev migrates ownership automatically; report the posture only
+}
+_chk_home_volume_owner_fix() {
+  echo "Under rootless podman dev re-chowns named volumes once via"
+  echo "'podman unshare chown'. If \$HOME or /mise is unwritable inside the"
+  echo "container, run 'dev down' then 'dev up' to trigger the migration."
+}
+
+_chk_selinux_enforcing() {
+  local m; m=$(_selinux_mode)
+  [[ -z "$m" ]] && return 2
+  [[ "$m" == "Enforcing" ]] && return 1
+  return 0
+}
+_chk_selinux_enforcing_fix() {
+  echo "SELinux is enforcing. dev passes --security-opt label=disable for"
+  echo "nested engines, so this is usually fine; if a nested mount is denied,"
+  echo "that is the first thing to check."
+}
+
+_chk_disk_space() { [[ "$(_free_disk_gb)" -lt 3 ]] && return 1; return 0; }
+_chk_disk_space_fix() { echo "Images and the mise cache need ~3 GB free; free some space."; }
+
+_chk_memory() { [[ "$(_total_mem_gb)" -lt 6 ]] && return 1; return 0; }
+_chk_memory_fix() {
+  echo "Nested engines (--dind/--pind) want ~6 GB; with less the kernel may"
+  echo "OOM-kill the build. Normal mode is fine on less."
+}
+
+_chk_github_token_scopes() {
+  [[ -z "${GITHUB_TOKEN:-}" ]] && return 2
+  [[ -n "$(_token_scopes)" ]] && return 1
+  return 0
+}
+_chk_github_token_scopes_fix() {
+  echo "GITHUB_TOKEN carries OAuth scopes. An agent inside the container can"
+  echo "read it, so those scopes are scopes you hand the agent. Its only job"
+  echo "here is rate-limit identification: use a fine-grained PAT with no"
+  echo "repository access and no permissions."
+}
