@@ -143,9 +143,12 @@ up to it yet.
   `/workspace`) against a host-side approved snapshot and prompts before
   merging any change into the firewall (`lib/dev/approval.sh`). Setting
   `DEV_ASSUME_YES=1` — intended for CI/non-interactive rebuild prompts —
-  also auto-approves allowlist changes without showing the diff. An agent
-  that can persuade a `DEV_ASSUME_YES=1` environment to restart the
-  container effectively gets to add its own allowlist entries unreviewed.
-  Don't set it globally in an environment where an agent controls the
-  workspace contents; set it only for the specific non-interactive
-  prompts it's meant for.
+  auto-approves allowlist changes without pausing for confirmation: the
+  diff is still printed to stderr unconditionally (`lib/dev/approval.sh`
+  runs `diff -u` before it even checks `DEV_ASSUME_YES`), but nothing
+  waits for a human to actually read it in a non-interactive context. An
+  agent that can persuade a `DEV_ASSUME_YES=1` environment to restart the
+  container effectively gets to add its own allowlist entries with no one
+  reviewing the printed diff. Don't set it globally in an environment
+  where an agent controls the workspace contents; set it only for the
+  specific non-interactive prompts it's meant for.
