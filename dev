@@ -90,6 +90,12 @@ DRY_RUN=false
 # print a command leave it false.
 # shellcheck disable=SC2034  # consumed by ensure_runtime_ready
 NEEDS_ENGINE=false
+# Set true by _prefer_podman_cli_for_podman_engine (lib/dev/runtime.sh) when
+# it rewrites $RUNTIME from docker to podman mid-detect_runtime. Read by
+# _chk_engine_cli_match (lib/dev/checks-catalog.sh), which otherwise only
+# ever sees the post-switch state and would wrongly report agreement.
+# shellcheck disable=SC2034  # consumed by _chk_engine_cli_match; set by _prefer_podman_cli_for_podman_engine
+ENGINE_CLI_SWITCHED=false
 # shellcheck disable=SC2034  # consumed by cmd_start in lib/dev/up.sh
 FORCE_BUILD=false
 # shellcheck disable=SC2034  # consumed by start_container in lib/dev/lifecycle.sh

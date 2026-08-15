@@ -97,6 +97,16 @@ _engine_server_name() { echo ""; }
 DEV_FAKE_RUNTIME_VERSION='Docker version 29.1.3' run_check engine-cli-match
 [ "$CHECK_STATE" = na ] || fail "engine unreachable must be na, not a false pass"
 
+# ENGINE_CLI_SWITCHED (set by _prefer_podman_cli_for_podman_engine once it
+# has already rewritten $RUNTIME to podman) must win regardless of what the
+# CLI/engine now report — that is the whole reason the flag exists: by the
+# time this probe runs post-switch, the CLI IS podman, so without the flag
+# the checks above would find nothing to disagree about and wrongly pass.
+ENGINE_CLI_SWITCHED=true
+DEV_FAKE_RUNTIME_VERSION='podman version 5.7.0' run_check engine-cli-match
+[ "$CHECK_STATE" = fail ] || fail "ENGINE_CLI_SWITCHED=true must fail even though the CLI now reports podman"
+unset ENGINE_CLI_SWITCHED
+
 # --- disk-space / memory: thresholds from docs/ci-testing.md ---
 # shellcheck disable=SC2329  # invoked indirectly via run_check -> _chk_disk_space
 _free_disk_gb() { echo 10; }; run_check disk-space; [ "$CHECK_STATE" = pass ] || fail "10 GB is enough"

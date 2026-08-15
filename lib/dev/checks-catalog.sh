@@ -222,6 +222,12 @@ _selinux_mode() { command -v getenforce >/dev/null 2>&1 && getenforce 2>/dev/nul
 # auto-switches to the podman CLI (runtime.sh), but the user should know why
 # their commands are being rewritten. Advisory, never blocking.
 _chk_engine_cli_match() {
+  # detect_runtime already rewired $RUNTIME to podman for exactly this
+  # mismatch (_prefer_podman_cli_for_podman_engine in lib/dev/runtime.sh).
+  # By the time this probe runs the CLI IS podman, so the checks below would
+  # find nothing left to disagree about and wrongly report 'pass'. The flag
+  # records what the CLI was before that rewrite.
+  [[ "${ENGINE_CLI_SWITCHED:-false}" == true ]] && return 1
   _runtime_version | grep -qi podman && return 0     # CLI is podman: agrees
   local server; server="$(_engine_server_name)"
   [[ -z "$server" ]] && return 2                      # engine unreachable: undetermined
@@ -229,10 +235,23 @@ _chk_engine_cli_match() {
   return 0
 }
 _chk_engine_cli_match_fix() {
-  echo "DOCKER_HOST=${DOCKER_HOST:-unset} points at a podman engine while the"
-  echo "CLI is Docker. dev drives podman directly, because --userns=keep-id is"
-  echo "podman-only and the Docker CLI rejects it."
-  echo "Pin it explicitly to silence this:  DEV_RUNTIME=podman"
+  if [[ "${ENGINE_CLI_SWITCHED:-false}" == true ]]; then
+    echo "dev noticed \$DOCKER_HOST (or the default socket) points at a podman"
+    echo "engine while the CLI you invoked was Docker, and switched this"
+    echo "session to the podman CLI: --userns=keep-id (needed to keep"
+    echo "/home/vscode and /mise writable under rootless podman) is"
+    echo "podman-only, and the Docker CLI rejects that flag outright. This is"
+    echo "working as intended: nothing to fix."
+    echo "Pin it explicitly to silence this note:  DEV_RUNTIME=podman"
+  else
+    echo "DOCKER_HOST=${DOCKER_HOST:-unset} points at a podman engine, but"
+    echo "DEV_RUNTIME=docker is pinning this session to the Docker CLI, so dev"
+    echo "cannot redirect it to podman the way it normally would. The Docker"
+    echo "CLI cannot pass --userns=keep-id, which rootless podman needs to keep"
+    echo "/home/vscode and /mise writable: this pin is unsafe."
+    echo "Drop the pin so dev can drive podman directly:"
+    echo "    unset DEV_RUNTIME     # or: DEV_RUNTIME=podman"
+  fi
 }
 
 _chk_selinux_enforcing() {

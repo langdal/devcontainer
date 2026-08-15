@@ -28,6 +28,65 @@ _doc_glyph() {
   fi
 }
 
+# First N.N.N-shaped token in a --version banner ("Docker version 29.1.3,
+# build ..." / "podman version 5.7.0"), or empty. Pipe through head so a
+# no-match (grep exit 1) never trips the caller's `set -e`.
+_doc_cli_ver() {
+  echo "$1" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1
+}
+
+# The first "{Name Version map[...]}" component of _engine_server_name's raw
+# Server.Components dump, e.g. "[{Podman Engine 5.7.0 map[...]}]" ->
+# "Podman Engine 5.7.0". Pure parameter expansion (no regex engine, no
+# subshell): safe even though later components (OCI Runtime) can contain
+# embedded newlines, because none of that text appears before the first
+# "map[" this strips down to.
+_doc_engine_ver() {
+  local raw="$1" head
+  [[ -z "$raw" ]] && return 0
+  head="${raw%%map[*}"
+  head="${head#\[\{}"
+  head="${head% }"
+  echo "$head"
+}
+
+# Host / Runtime / Workspace header. Only called once a runtime CLI is known
+# to exist and detect_runtime has run, so $RUNTIME is always set here.
+# Degrades gracefully: any field this cannot determine (no engine reachable,
+# version banner didn't parse) is simply omitted, never printed as "unknown".
+_doc_header() {
+  local os="$1"
+  printf 'Host      %s %s, %s\n' "$os" "$(uname -r 2>/dev/null)" "$(uname -m 2>/dev/null)"
+
+  local cli_ver engine_raw engine_ver line="$RUNTIME"
+  cli_ver="$(_doc_cli_ver "$(_runtime_version)")"
+  [[ -n "$cli_ver" ]] && line="$line (CLI $cli_ver)"
+  engine_raw="$(_engine_server_name)"
+  engine_ver="$(_doc_engine_ver "$engine_raw")"
+  [[ -n "$engine_ver" ]] && line="$line -> $engine_ver"
+  if runtime_is_rootless; then
+    line="$line, rootless"
+  fi
+  printf 'Runtime   %s\n' "$line"
+
+  local ws image_state=""
+  ws="$(basename "$(pwd)")"
+  # shellcheck disable=SC2086  # intentional word-splitting of RUNTIME_ARGS
+  if $RUNTIME $RUNTIME_ARGS info >/dev/null 2>&1; then
+    # shellcheck disable=SC2086  # intentional word-splitting of RUNTIME_ARGS
+    if $RUNTIME $RUNTIME_ARGS image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
+      image_state="built"
+    else
+      image_state="not built"
+    fi
+  fi
+  if [[ -n "$image_state" ]]; then
+    printf 'Workspace %s  (image: %s)\n' "$ws" "$image_state"
+  else
+    printf 'Workspace %s\n' "$ws"
+  fi
+}
+
 cmd_doctor() {
   NESTED=false
   while [[ $# -gt 0 ]]; do
@@ -40,7 +99,7 @@ cmd_doctor() {
   done
 
   # Phase 0 runs before a runtime is known.
-  local os id entry
+  local os
   os="$(_host_os)"
   local blocking=0 advisories=0 passed=0 na=0
 
@@ -69,27 +128,45 @@ cmd_doctor() {
     fi
   }
 
-  for id in $(checks_select 0 all "$os" ""); do
-    for entry in "${CHECKS[@]}"; do
-      [[ "$(check_field "$entry" 1)" == "$id" ]] || continue
-      _report_one "$id" "$(check_field "$entry" 4)" "$(check_field "$entry" 5)"
+  _doc_phase0() {
+    local id entry
+    for id in $(checks_select 0 all "$os" ""); do
+      for entry in "${CHECKS[@]}"; do
+        [[ "$(check_field "$entry" 1)" == "$id" ]] || continue
+        _report_one "$id" "$(check_field "$entry" 4)" "$(check_field "$entry" 5)"
+      done
     done
-  done
+  }
+
+  # The header (Host/Runtime/Workspace) needs detect_runtime, which cannot
+  # run until phase 0 has established that a runtime exists at all — but the
+  # header still belongs above every check result. Buffer phase 0's report
+  # lines into a plain file (a brace group, not a subshell, so _report_one's
+  # tally increments above land in THIS shell) and flush them after the
+  # header prints.
+  local phase0_buf
+  phase0_buf="$(mktemp 2>/dev/null)" || phase0_buf=""
+  if [[ -n "$phase0_buf" ]]; then
+    { _doc_phase0; } > "$phase0_buf"
+  else
+    _doc_phase0   # mktemp unavailable: fall back to printing immediately
+  fi
 
   # Only now is it safe to identify the runtime.
   if _chk_runtime_present; then
-    # shellcheck disable=SC2034  # consumed by ensure_runtime_ready; doctor never calls it, but detect_runtime reads the same global
-    NEEDS_ENGINE=false
     detect_runtime
-    printf 'Host      %s\n' "$os"
-    printf 'Runtime   %s\n' "$RUNTIME"
+    _doc_header "$os"
+    [[ -n "$phase0_buf" ]] && cat "$phase0_buf"
     for id in $(checks_select 1 all "$os" "$RUNTIME"); do
       for entry in "${CHECKS[@]}"; do
         [[ "$(check_field "$entry" 1)" == "$id" ]] || continue
         _report_one "$id" "$(check_field "$entry" 4)" "$(check_field "$entry" 5)"
       done
     done
+  else
+    [[ -n "$phase0_buf" ]] && cat "$phase0_buf"
   fi
+  [[ -n "$phase0_buf" ]] && rm -f "$phase0_buf"
 
   echo
   printf '%d blocking, %d advisory, %d passed, %d not applicable\n' \

@@ -71,6 +71,11 @@ _prefer_podman_cli_for_podman_engine() {
     echo "      podman CLI instead (required for --userns=keep-id)." >&2
     echo "      Set DEV_RUNTIME=docker to override." >&2
     RUNTIME=podman
+    # Record that we redirected the CLI, so `dev doctor` can report it. The
+    # check that looks at $RUNTIME afterwards would only ever see the
+    # post-switch state and conclude, wrongly, that nothing happened.
+    # shellcheck disable=SC2034  # consumed by _chk_engine_cli_match (lib/dev/checks-catalog.sh)
+    ENGINE_CLI_SWITCHED=true
     # podman does not read DOCKER_HOST — it reads CONTAINER_HOST. Carry the
     # socket over so we keep talking to the engine we just identified rather
     # than the invoking user's default rootless one, which can be entirely
