@@ -432,13 +432,12 @@ dev --help
 
 Highlights not covered above: `dev reset` removes this workspace's containers
 and prompts per named volume; `dev update` updates a git-checkout install
-to the latest tag; `dev scaffold` generates a `.devcontainer/` for
-VS Code (`dev scaffold --pind` emits a pind-flavored one).
+to the latest tag.
 
 Note: the old flag spellings (`--disable-firewall`, `--enable-firewall`,
-`--monitor`, `--monitor-fw`, `--reset`, `--self-update`,
-`--create-dev-container`) still work as deprecated aliases — they print a
-warning to stderr and route to the subcommand above.
+`--monitor`, `--monitor-fw`, `--reset`, `--self-update`) still work as
+deprecated aliases — they print a warning to stderr and route to the
+subcommand above.
 
 ### Environment variables
 

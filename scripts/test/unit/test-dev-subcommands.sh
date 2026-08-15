@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Unit: dev verb dispatch (up/exec/shell/down/status/fw/scaffold/reset). No
+# Unit: dev verb dispatch (up/exec/shell/down/status/fw/reset). No
 # containers are started; every check uses --dry-run, usage output, or an
 # error path that fires before any container/runtime work happens.
 set -u
@@ -39,26 +39,21 @@ echo "$out" | grep -q 'dev exec' || { echo "up -- true missing 'dev exec' guidan
 out=$(dev status); echo "$out" | grep -qi 'Nothing running' \
     || { echo "status did not report nothing running: $out"; exit 1; }
 
-# 6. `dev scaffold` writes .devcontainer/.
-(cd "$WORK" && "$ROOT/dev" scaffold >/dev/null 2>&1)
-[ -f "$WORK/.devcontainer/devcontainer.json" ] || { echo "scaffold did not write files"; exit 1; }
-rm -rf "$WORK/.devcontainer"
-
-# 7. `dev up --dry-run` (no subcommand-specific args): the shim falls through
+# 6. `dev up --dry-run` (no subcommand-specific args): the shim falls through
 #    to the start path and prints the run command without executing it.
 out=$(dev up --dry-run); echo "$out" | grep -qE 'run .*--rm .*--name' \
     || { echo "up --dry-run start path broken: $out"; exit 1; }
 
-# 8. Unknown verb is an error with guidance.
+# 7. Unknown verb is an error with guidance.
 if dev bogus >/dev/null 2>&1; then echo "unknown verb should fail"; exit 1; fi
 out=$(dev bogus 2>&1); echo "$out" | grep -qiE 'unknown|usage' || { echo "no guidance on bad verb: $out"; exit 1; }
 
-# 9. `reset` composes standalone; a start flag with it must be rejected —
+# 8. `reset` composes standalone; a start flag with it must be rejected —
 #    assert it fails AND does NOT silently start a container.
 if out=$(dev reset --dind 2>&1); then echo "reset --dind should be rejected: $out"; exit 1; fi
 echo "$out" | grep -qE 'run .*--rm' && { echo "reset --dind wrongly started a container: $out"; exit 1; }
 
-# 10. --help/--version stay position-independent through the `up` verb shim
+# 9. --help/--version stay position-independent through the `up` verb shim
 #     (not just as the bare first token), and the --dind/--maintenance mutex
 #     is enforced through the `up` verb path too.
 out=$(dev --help); echo "$out" | grep -qi 'usage' || { echo "help broke: $out"; exit 1; }

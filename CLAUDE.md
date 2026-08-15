@@ -70,17 +70,13 @@ docker build -t generic-devcontainer .
 ./dev dotfile add ~/.config/nvim
 ./dev dotfile rm ~/.config/nvim
 
-# Scaffold a self-contained .devcontainer/ for VS Code's "Reopen in Container".
-./dev scaffold
-
 # Update a git-checkout install to the latest released tag.
 ./dev update
 ```
 
 Note: the old flag spellings (`--disable-firewall`, `--enable-firewall`,
-`--monitor`, `--monitor-fw`, `--reset`, `--self-update`,
-`--create-dev-container`) still work as deprecated aliases — they warn to
-stderr and route to the subcommand above.
+`--monitor`, `--monitor-fw`, `--reset`, `--self-update`) still work as
+deprecated aliases — they warn to stderr and route to the subcommand above.
 
 Useful environment variables for `./dev`:
 

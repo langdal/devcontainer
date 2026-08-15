@@ -205,7 +205,6 @@ DEFAULT_PORTS=false
 MAINTENANCE=false
 DIND=false
 PIND=false
-FORCE=false
 # shellcheck disable=SC2034  # consumed by start_container in lib/dev/lifecycle.sh (Task 3)
 SHELL_ONLY=false
 EXTRA_PORTS=()
@@ -244,7 +243,6 @@ VERBS:
                   --host-port PORT Allow egress from the container to
                                    host.docker.internal:PORT (repeatable),
                                    without disabling the firewall.
-                  --force          Accepted for parser-surface parity only.
   shell           Attach another shell to the running container. Takes no
                   options; errors if nothing is running for this workspace.
   exec            Run one command inside (starts the container if needed):
@@ -291,12 +289,6 @@ VERBS:
                   [devcontainer-home-<dir>, or devcontainer-home under
                   DEV_SHARED_HOME=1], devcontainer-dind). Does not
                   rebuild the image. Takes no options.
-  scaffold        Generate a self-contained .devcontainer/ in the
-                  current directory (devcontainer.json + Dockerfile +
-                  support files). VS Code's "Reopen in Container" will
-                  build and attach to it.
-                  --dind           Scaffold the Docker-in-Docker variant.
-                  --force          Overwrite existing files.
   update          Update the dev script's git checkout to the latest
                   released tag (the same source used by install.sh).
                   Requires SCRIPT_DIR to be a clean git checkout. The
@@ -358,8 +350,6 @@ EXAMPLES:
   dev fw off                      # Toggle the firewall off on the running container
   dev fw on                       # Restore the firewall on the running container
   dev reset                       # Remove containers + prompt per volume
-  dev scaffold                    # Scaffold .devcontainer/ for VS Code
-  dev scaffold --dind             # Scaffold dind-mode .devcontainer/
   dev update                      # Update the checkout to the latest tag
   dev update --dry-run            # Show what update would do
   dev install                     # Install 'dev' onto your PATH
@@ -446,7 +436,7 @@ install_self() {
 # parser any more: it is reached only via the up/exec/shell verb arms below.
 subcmd=""
 case "${1:-}" in
-  up|shell|exec|down|status|fw|reset|scaffold|update|install|agent|dotfile|dotfiles) subcmd="$1"; shift ;;
+  up|shell|exec|down|status|fw|reset|update|install|agent|dotfile|dotfiles) subcmd="$1"; shift ;;
   --help)    usage; exit 0 ;;
   --version) echo "dev $(resolve_dev_version)"; exit 0 ;;
   '')
@@ -588,21 +578,6 @@ case "$subcmd" in
     status_workspace
     exit 0
     ;;
-  scaffold)
-    while [[ $# -gt 0 ]]; do
-      case $1 in
-        --dind) DIND=true; shift ;;
-        --pind) PIND=true; shift ;;
-        --force) FORCE=true; shift ;;
-        *)
-          echo "Error: dev scaffold: unknown option: $1" >&2
-          exit 1
-          ;;
-      esac
-    done
-    create_dev_container
-    exit 0
-    ;;
   up)
     # Verb shim (PR1): translate to the legacy start parser's spellings and
     # fall through to it. The real extraction into lib/dev/up.sh is PR4.
@@ -655,7 +630,7 @@ case "$subcmd" in
       log|drops|on)
         shift
         # These share a strict no-extra-args branch (consistent with
-        # reset/scaffold/update). `on` is an alias for `enable`: map it after
+        # reset/update). `on` is an alias for `enable`: map it after
         # validation so the dispatch below only needs to handle `enable`.
         if [[ $# -gt 0 ]]; then
           echo "Error: dev fw $fw_action does not take extra arguments: $*" >&2
@@ -832,14 +807,6 @@ while [[ $# -gt 0 ]]; do
       ;;
     --pind)
       PIND=true
-      shift
-      ;;
-    --force)
-      # shellcheck disable=SC2034  # accepted here for parser-surface parity with
-      # the pre-router flags; only actually consumed by create_dev_container in
-      # lib/dev/scaffold.sh (i.e. 'dev scaffold --force'), which this path never
-      # calls — a bare `dev --force` is (as before the router) a harmless no-op.
-      FORCE=true
       shift
       ;;
     --help)
