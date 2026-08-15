@@ -21,7 +21,7 @@ chmod +x "$STUB/curl"
 
 run_dev() {
     (cd "$WORKDIR" && env PATH="$STUB:$PATH" XDG_STATE_HOME="$STATE_HOME" "$@" \
-        "$ROOT/dev" --dry-run </dev/null 2>&1)
+        "$ROOT/dev" up --dry-run </dev/null 2>&1)
 }
 
 # 1. Scoped classic token -> warning naming the scopes.
