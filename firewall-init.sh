@@ -22,6 +22,50 @@ CONF=/etc/tinyproxy/tinyproxy.conf
 
 mkdir -p /etc/tinyproxy /var/log /run
 
+# Convert allowlist entries (stdin) to anchored tinyproxy ERE lines (stdout).
+# Fail closed on any entry that is not a bare hostname or a *.suffix wildcard:
+# a stray ERE metacharacter (|, *, +, (, ), [, ], {, }, ^, $, \, ?) would
+# otherwise be injected into a FilterExtended regex and could match every
+# host (e.g. "x|" -> "^x|$" -> matches all). See SECURITY.md C1.
+allowlist_to_filter() {
+    local entry tail escaped
+    while IFS= read -r entry; do
+        if [[ "$entry" == \*.* ]]; then
+            tail="${entry#*.}"
+            if [[ ! "$tail" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*$ ]]; then
+                echo "firewall-init: refusing malformed allowlist wildcard: $entry" >&2
+                return 1
+            fi
+            escaped="${tail//./\\.}"
+            printf '^[A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)*\\.%s$\n' "$escaped"
+        else
+            if [[ ! "$entry" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*$ ]]; then
+                echo "firewall-init: refusing malformed allowlist entry: $entry" >&2
+                return 1
+            fi
+            escaped="${entry//./\\.}"
+            printf '^%s$\n' "$escaped"
+        fi
+    done
+}
+
+# Always-on in every mode: link-local (169.254/16, fe80::/10) carries the
+# cloud metadata endpoint (169.254.169.254 on AWS/GCP/Azure/Oracle), a network
+# path to host credentials. Rules precede the chain policy, so this holds
+# whether OUTPUT policy is ACCEPT (open) or DROP (closed). If the container's
+# own resolver is link-local, exempt it so DNS still resolves.
+install_baseline_blocks() {
+    local ns
+    while read -r _ ns _; do
+        case "$ns" in
+          169.254.*) iptables  -A OUTPUT -d "$ns" -p udp --dport 53 -j ACCEPT
+                     iptables  -A OUTPUT -d "$ns" -p tcp --dport 53 -j ACCEPT ;;
+        esac
+    done < <(grep '^nameserver ' /etc/resolv.conf 2>/dev/null)
+    iptables  -A OUTPUT -d 169.254.0.0/16 -j DROP
+    ip6tables -w -A OUTPUT -d fe80::/10    -j DROP 2>/dev/null || true
+}
+
 # --- Merge base + project allowlist into a tinyproxy regex filter ---
 {
     cat "$BASE"
@@ -36,18 +80,7 @@ mkdir -p /etc/tinyproxy /var/log /run
   | tr -d ' \t'             \
   | awk 'NF'                \
   | sort -u                 \
-  | while IFS= read -r entry; do
-        # *.foo.com  -> ^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.foo\.com$
-        # foo.com    -> ^foo\.com$
-        if [[ "$entry" == \*.* ]]; then
-            tail="${entry#*.}"
-            escaped="${tail//./\\.}"
-            printf '^[A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)*\\.%s$\n' "$escaped"
-        else
-            escaped="${entry//./\\.}"
-            printf '^%s$\n' "$escaped"
-        fi
-    done > "$FILTER"
+  | allowlist_to_filter > "$FILTER" || exit 1
 
 if [ ! -s "$FILTER" ]; then
     echo "firewall-init: refusing to start with an empty filter" >&2
@@ -115,6 +148,11 @@ iptables -F OUTPUT
 iptables -P OUTPUT DROP
 iptables -P FORWARD DROP
 iptables -P INPUT ACCEPT   # docker port forwarding lives here
+
+# Baseline blocks first, so they occupy the earliest slots in the chain and
+# take precedence over every ACCEPT rule added below (including the
+# ESTABLISHED,RELATED short-circuit).
+install_baseline_blocks
 
 iptables -A OUTPUT -o lo -j ACCEPT
 iptables -A OUTPUT -p udp --dport 53 -j ACCEPT
