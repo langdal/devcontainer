@@ -2,21 +2,29 @@
 # scripts/verify-firewall.sh
 #
 # Run inside the dev container to probe firewall posture.
-# In normal mode: posture checks 1-7, 13, and 14 should pass.
+# In closed egress mode: posture checks 1-7, 13, and 14 should pass.
+# In open egress mode: checks 1, 3, 4, 13 are skipped (they assert closed-mode
+# behavior that open mode deliberately doesn't provide); 2, 5, and 14 should pass.
 # In maintenance mode: checks 1, 3, 4, 6, 7, 13 are skipped; 2, 5, and 14 should pass.
-# Check 14 (link-local/metadata block) runs unconditionally in both modes: the
+# Check 14 (link-local/metadata block) runs unconditionally in every mode: the
 # 169.254.0.0/16 / fe80::/10 DROP rule is always-on regardless of egress mode.
 set -u
 
 PASS=0; FAIL=0; SKIP=0
 maint=${DEVCONTAINER_MAINTENANCE:-}
+egress_open=""; [ "${DEVCONTAINER_EGRESS:-}" = open ] && egress_open=1
 
 run_check() {
     local name="$1"; shift
     local skip_in_maint="${SKIP_IN_MAINT:-0}"
+    local skip_in_open="${SKIP_IN_OPEN:-0}"
     local skip_unless_nested="${SKIP_UNLESS_NESTED:-0}"
     if [ -n "$maint" ] && [ "$skip_in_maint" = "1" ]; then
         printf '  SKIP   %s (maintenance mode)\n' "$name"
+        SKIP=$((SKIP+1)); return
+    fi
+    if [ -n "$egress_open" ] && [ "$skip_in_open" = "1" ]; then
+        printf '  SKIP   %s (open egress mode)\n' "$name"
         SKIP=$((SKIP+1)); return
     fi
     if [ "$skip_unless_nested" = "1" ] && ! nested_active; then
@@ -159,15 +167,15 @@ else
 fi
 echo
 
-SKIP_IN_MAINT=1 run_check "1. proxy reachable on 127.0.0.1:8888" proxy_listening
-                run_check "2. allowed host reachable"            allowed_host
-SKIP_IN_MAINT=1 run_check "3. blocked host returns 403"          blocked_host_returns_403
-SKIP_IN_MAINT=1 run_check "4. raw socket bypass blocked"         raw_socket_blocked
-                run_check "5. DNS works"                         dns_works
-SKIP_IN_MAINT=1 run_check "6. sudo blocked"                      sudo_blocked
-SKIP_IN_MAINT=1 run_check "7. iptables flush blocked"            iptables_flush_blocked
-SKIP_IN_MAINT=1 run_check "13. direct IPv6 bypass blocked"       ipv6_direct_blocked
-                run_check "14. link-local/metadata blocked"      link_local_blocked
+SKIP_IN_MAINT=1 SKIP_IN_OPEN=1 run_check "1. proxy reachable on 127.0.0.1:8888" proxy_listening
+                                run_check "2. allowed host reachable"            allowed_host
+SKIP_IN_MAINT=1 SKIP_IN_OPEN=1 run_check "3. blocked host returns 403"          blocked_host_returns_403
+SKIP_IN_MAINT=1 SKIP_IN_OPEN=1 run_check "4. raw socket bypass blocked"         raw_socket_blocked
+                                run_check "5. DNS works"                         dns_works
+SKIP_IN_MAINT=1                run_check "6. sudo blocked"                      sudo_blocked
+SKIP_IN_MAINT=1                run_check "7. iptables flush blocked"            iptables_flush_blocked
+SKIP_IN_MAINT=1 SKIP_IN_OPEN=1 run_check "13. direct IPv6 bypass blocked"       ipv6_direct_blocked
+                                run_check "14. link-local/metadata blocked"      link_local_blocked
 
 SKIP_UNLESS_NESTED=1 run_check "8. nested engine reachable"         dockerd_reachable
 SKIP_UNLESS_NESTED=1 run_check "9. nested engine rootless"          dockerd_rootless
