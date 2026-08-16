@@ -27,6 +27,22 @@ ensure_state_dir() {
   mkdir -p "$STATE_DIR"
 }
 
+# A freshly approved allowlist only reaches the *live* firewall on the next
+# firewall-init.sh run (fresh container start, or `dev fw close`) — it is
+# never hot-reloaded into an already-running tinyproxy/iptables. When
+# approve_project_allowlist runs, CONTAINER_NAME is already resolved for this
+# invocation (resolve_container_name_and_guard runs first in cmd_start), so a
+# running container at that point means this call is about to take the
+# attach path in attach_existing_container, not a fresh start — the one case
+# where approving here does NOT make the new entries live. Print a hint so
+# the user doesn't approve the diff and then wonder why the host is still
+# blocked.
+hint_restart_for_new_allowlist() {
+  if container_running "$CONTAINER_NAME" 2>/dev/null; then
+    echo "Approved. Restart for the new entries to take effect: 'dev down && dev up', or 'dev fw close' to re-init the filter in place." >&2
+  fi
+}
+
 # Approval gate for the workspace allowlist. The workspace file is
 # agent-writable, so it is never given to the firewall unreviewed: dev
 # diffs it against the approved snapshot in STATE_DIR and asks. Decline or
@@ -61,6 +77,7 @@ approve_project_allowlist() {
     echo "DEV_ASSUME_YES set — approving project allowlist." >&2
     cp "$src" "$snap"
     MOUNT_PROJECT_ALLOWLIST=true
+    hint_restart_for_new_allowlist
     return 0
   fi
   if [[ "$DRY_RUN" == true ]]; then
@@ -79,6 +96,7 @@ approve_project_allowlist() {
       cp "$src" "$snap"
       # shellcheck disable=SC2034  # consumed by append_volume_mounts in lib/dev/volumes.sh
       MOUNT_PROJECT_ALLOWLIST=true
+      hint_restart_for_new_allowlist
       ;;
     *)
       echo "Starting WITHOUT the project allowlist (approval declined)." >&2
