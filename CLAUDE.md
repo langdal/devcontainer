@@ -163,7 +163,26 @@ In addition there are two in-container probes:
   `docker -H "$DOCKER_HOST" ...` talk to the Docker-API compat socket
   directly via curl instead.
 
-There is no linter or CI pipeline.
+Linting is `bash scripts/lint.sh`: shellcheck over every tracked shell file,
+hadolint on the Dockerfile, actionlint on the workflows, the line budgets over
+`dev` and `lib/dev/*.sh`, and a bash 3.2 portability gate. That last one
+matters because macOS still ships bash 3.2 as `/bin/bash` and `dev` plus the
+test harness run there directly: `declare -A`, `mapfile`, `${var^}` and
+friends are rejected in host-side files. Container-side scripts
+(`entrypoint.sh`, `firewall-init.sh`, `dind-init.sh`, `scripts/verify-*.sh`)
+run against bash 5 and are exempt, as is `scripts/test/run-e2e.sh`, which is
+Linux-only by construction.
+
+lint.sh fetches pinned hadolint and actionlint binaries into
+`${XDG_CACHE_HOME:-~/.cache}/devcontainer-ci/bin` on first run — a network
+fetch and an executable written outside the repo, worth knowing before running
+it on a machine you care about. Every platform's checksum is pinned and
+verification fails closed: an unrecognised platform or a missing digest tool
+refuses rather than skipping.
+
+CI is `.github/workflows/ci.yml`. The `rootless-linux` and `macos-checks` jobs
+are still `continue-on-error: true` — they have never completed a green run,
+so they report but do not gate. Remove that flag once each has passed.
 
 ## Architecture
 
