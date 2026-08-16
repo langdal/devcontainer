@@ -1,5 +1,76 @@
 # Changelog
 
+## [2.0.0](https://github.com/langdal/devcontainer/compare/v1.7.0...v2.0.0) (2026-08-16)
+
+
+### ⚠ BREAKING CHANGES
+
+* **cli:** 'dev scaffold' and the generated .devcontainer/ flow are removed; use 'dev up' / editor-agnostic attach instead.
+* **cli:** 'dev' (bare) now prints usage; start with 'dev up', run commands with 'dev exec' -- CMD [ARGS...]. 'fw disable/enable' are 'fw off/on'; cold-start-with-firewall-open is 'dev up --open'. The old --flag aliases (--disable-firewall, --enable-firewall, --monitor, --monitor-fw, --reset, --self-update, --create-dev-container) are removed.
+
+### Features
+
+* **cli:** add advisory host checks ([3244eae](https://github.com/langdal/devcontainer/commit/3244eae6be690d5bda0855952457d9d369473975))
+* **cli:** add down and status verbs ([67fd36f](https://github.com/langdal/devcontainer/commit/67fd36f61a35f08f0a33b03356615f1eb8d75e51))
+* **cli:** add fw off/on actions and unknown-verb rejection ([589fecd](https://github.com/langdal/devcontainer/commit/589fecd875ae9afa0039baef045b74d51b3fee9b))
+* **cli:** add nested-mode host checks, migrating preflight probes ([1935d15](https://github.com/langdal/devcontainer/commit/1935d15a288cee7cbcb0d3f97fc8cf7869b4f605))
+* **cli:** add overridable host probes for the check registry ([7150b45](https://github.com/langdal/devcontainer/commit/7150b458defb73116681b424f042b101d70a0289))
+* **cli:** add phase-0 and blocking host checks ([7317a6f](https://github.com/langdal/devcontainer/commit/7317a6faf146d0f5e39b0d85336cf251833d0951))
+* **cli:** add shell verb (attach-only, never creates) ([07cbb3c](https://github.com/langdal/devcontainer/commit/07cbb3c34847f15952a01747019dac393674a0c0))
+* **cli:** add the dev doctor verb ([c049524](https://github.com/langdal/devcontainer/commit/c049524fbee5314e2f92638916ae8cd50f640a2f))
+* **cli:** add the host-check registry, filter and runner ([7bbdfe1](https://github.com/langdal/devcontainer/commit/7bbdfe1b55f666e324ff1539b7013bf70defb044))
+* **cli:** add up/exec verbs as shims over the start path ([04fb375](https://github.com/langdal/devcontainer/commit/04fb37510b4faff2067b1d45b9bba3687dcb34a3))
+* **cli:** hint restart after allowlist approval on a running container (I7) ([d448a5d](https://github.com/langdal/devcontainer/commit/d448a5d8800e551bbf47b24ca6b25efd00dce452))
+* **cli:** open egress by default; --closed opt-in, DEV_EGRESS default, fw open/close ([f7a53e1](https://github.com/langdal/devcontainer/commit/f7a53e1ed59d69c84c3fe535ed53a3a60737e4ef))
+* **cli:** remove deprecated flag aliases and legacy start spellings ([f689f79](https://github.com/langdal/devcontainer/commit/f689f790ee053700a6bc75c23111b312d285bce2))
+* **cli:** remove scaffold subcommand ([b150652](https://github.com/langdal/devcontainer/commit/b15065218a739ac8c59c27d11d54f38d380a334d))
+* **dev:** scope-guard ambient GITHUB_TOKEN, add DEV_GITHUB_TOKEN opt-in ([40f818f](https://github.com/langdal/devcontainer/commit/40f818f609b4f927fbcb4c810c0e0702aa5aa12a))
+* **dev:** scope-guard ambient GITHUB_TOKEN, add DEV_GITHUB_TOKEN opt-in ([6058d5f](https://github.com/langdal/devcontainer/commit/6058d5f3ecd205cc3a7725ab00131c38fceae211))
+* **firewall:** extend default allowlist to cover mainstream dev workflows ([e7d4720](https://github.com/langdal/devcontainer/commit/e7d47206096fbff1325465b1d6b17a13616ee2a6))
+* **firewall:** open/closed egress modes; open keeps link-local blocked and connections logged ([406d058](https://github.com/langdal/devcontainer/commit/406d058928a719816e75ea1135b2de4fae341c73))
+
+
+### Bug Fixes
+
+* **ci:** repair the three jobs that failed on their first real run ([bc88c49](https://github.com/langdal/devcontainer/commit/bc88c49c224b767718d0ad4b5a4ab045d613faf7))
+* **cli:** clear the small findings left over from both increments ([531a13f](https://github.com/langdal/devcontainer/commit/531a13ff8cb87059fc8945d3a49fc367444032f7))
+* **cli:** close last two fail-open probes and fix dry-run podman-machine block ([323f809](https://github.com/langdal/devcontainer/commit/323f809508bea758ca11ea59af8b1fcabc0e0133))
+* **cli:** close whole-branch review findings in the verb surface ([b46812f](https://github.com/langdal/devcontainer/commit/b46812f33f7f8c7ad01a3ee7853e016aae917b18))
+* **cli:** correct disk-space/engine-cli-match probes, drop home-volume-owner ([223eead](https://github.com/langdal/devcontainer/commit/223eead0defd7a9b745f84448e3ef2861106b75d))
+* **cli:** detect podman engine behind a docker CLI, not from the binary ([18fd483](https://github.com/langdal/devcontainer/commit/18fd483de3407f5e5619f8a740a00a3686e2365d))
+* **cli:** gate the podman-machine check on operations that need an engine ([f04cc55](https://github.com/langdal/devcontainer/commit/f04cc55eb787672eddb0c1cfdc4a61c9e00c3fa9))
+* **cli:** gate the two ensure_runtime_ready call sites the brief missed ([1b8a946](https://github.com/langdal/devcontainer/commit/1b8a94656eef381f50e672f9d538cf550b3fa80c))
+* **cli:** guard status probe against vanished containers and probe failure ([f72fb68](https://github.com/langdal/devcontainer/commit/f72fb68c1740458352035f845b354c3e8c5b7379))
+* **cli:** keep dev doctor reporting on hosts detect_runtime refuses ([f71eb33](https://github.com/langdal/devcontainer/commit/f71eb3388f7839ef47e1446d34b6c8c9c6e47f45))
+* **cli:** keep the DEV_RUNTIME diagnostic's established wording ([daeccfc](https://github.com/langdal/devcontainer/commit/daeccfc5103b23b8cc475033edc62a220cbacc0f))
+* **cli:** make doctor's header and CLI-mismatch check report reality ([d3d37ae](https://github.com/langdal/devcontainer/commit/d3d37ae6bc9771cb8cfb0290664ae0c671dbf77b))
+* **cli:** only inject firewall proxy env in closed mode (attach + nested engines) ([87e6b8d](https://github.com/langdal/devcontainer/commit/87e6b8d814ef0f427f6abd9be48d4593d9214a57))
+* **cli:** pin runtime version in hyphen-mapping test guard ([58093af](https://github.com/langdal/devcontainer/commit/58093afdd5fac18de38d09daa9ebad0d5e496bcd))
+* **cli:** replace buildx's block-if-building severity with block-in-doctor ([f173eae](https://github.com/langdal/devcontainer/commit/f173eaea0a9a0c0e140fddd3345ef8e54f5b2367))
+* **cli:** restore preflight remediation text and widen subid-grant scope ([c180139](https://github.com/langdal/devcontainer/commit/c1801390888785a377d330a0f2a0b2e87ce896f2))
+* **cli:** stop run_check aborting dev under set -e on a failing probe ([e798b46](https://github.com/langdal/devcontainer/commit/e798b46f216365b251a8b7e52d71f9b53fee575b))
+* **cli:** two defects found by the first real macOS run ([56f8273](https://github.com/langdal/devcontainer/commit/56f8273849d5c7dabb2d8e79e1494c099ee50219))
+* **cli:** verb-spelling error messages and exec empty-command guard ([5e0a1a6](https://github.com/langdal/devcontainer/commit/5e0a1a6f1fd94a947232a44c184e813c9e4fc3e8))
+* **entrypoint:** proxy Maven https downloads, explain the maintenance gap ([8bb5117](https://github.com/langdal/devcontainer/commit/8bb5117474ba1ee99118a4d60a0c2e78ac8de9a8))
+* **firewall:** capture open-mode DNS via NFLOG so fw log works without CAP_NET_RAW ([8f24460](https://github.com/langdal/devcontainer/commit/8f24460c3d5a2f28d3de6ad8861eaee32ff6b659))
+* **firewall:** close IPv6 egress bypass and harden startup portability ([ba3d2d4](https://github.com/langdal/devcontainer/commit/ba3d2d4b83441e22371a5d3d79a3b7658bcef861))
+* **firewall:** make fw close re-confine open containers; harden metadata block, DNS, JVM-seed, and toggle tests ([134f6c6](https://github.com/langdal/devcontainer/commit/134f6c61fb43326c0307debc190a6995156e48f2))
+* **firewall:** validate allowlist entries before building the filter (C1) ([c8b4cd5](https://github.com/langdal/devcontainer/commit/c8b4cd5cd9debe7ff06f5d3dc635186859d87ac7))
+* **lint:** correct hadolint asset URL and close the rule's blind spot ([2a47b25](https://github.com/langdal/devcontainer/commit/2a47b253a3c698cd700b86984e9af7d14bb281bf))
+* **lint:** silence SC2034 for shell.sh's cross-file globals ([08daf9e](https://github.com/langdal/devcontainer/commit/08daf9e4b14dec3afd94bc29046066571cc08c4c))
+* **lint:** verify tool downloads on every platform, fail closed ([7f35bd1](https://github.com/langdal/devcontainer/commit/7f35bd1bea8bc9c45bbaf97ed9ac84f05795c457))
+* **test,docs:** make scenario 52 DNS check assert, correct SECURITY.md rule order ([7e2a4e0](https://github.com/langdal/devcontainer/commit/7e2a4e03868bd49fc2e7c73840ba6f0faa206f51))
+* **test:** close the final-review findings ([e638fd2](https://github.com/langdal/devcontainer/commit/e638fd209adb471a0f5722de1ca8c76c0e478b44))
+* **test:** make runtime tests platform-independent; record probe findings ([94e7618](https://github.com/langdal/devcontainer/commit/94e7618df0a51f699cd8347a0c7c657eaaf482a8))
+* **test:** make the harness run on macOS's bash 3.2 ([c581387](https://github.com/langdal/devcontainer/commit/c58138762a9807f40ab8da1a63a9dd7eb19509b5))
+* **test:** migrate scenario 21 fw off/on to open/close (matrix-caught) ([c16fb67](https://github.com/langdal/devcontainer/commit/c16fb67ee12f2caf7fc1696b2b6e1633b79429c1))
+* **test:** nested-egress probes assert the inner result, not outer-exec failure (C4) ([31b761d](https://github.com/langdal/devcontainer/commit/31b761d35dbc3322eae063e127af04bc1e4bf626))
+* **test:** pin closed-mode scenarios to --closed; make fw log/drops work headless ([71ff9de](https://github.com/langdal/devcontainer/commit/71ff9debe3f7a51dc7d5d148187eaa76f3b1658b))
+* **test:** pin scenario 26 to closed egress mode ([3b1190b](https://github.com/langdal/devcontainer/commit/3b1190b40dcd4b03f06e9f135ebbcd01e0c5ead6))
+* **test:** use $RUNTIME instead of hardcoded docker in host-side scenario probes ([378402c](https://github.com/langdal/devcontainer/commit/378402c85ca8cedc3b07121f445476cccd70fd38))
+* **update:** ignore prerelease tags in dev update, matching install.sh ([eee47ec](https://github.com/langdal/devcontainer/commit/eee47ecf301a7e2c4c328778b749ac2cd54540a4))
+* **volumes:** keep-id migrate devcontainer-pind like devcontainer-dind (I1) ([f51e58e](https://github.com/langdal/devcontainer/commit/f51e58e3016942ee5b2a1094ff3175aa30a07f00))
+
 ## [1.7.0](https://github.com/langdal/devcontainer/compare/v1.6.2...v1.7.0) (2026-07-08)
 
 
