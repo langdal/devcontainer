@@ -118,19 +118,22 @@ filters on it:
 ```
 
 `DEV_TEST_PRIVILEGE=user` runs only the `user` subset and requires no sudo;
-unset means "run everything". 9 of the 40 scenarios are `root`.
+unset means "run everything". 9 of the 41 scenarios are `root`.
 
-Two cells, two baselines on the dev host, both measured with `GITHUB_TOKEN`
-set — without it the numbers are not reproducible, for the reason below.
-Compare the failure SET, not just the tally: a run can hit the same count
-with a different set.
+Two cells on the dev host, both measured with `GITHUB_TOKEN` set — without it
+the numbers are not reproducible, for the reason below. Treat any tally as
+**indicative only, not a baseline to compare against** (see
+`docs/ci-testing.md`, which is authoritative): pass/fail/skip counts shift
+with host state (`kernel.apparmor_restrict_unprivileged_userns`, subuid/subgid
+grants) that vary between machines and over time. Compare the failure SET,
+not just the tally: a run can hit the same count with a different set.
 
-| Cell | Command | Baseline |
-| --- | --- | --- |
-| rootful docker | `sudo --preserve-env=GITHUB_TOKEN bash scripts/test/run-all.sh` | 24 passed / 10 failed / 6 skipped |
-| rootless podman | `bash scripts/test/run-rootless.sh` | 17 passed / 10 failed / 4 skipped |
+| Cell | Command |
+| --- | --- |
+| rootful docker | `sudo --preserve-env=GITHUB_TOKEN bash scripts/test/run-all.sh` |
+| rootless podman | `bash scripts/test/run-rootless.sh` |
 
-Re-measured 2026-08-16. Every failure in both is environmental, not a defect,
+As last re-measured 2026-08-16, every failure in both was environmental, not a defect,
 and it is now the same story in each cell: exactly 10 failures, all tracing to
 `kernel.apparmor_restrict_unprivileged_userns=1` on this host, which blocks
 the rootless nested engines that every `--dind`/`--pind` scenario needs.

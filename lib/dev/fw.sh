@@ -105,8 +105,12 @@ fw_drops() {
 # into firewall-init.sh).
 fw_close() {
   require_workspace_firewall_container "fw close"
+  # Override the container's own DEVCONTAINER_EGRESS (which may be "open" on
+  # a container started via --open/DEV_EGRESS=open): without this, exec
+  # inherits that env and firewall-init.sh re-runs its OPEN branch, silently
+  # leaving OUTPUT ACCEPT and no tinyproxy while still printing "ready".
   # shellcheck disable=SC2086  # intentional word-splitting of $MANAGED_RUNTIME_ARGS
-  exec $RUNTIME $MANAGED_RUNTIME_ARGS exec --user root "$MANAGED_NAME" /usr/local/sbin/firewall-init.sh
+  exec $RUNTIME $MANAGED_RUNTIME_ARGS exec --user root -e DEVCONTAINER_EGRESS=closed "$MANAGED_NAME" /usr/local/sbin/firewall-init.sh
 }
 
 # fw_open_running_only: toggle a running firewall container's iptables open in

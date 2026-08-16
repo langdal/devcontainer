@@ -228,6 +228,10 @@ if ip6tables -w -F OUTPUT 2>/dev/null; then
     # policy — so it holds whether that policy ends up ACCEPT (open) or DROP
     # (closed).
     ip6tables -w -A OUTPUT -d fe80::/10 -j DROP 2>/dev/null || true
+    # AWS's IPv6 IMDS endpoint lives outside fe80::/10 (a ULA, not
+    # link-local) so the rule above does not cover it. Block it here too,
+    # present in both open and closed mode.
+    ip6tables -w -A OUTPUT -d fd00:ec2::254/128 -j DROP 2>/dev/null || true
 
     if [ "${DEVCONTAINER_EGRESS:-closed}" = "open" ]; then
         ip6tables -w -P OUTPUT ACCEPT

@@ -117,6 +117,32 @@ if ! expect_grep "$fw_out" 'example\.com'; then
     F_REASON="container egress=open confirms 'dev fw log' selected the tcpdump (open-mode) branch, but tcpdump produced no example.com line within the timeout -- consistent with this sandbox's nested-podman netlink/NFLOG limits (a documented host limitation, not a code defect), not a fresh assertion failure. fw_out=[$fw_out]"
 fi
 
+echo "assertion (f): $F_REASON"
+
+# ---------- (g) fw close/open toggle actually flips the kernel policy ----------
+# Regression guard for C-1: `dev fw close` on a container that was started
+# with DEVCONTAINER_EGRESS=open must not silently inherit that env into the
+# exec and re-run firewall-init.sh's OPEN branch. Reuses the still-running
+# default-egress container from (f). Assert the OUTPUT policy directly
+# (evidence), not the "ready" log line, which both branches print.
+if ! out=$(./dev fw close 2>&1); then
+    log_fail "(g) 'dev fw close' failed on a running open-egress container: $out"
+    exit 1
+fi
+pol=$("$RUNTIME" exec --user root "$N" iptables -S OUTPUT 2>&1 | head -1)
+expect_grep "$pol" "OUTPUT DROP" \
+    || { log_fail "(g) 'dev fw close' did not set OUTPUT policy to DROP: $pol"; exit 1; }
+
+if ! out=$(./dev fw open 2>&1); then
+    log_fail "(g) 'dev fw open' failed after fw close: $out"
+    exit 1
+fi
+pol=$("$RUNTIME" exec --user root "$N" iptables -S OUTPUT 2>&1 | head -1)
+expect_grep "$pol" "OUTPUT ACCEPT" \
+    || { log_fail "(g) 'dev fw open' did not restore OUTPUT policy to ACCEPT: $pol"; exit 1; }
+
+echo "assertion (g): 'dev fw close'/'dev fw open' toggle the kernel OUTPUT policy (DROP/ACCEPT) on a running container"
+
 "$RUNTIME" stop "$N" >/dev/null 2>&1
 "$RUNTIME" rm -f "$N" >/dev/null 2>&1
 
@@ -131,8 +157,8 @@ echo "assertion (e-closed): link-local (169.254.169.254) blocked under closed eg
 ./dev down >/dev/null 2>&1
 
 if [[ "$F_RESULT" == pass ]]; then
-    log_pass "egress open/closed contract holds: precedence (a-d), link-local DROP in both modes (e), open-mode fw log observability (f): $F_REASON"
+    log_pass "egress open/closed contract holds: precedence (a-d), link-local DROP in both modes (e), open-mode fw log observability (f), fw close/open toggle (g): $F_REASON"
 else
-    log_skip "egress open/closed contract holds for (a)-(e); (f) degraded gracefully: $F_REASON"
+    log_skip "egress open/closed contract holds for (a)-(e) and (g); (f) degraded gracefully: $F_REASON"
 fi
 exit 0

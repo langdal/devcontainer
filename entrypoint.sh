@@ -34,6 +34,28 @@ if [ "${DEVCONTAINER_EGRESS:-closed}" = closed ]; then
     fi
 fi
 
+# Warn (never rewrite) if a stale closed-mode JVM proxy seed is sitting in the
+# PERSISTENT per-workspace home volume while the current mode runs no
+# tinyproxy for it to reach. Shared by maintenance mode and open-egress mode
+# below — both silently break Maven/Gradle downloads the same way
+# (connection-refused to 127.0.0.1:8888) if a prior closed-mode run seeded
+# ~/.m2/settings.xml or ~/.gradle/gradle.properties (see the seeding further
+# down, ~line 172). Don't rewrite the files here: the seeding contract is
+# never to overwrite, and this volume outlives the container; make the
+# failure self-explanatory instead.
+warn_stale_jvm_proxy_seed() {
+    _jvm_mode_label="$1"
+    for _jvm_cfg in /home/vscode/.m2/settings.xml /home/vscode/.gradle/gradle.properties; do
+        if [ -f "$_jvm_cfg" ] && grep -q '8888' "$_jvm_cfg" 2>/dev/null; then
+            echo "Note: $_jvm_cfg points JVM downloads at the firewall proxy" >&2
+            echo "      (127.0.0.1:8888), which does not run in $_jvm_mode_label mode." >&2
+            echo "      Bypass it for this session, e.g.  mvn -s /dev/null ...  or" >&2
+            echo "      gradle -Dhttp.proxyHost= -Dhttps.proxyHost= ..." >&2
+        fi
+    done
+    unset _jvm_cfg _jvm_mode_label
+}
+
 # --- Firewall (skipped in maintenance mode; self-branches on egress mode) ---
 if [ -z "${DEVCONTAINER_MAINTENANCE:-}" ]; then
     if ! /usr/local/sbin/firewall-init.sh; then
@@ -54,6 +76,10 @@ export HTTP_PROXY=http://127.0.0.1:8888
 export NO_PROXY=localhost,127.0.0.1,host.docker.internal
 EOF
         chmod 644 /etc/profile.d/proxy.sh
+    else
+        # Open mode: same stale-seed hazard as maintenance mode (see
+        # warn_stale_jvm_proxy_seed above) — warn only, never overwrite.
+        warn_stale_jvm_proxy_seed "open"
     fi
 fi
 
@@ -77,18 +103,8 @@ EOF
     # per-workspace home volume, which this container mounts too. Maintenance
     # mode runs no tinyproxy, so those files point every JVM download at a
     # 127.0.0.1:8888 that nothing is listening on — connection-refused in
-    # exactly the mode meant to have unrestricted egress. Don't rewrite them
-    # (the seeding contract is never to overwrite, and this volume outlives the
-    # container); make the failure self-explanatory instead.
-    for _jvm_cfg in /home/vscode/.m2/settings.xml /home/vscode/.gradle/gradle.properties; do
-        if [ -f "$_jvm_cfg" ] && grep -q '8888' "$_jvm_cfg" 2>/dev/null; then
-            echo "Note: $_jvm_cfg points JVM downloads at the firewall proxy" >&2
-            echo "      (127.0.0.1:8888), which does not run in maintenance mode." >&2
-            echo "      Bypass it for this session, e.g.  mvn -s /dev/null ...  or" >&2
-            echo "      gradle -Dhttp.proxyHost= -Dhttps.proxyHost= ..." >&2
-        fi
-    done
-    unset _jvm_cfg
+    # exactly the mode meant to have unrestricted egress.
+    warn_stale_jvm_proxy_seed "maintenance"
 fi
 
 # --- DinD mode: launch rootless dockerd ---

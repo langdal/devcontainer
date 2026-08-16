@@ -49,6 +49,12 @@ if ! out=$(./dev fw close 2>&1); then
 fi
 expect_grep "$out" "firewall-init: ready" \
     || { log_fail "fw close on normal did not invoke firewall-init.sh: $out"; exit 1; }
+# Evidence, not just the log line: the "ready" message printed even when
+# fw_close's OPEN-branch regression (C-1) left OUTPUT ACCEPT, so confirm the
+# kernel policy actually flipped to DROP.
+pol=$("$RUNTIME" exec --user root "$N" iptables -S OUTPUT 2>&1 | head -1)
+expect_grep "$pol" "OUTPUT DROP" \
+    || { log_fail "fw close on normal did not set OUTPUT policy to DROP: $pol"; exit 1; }
 "$RUNTIME" stop "$N" 2>/dev/null; "$RUNTIME" rm -f "$N" 2>/dev/null
 
 # 1. With only the dind container running, `fw close` and
@@ -74,6 +80,11 @@ if ! out=$(./dev fw close 2>&1); then
 fi
 expect_grep "$out" "firewall-init: ready" \
     || { log_fail "fw close on dind did not invoke firewall-init.sh: $out"; exit 1; }
+# Same evidence check as step 0 (environmental on hosts where dind itself
+# can't come up, since it depends on the same apparmor/subuid preflights).
+pol=$("$RUNTIME" exec --user root "$D" iptables -S OUTPUT 2>&1 | head -1)
+expect_grep "$pol" "OUTPUT DROP" \
+    || { log_fail "fw close on dind did not set OUTPUT policy to DROP: $pol"; exit 1; }
 
 # `fw log` exec's `tail -F`. Bound it with timeout, redirect stdin from
 # /dev/null so the test passes in non-TTY runs (the existing -it flag
@@ -137,6 +148,14 @@ if ! out=$(./dev fw close 2>&1); then
 fi
 expect_grep "$out" "firewall-init: ready" \
     || { log_fail "fw close did not invoke firewall-init.sh: $out"; exit 1; }
+# This is the C-1 regression check: a container that started with
+# DEVCONTAINER_EGRESS=open (via exec --open) is exactly the case where fw
+# close previously inherited that env and silently stayed in the OPEN
+# branch. Confirm OUTPUT actually flipped to DROP, not just that "ready"
+# printed.
+pol=$("$RUNTIME" exec --user root "$N" iptables -S OUTPUT 2>&1 | head -1)
+expect_grep "$pol" "OUTPUT DROP" \
+    || { log_fail "fw close on a fresh fw-open container did not set OUTPUT policy to DROP: $pol"; exit 1; }
 "$RUNTIME" stop "$N" 2>/dev/null; "$RUNTIME" rm -f "$N" 2>/dev/null
 
 log_pass "monitor + firewall management commands target running normal-or-dind container"
