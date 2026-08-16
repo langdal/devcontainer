@@ -117,23 +117,35 @@ filters on it:
 `DEV_TEST_PRIVILEGE=user` runs only the `user` subset and requires no sudo;
 unset means "run everything". 9 of the 40 scenarios are `root`.
 
-Two cells, two baselines on the dev host. Compare the failure SET, not just
-the tally — a run can hit the same count with a different set:
+Two cells, two baselines on the dev host, both measured with `GITHUB_TOKEN`
+set — without it the numbers are not reproducible, for the reason below.
+Compare the failure SET, not just the tally: a run can hit the same count
+with a different set.
 
 | Cell | Command | Baseline |
 | --- | --- | --- |
-| rootful docker | `sudo bash scripts/test/run-all.sh` | 24 passed / 10 failed / 6 skipped |
-| rootless podman | `bash scripts/test/run-rootless.sh` | 13 passed / 14 failed / 4 skipped |
+| rootful docker | `sudo --preserve-env=GITHUB_TOKEN bash scripts/test/run-all.sh` | 24 passed / 10 failed / 6 skipped |
+| rootless podman | `bash scripts/test/run-rootless.sh` | 17 passed / 10 failed / 4 skipped |
 
-Every failure in both is environmental, not a defect:
+Re-measured 2026-08-16. Every failure in both is environmental, not a defect,
+and it is now the same story in each cell: exactly 10 failures, all tracing to
+`kernel.apparmor_restrict_unprivileged_userns=1` on this host, which blocks
+the rootless nested engines that every `--dind`/`--pind` scenario needs.
+Host-specific, not inherent to unprivileged operation. The rootless cell's
+failure set adds `16-rootless-subid-preflight` and drops one the rootful cell
+skips, so compare sets rather than assuming the two 10s are identical.
 
-- 10 in each trace to `kernel.apparmor_restrict_unprivileged_userns=1` on this
-  host, which blocks the rootless nested engines every `--dind`/`--pind`
-  scenario needs. Host-specific, not inherent to unprivileged operation — both
-  cells hit the same family on the same machine.
-- The rootless cell's extra 4 (`41`-`44`) are the GitHub anonymous API rate
-  limit during image builds. Set `GITHUB_TOKEN` to avoid them; without it,
-  release-metadata lookups share a 60/hr limit per IP.
+**Set `GITHUB_TOKEN` before every run.** The 60/hr anonymous limit is per IP
+and shared with everything else on the host, so it is usually already spent by
+the time a suite reaches the image-building scenarios. It does not fail
+loudly: the affected scenarios just fail, with no rate-limit text anywhere in
+the log, which reads as a code regression. Confirmed on 2026-08-16 — a run
+with the quota exhausted produced 23/11/6, and the single extra failure
+(`46-version-mismatch`) passed on its own the moment a token was present. A
+scopeless or fine-grained PAT is enough; it raises the limit to 5000/hr and
+grants nothing. Under `sudo`, pass it with
+`sudo --preserve-env=GITHUB_TOKEN` rather than on the command line, so it
+does not appear in `ps`.
 
 Comparing two runs requires capturing each to its own file —
 `scripts/test/last-run.log` is shared and overwritten per run — and requires
