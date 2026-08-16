@@ -159,7 +159,7 @@ _total_mem_gb() {
 # an offline host or a firewall that silently drops (rather than rejects) the
 # connection must not hang the probe.
 # The single source of truth for "what scopes does GITHUB_TOKEN carry".
-# Consumed by _chk_github_token_scopes (dev doctor) AND check_github_token
+# Consumed by _chk_github_token_scopes (dev doctor) AND resolve_github_token
 # (lib/dev/approval.sh, the warning dev up prints). Those were two separate
 # implementations that had already drifted: the registry copy lacked the
 # fine-grained-PAT short-circuit and the per-token cache, so it made a network

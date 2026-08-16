@@ -67,4 +67,42 @@ echo "$out" | grep -q 'OAuth scopes' \
 n=$(find "$STATE_HOME" -name 'github-token-*' | wc -l)
 [ "$n" -eq 2 ] || { echo "failure verdict was cached ($n cache files, expected 2)"; exit 1; }
 
+# --- injection decisions ----------------------------------------------------
+# The value-less `-e GITHUB_TOKEN` in the printed run command is the signal
+# that the token was injected; its VALUE never appears (kept out of argv).
+
+# 6. Scoped classic token, --dry-run + non-TTY -> declined, NOT injected.
+cat > "$STUB/curl" <<'EOF'
+#!/bin/bash
+printf 'HTTP/2 200\r\nx-oauth-scopes: repo, workflow\r\n\r\n'
+EOF
+chmod +x "$STUB/curl"
+out=$(run_dev GITHUB_TOKEN=ghp_scoped_a)
+echo "$out" | grep -q 'continuing WITHOUT it for --dry-run' \
+    || { echo "scoped token under --dry-run should decline: $out"; exit 1; }
+echo "$out" | grep -q -- '-e GITHUB_TOKEN' \
+    && { echo "declined scoped token must NOT be injected: $out"; exit 1; }
+
+# 7. Same scoped token + DEV_ASSUME_YES=1 -> auto-approved and injected.
+out=$(run_dev GITHUB_TOKEN=ghp_scoped_b DEV_ASSUME_YES=1)
+echo "$out" | grep -q 'DEV_ASSUME_YES set' \
+    || { echo "DEV_ASSUME_YES should auto-approve the scoped token: $out"; exit 1; }
+echo "$out" | grep -q -- '-e GITHUB_TOKEN' \
+    || { echo "auto-approved scoped token must be injected: $out"; exit 1; }
+
+# 8. DEV_GITHUB_TOKEN -> injected explicitly, unprobed (curl not called), even
+#    though its value looks like a scoped classic token.
+rm -f "$STUB/calls"
+out=$(run_dev DEV_GITHUB_TOKEN=ghp_explicit GITHUB_TOKEN=)
+echo "$out" | grep -q 'Injecting DEV_GITHUB_TOKEN' \
+    || { echo "DEV_GITHUB_TOKEN should be injected explicitly: $out"; exit 1; }
+echo "$out" | grep -q -- '-e GITHUB_TOKEN' \
+    || { echo "DEV_GITHUB_TOKEN must reach the container as -e GITHUB_TOKEN: $out"; exit 1; }
+[ ! -f "$STUB/calls" ] || { echo "DEV_GITHUB_TOKEN must not be probed for scopes"; exit 1; }
+
+# 9. Fine-grained PAT -> minimal by construction, injected silently.
+out=$(run_dev GITHUB_TOKEN=github_pat_minimal)
+echo "$out" | grep -q -- '-e GITHUB_TOKEN' \
+    || { echo "fine-grained PAT should be injected: $out"; exit 1; }
+
 echo ok

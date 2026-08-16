@@ -9,7 +9,8 @@
 # start path; either exec's into the container or, under --dry-run, prints the
 # command. Reads the start-path globals assembled by cmd_start (RUNTIME,
 # RUNTIME_ARGS, CONTAINER_NAME, IMAGE_TAG, DIND, MAINTENANCE, DEFAULT_PORTS,
-# EXTRA_PORTS, HOST_PORTS, CMD_ARGS, EGRESS_MODE, DRY_RUN, GITHUB_TOKEN, …).
+# EXTRA_PORTS, HOST_PORTS, CMD_ARGS, EGRESS_MODE, DRY_RUN, GITHUB_TOKEN,
+# GH_TOKEN_INJECT, …).
 start_container() {
   # Allocate a TTY only when stdin AND stdout are real terminals; otherwise
   # docker rejects -it with "the input device is not a TTY" and scripted
@@ -128,7 +129,11 @@ start_container() {
     DOCKER_CMD+=(-e "DEVCONTAINER_HOST_PORTS=$_hp_csv")
   fi
 
-  if [[ -n ${GITHUB_TOKEN:-} ]]; then
+  # GITHUB_TOKEN resolution (Method 1 scope-guard / Method 2 DEV_GITHUB_TOKEN)
+  # happens in resolve_github_token (lib/dev/approval.sh); it exports the chosen
+  # value into dev's env and sets GH_TOKEN_INJECT. The value-less -e form keeps
+  # the token out of the printed --dry-run command.
+  if [[ "${GH_TOKEN_INJECT:-false}" == true ]]; then
     DOCKER_CMD+=(-e GITHUB_TOKEN)
   fi
 

@@ -541,16 +541,31 @@ to the latest tag.
 - `DEV_SKIP_APPARMOR_CHECK=1` — bypass the `--dind`/`--pind` AppArmor preflight.
 - `DEV_SKIP_SUBID_CHECK=1` — bypass the `--dind`/`--pind` preflight that requires a rootless-runtime host to grant ≥165535 subuids/subgids.
 - `DEV_EXTRA_RUN_ARGS=...` — extra args appended to `docker run`.
-- `GITHUB_TOKEN` — passed through to the container if set on the host, and
+- `GITHUB_TOKEN` — injected into the container if set on the host, and
   forwarded to image builds as a BuildKit secret. Its purpose is **rate-limit
-  identification** (the anonymous GitHub API limit of 60 req/h is shared per
-  IP and easily exhausted by `mise install`), so use a token with no power:
-  create a **fine-grained PAT** with *no repository access* and *no
-  permissions* (GitHub → Settings → Developer settings → Fine-grained tokens
-  → "All repositories: none", zero permission grants). `dev` warns once per
-  token if a classic token with OAuth scopes is detected — an agent inside
-  the container can read the token, so scopes it carries are scopes you hand
-  to the agent.
+  identification** (see the note below). It is **scope-guarded**: a
+  no-permission fine-grained PAT or a classic token with zero scopes is
+  injected silently, but a classic token that carries OAuth scopes prompts
+  `[y/N]` before it is handed to the agent — an agent inside the container can
+  read the token, so scopes it carries are scopes you hand to the agent.
+  `DEV_ASSUME_YES=1` auto-approves; a non-TTY or `--dry-run` run starts
+  *without* the token (fail-safe). A token whose scopes can't be verified
+  (offline / probe failed) is injected anyway.
+- `DEV_GITHUB_TOKEN` — explicit opt-in that injects its value as `GITHUB_TOKEN`
+  with **no scope check and no prompt**, taking precedence over an ambient
+  `GITHUB_TOKEN`. Setting a `DEV_`-prefixed variable is itself the act of
+  intent, so a broader-scoped token here is legitimate — use it to hand the
+  agent GitHub access on purpose (e.g. to let it push or open PRs).
+
+> **NOTE:** To avoid GitHub's anonymous API rate limit (60 req/h, shared per
+> IP and easily exhausted by `mise install`), give the container a token
+> purely for identification. The safest choice is a **fine-grained PAT with
+> no repository access and no permissions** (GitHub → Settings → Developer
+> settings → Fine-grained tokens → "All repositories: none", zero permission
+> grants): it raises the limit to 5000 req/h and grants the agent nothing.
+> Export it as `GITHUB_TOKEN` (injected silently, since it carries no scopes),
+> or as `DEV_GITHUB_TOKEN` if you also want to hand the agent a token with
+> real access on purpose.
 
 ## Architecture
 
