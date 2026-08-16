@@ -127,7 +127,7 @@ resolve_managed_container() {
 }
 
 # Shared preamble for management commands that need a running firewall-capable
-# container ('dev fw log', 'dev fw drops', 'dev fw on'). Exits with a clear
+# container ('dev fw log', 'dev fw drops', 'dev fw close'). Exits with a clear
 # error if nothing is running, or if the only running container is maintenance
 # (which has no firewall).
 require_workspace_firewall_container() {
