@@ -68,11 +68,13 @@ cmd_fw() {
 
 # fw_log: stream the running workspace firewall container's egress activity.
 # Mode-aware: closed mode has tinyproxy (hostname-level log); open mode has no
-# proxy, so URLs/headers aren't available — fall back to tcpdump on the DNS
-# port and the FW-CONN NFLOG group firewall-init.sh installs for open mode
-# (see install_egress_logging), which gives hostnames-via-DNS plus raw
-# connection tuples instead. Requires a firewall-capable container (normal or
-# dind/pind) to already be running; never returns.
+# proxy, so URLs/headers aren't available — instead it reads the single NFLOG
+# group-2 feed firewall-init.sh installs for open mode (see
+# install_egress_logging), which carries both DNS query names (FW-DNS) and
+# new-connection tuples (FW-CONN). That needs only CAP_NET_ADMIN, which the
+# container already has — unlike a raw `tcpdump -i any` capture, which would
+# need CAP_NET_RAW and is deliberately withheld. Requires a firewall-capable
+# container (normal or dind/pind) to already be running; never returns.
 fw_log() {
   require_workspace_firewall_container "fw log"
   # shellcheck disable=SC2086  # intentional word-splitting of $MANAGED_RUNTIME_ARGS
@@ -80,7 +82,7 @@ fw_log() {
   if [[ "$_fw_log_mode" == open ]]; then
     # shellcheck disable=SC2086  # intentional word-splitting of $MANAGED_RUNTIME_ARGS
     exec $RUNTIME $MANAGED_RUNTIME_ARGS exec -it --user root "$MANAGED_NAME" \
-        sh -c 'tcpdump -i any -nn -l port 53 & tcpdump -i nflog:2 -nn -l'
+        tcpdump -i nflog:2 -nn -l
   else
     # shellcheck disable=SC2086  # intentional word-splitting of $MANAGED_RUNTIME_ARGS
     exec $RUNTIME $MANAGED_RUNTIME_ARGS exec -it "$MANAGED_NAME" tail -F /var/log/tinyproxy.log

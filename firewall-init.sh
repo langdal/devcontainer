@@ -68,14 +68,23 @@ install_baseline_blocks() {
 }
 
 # Open-mode egress is unfiltered at the IP layer but must stay observable:
-# log the first packet (SYN) of every new outbound TCP connection, rate
-# limited so a noisy process cannot flood the netlink buffer. Read with
-# `tcpdump -i nflog:2` (mirrors the closed-mode FW-DROP group 1 convention).
-# Takes the iptables binary (and any flags, e.g. "ip6tables -w") to run as
-# its arguments, so the same rule can be installed for both families.
+# log the first packet (SYN) of every new outbound TCP connection, plus every
+# outbound DNS query (name resolution is the cheapest signal for "what host
+# is this talking to"), both rate limited so a noisy process cannot flood the
+# netlink buffer. Both land in the same NFLOG group so a single
+# `tcpdump -i nflog:2` reader sees DNS names and connection tuples together
+# (mirrors the closed-mode FW-DROP group 1 convention) — no CAP_NET_RAW
+# `tcpdump -i any` capture needed, only the CAP_NET_ADMIN the container
+# already has. Takes the iptables binary (and any flags, e.g. "ip6tables -w")
+# to run as its arguments, so the same rules can be installed for both
+# families.
 install_egress_logging() {
     "$@" -A OUTPUT -m limit --limit 60/min --limit-burst 20 \
         -p tcp --syn -j NFLOG --nflog-group 2 --nflog-prefix "FW-CONN"
+    "$@" -A OUTPUT -p udp --dport 53 -m limit --limit 120/min --limit-burst 30 \
+        -j NFLOG --nflog-group 2 --nflog-prefix "FW-DNS"
+    "$@" -A OUTPUT -p tcp --dport 53 -m limit --limit 120/min --limit-burst 30 \
+        -j NFLOG --nflog-group 2 --nflog-prefix "FW-DNS"
 }
 
 # --- Apply iptables rules ---
@@ -86,6 +95,21 @@ iptables -F OUTPUT
 iptables -P FORWARD DROP
 iptables -P INPUT ACCEPT   # docker port forwarding lives here
 
+# In open mode, install the DNS-query/new-connection NFLOG rules *before*
+# install_baseline_blocks, not after: NFLOG is a non-terminating target (it
+# logs, then falls through to the next rule), so logging first doesn't
+# change what gets accepted or dropped below — but it does mean these rules
+# still see traffic that a later rule is about to ACCEPT outright.
+# install_baseline_blocks's link-local-resolver exemption is exactly such a
+# rule: rootless podman's pasta/slirp4netns commonly points /etc/resolv.conf
+# at a 169.254.x gateway resolver, and that exemption ACCEPTs port-53 traffic
+# to it unconditionally. Installed afterward, the DNS NFLOG rule would never
+# fire for the container's own (very common) resolver — installed before, the
+# query is logged and then still ACCEPTed exactly as before.
+if [ "${DEVCONTAINER_EGRESS:-closed}" = "open" ]; then
+    install_egress_logging iptables
+fi
+
 # Baseline blocks first, so they occupy the earliest slots in the chain and
 # take precedence over every ACCEPT rule added below (including the
 # ESTABLISHED,RELATED short-circuit) and over the open-mode ACCEPT policy.
@@ -94,10 +118,10 @@ install_baseline_blocks
 if [ "${DEVCONTAINER_EGRESS:-closed}" = "open" ]; then
     # Open mode: everything except link-local (already dropped above) is
     # allowed at the IP layer. No proxy, no allowlist. Egress stays
-    # observable via install_egress_logging (new-connection NFLOG).
-    install_egress_logging iptables
+    # observable via install_egress_logging, installed above (new-connection
+    # + DNS-query NFLOG).
     iptables -P OUTPUT ACCEPT
-    echo "firewall-init: egress OPEN (link-local blocked; connections logged to NFLOG group 2)" >&2
+    echo "firewall-init: egress OPEN (link-local blocked; connections + DNS logged to NFLOG group 2)" >&2
 else
     # --- Merge base + project allowlist into a tinyproxy regex filter ---
     {
@@ -234,6 +258,7 @@ if ip6tables -w -F OUTPUT 2>/dev/null; then
     ip6tables -w -A OUTPUT -d fd00:ec2::254/128 -j DROP 2>/dev/null || true
 
     if [ "${DEVCONTAINER_EGRESS:-closed}" = "open" ]; then
+        install_egress_logging ip6tables -w
         ip6tables -w -P OUTPUT ACCEPT
     else
         ip6tables -w -P OUTPUT DROP

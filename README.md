@@ -238,12 +238,15 @@ longer-lived unrestricted work needing sudo too, prefer `--maint` — its name
 `dev fw log` is mode-aware, but shows you something useful either way:
 
 - **Open mode (the default):** no proxy log to tail, so it shows the
-  kernel-level view instead — DNS query names (which hosts the container
-  looked up) merged with a live connection log (IP:port for every new
-  outbound TCP connection, including literal IPs a DNS log alone would
-  miss). That's the ceiling without terminating TLS — hostname and
-  IP:port, not full URLs or request bodies — but it's enough to answer "what
-  did the agent talk to just now" without confining it first.
+  kernel-level view instead — a single NFLOG group-2 feed carrying both DNS
+  query names (which hosts the container looked up) and a live connection
+  log (IP:port for every new outbound TCP connection, including literal IPs
+  a DNS log alone would miss), read with one `tcpdump -i nflog:2`. NFLOG
+  only needs `CAP_NET_ADMIN`, which the container already has for iptables —
+  no `CAP_NET_RAW` capture required. That's the ceiling without terminating
+  TLS — hostname and IP:port, not full URLs or request bodies — but it's
+  enough to answer "what did the agent talk to just now" without confining
+  it first.
 - **Closed mode:** tails the tinyproxy log, the richer per-request hostname
   audit trail closed mode has always produced.
 

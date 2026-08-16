@@ -30,6 +30,24 @@ if ip6tables -w -F OUTPUT 2>/dev/null; then
     ip6tables -w -P OUTPUT ACCEPT
 fi
 
+# Reinstall the open-mode connection + DNS log (mirrors firewall-init.sh's
+# install_egress_logging) *before* the link-local-resolver exemption below,
+# not after: NFLOG is a non-terminating target (logs, then falls through),
+# so logging first doesn't change what gets accepted/dropped below, but it
+# does mean the FW-DNS rule still sees the container's own DNS queries even
+# when their destination is the resolver-exemption ACCEPT rule that follows
+# (common under rootless podman/pasta, whose resolver often lives at a
+# 169.254.x gateway address) — installed afterward, as `dev fw open` used to
+# do, that ACCEPT would swallow the packet before the log rule ever saw it.
+# Without this reinstall at all, `dev fw open` would leave `dev fw log` with
+# nothing to show, since the FW-CONN/FW-DNS NFLOG rules were never (re)added.
+iptables -A OUTPUT -p tcp --syn -m limit --limit 60/min --limit-burst 20 \
+    -j NFLOG --nflog-group 2 --nflog-prefix "FW-CONN"
+iptables -A OUTPUT -p udp --dport 53 -m limit --limit 120/min --limit-burst 30 \
+    -j NFLOG --nflog-group 2 --nflog-prefix "FW-DNS"
+iptables -A OUTPUT -p tcp --dport 53 -m limit --limit 120/min --limit-burst 30 \
+    -j NFLOG --nflog-group 2 --nflog-prefix "FW-DNS"
+
 # Re-assert the always-on link-local block; opening egress must not open
 # the path to the cloud metadata endpoint. This script runs standalone (it
 # does not source firewall-init.sh), so the rules are inlined rather than
@@ -45,12 +63,6 @@ done < <(grep '^nameserver ' /etc/resolv.conf 2>/dev/null)
 iptables  -A OUTPUT -d 169.254.0.0/16   -j DROP
 ip6tables -w -A OUTPUT -d fe80::/10     -j DROP 2>/dev/null || true
 ip6tables -w -A OUTPUT -d fd00:ec2::254/128 -j DROP 2>/dev/null || true
-
-# Reinstall the open-mode connection log (mirrors firewall-init.sh's open
-# branch): without this, `dev fw open` leaves `dev fw log`/`fw drops` with
-# only DNS traffic to show, since the FW-CONN NFLOG rule was never (re)added.
-iptables -A OUTPUT -p tcp --syn -m limit --limit 60/min --limit-burst 20 \
-    -j NFLOG --nflog-group 2 --nflog-prefix "FW-CONN"
 
 # Switch tinyproxy to an allow-all filter and reload it in place.
 # The HUP must not abort the script (set -e): a stale pidfile or an

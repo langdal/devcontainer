@@ -104,30 +104,36 @@ startup rather than falling through to an unfirewalled shell
 (`entrypoint.sh:38-42`). It always installs the link-local block (§2) first,
 before either mode's OUTPUT policy is programmed.
 
-**Open (default).** After the baseline block, `firewall-init.sh` installs a
-rate-limited NFLOG rule that logs the first packet (SYN) of every new
-outbound TCP connection (group 2, `FW-CONN`), then sets the OUTPUT policy to
-ACCEPT for both IPv4 and IPv6 (`firewall-init.sh:94-100`). No tinyproxy, no
-allowlist, no `HTTPS_PROXY`/`HTTP_PROXY` exports, no `no-aaaa` resolver edit,
-no Maven/Gradle proxy seeding — `entrypoint.sh` gates all of that behind
-closed mode (`entrypoint.sh:29`, `44-57`, `182`). The container can reach any
-host on any port/protocol, proxy-free, the same as a process on the host.
+**Open (default).** After the baseline block, `firewall-init.sh` installs
+rate-limited NFLOG rules that log the first packet (SYN) of every new
+outbound TCP connection (`FW-CONN`) and every outbound DNS query (`FW-DNS`,
+UDP+TCP port 53), all into the same group 2, then sets the OUTPUT policy to
+ACCEPT for both IPv4 and IPv6 (`firewall-init.sh:install_egress_logging`,
+called from both the IPv4 and IPv6 open branches). No tinyproxy, no allowlist, no `HTTPS_PROXY`/
+`HTTP_PROXY` exports, no `no-aaaa` resolver edit, no Maven/Gradle proxy
+seeding — `entrypoint.sh` gates all of that behind closed mode
+(`entrypoint.sh:29`, `44-57`, `182`). The container can reach any host on any
+port/protocol, proxy-free, the same as a process on the host.
 
-Proxy-free does not mean unobservable: `dev fw log` in open mode runs
-`tcpdump` on port 53 (DNS query names) merged with `tcpdump -i nflog:2` (the
-FW-CONN connection log), so an operator can see every hostname the container
-tried to resolve and every new connection's IP:port
-(`lib/dev/fw.sh:69-88`). The ceiling without terminating TLS is hostname +
-IP:port, not URLs or request bodies — closed mode's tinyproxy log remains
-the richer per-request audit trail. `dev fw drops` (`tcpdump -i nflog:1`) is
-closed-mode-only: only the closed branch installs a group-1 `FW-DROP`/
-`FW-DROP6` rule (`firewall-init.sh:212-213`, `242-243`); the open branch
-installs no group-1 rule at all, so `dev fw drops` shows nothing in open
-mode — use `dev fw log` (the group-2 connection feed + DNS, above) for
-open-mode egress visibility instead. Note also that the link-local block
-itself (`install_baseline_blocks`, §2) is a terminating DROP installed
-*before* any group-1 rule in either mode, so link-local packets are
-discarded silently and never appear in `dev fw drops` either.
+Proxy-free does not mean unobservable: `dev fw log` in open mode runs a
+single `tcpdump -i nflog:2` reader over that group-2 feed, so an operator
+sees both DNS query names and every new connection's IP:port from one
+capture (`lib/dev/fw.sh:fw_log`). NFLOG only needs `CAP_NET_ADMIN`, which the
+container already has for iptables; the previous implementation additionally
+ran `tcpdump -i any` to catch DNS names, which needs `CAP_NET_RAW` — a
+capability the sandbox deliberately withholds, so that half silently failed
+with "Operation not permitted" under rootless podman. The ceiling without
+terminating TLS is hostname + IP:port, not URLs or request bodies — closed
+mode's tinyproxy log remains the richer per-request audit trail. `dev fw
+drops` (`tcpdump -i nflog:1`) is closed-mode-only: only the closed branch
+installs a group-1 `FW-DROP`/`FW-DROP6` rule; the open branch installs no
+group-1 rule at all, so `dev fw
+drops` shows nothing in open mode — use `dev fw log` (the group-2
+connection + DNS feed, above) for open-mode egress visibility instead. Note
+also that the link-local block itself (`install_baseline_blocks`, §2) is a
+terminating DROP installed *before* any group-1 rule in either mode, so
+link-local packets are discarded silently and never appear in `dev fw drops`
+either.
 
 **Closed (opt-in — `--closed` / `DEV_EGRESS=closed`).** Unchanged from the
 allowlist-firewall behavior this repo has always shipped: default-DROP

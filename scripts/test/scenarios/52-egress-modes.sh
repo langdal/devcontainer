@@ -90,8 +90,14 @@ echo "assertion (e-open): link-local (169.254.169.254) blocked under open egress
 # Needs the container to still be running when `dev fw log` attaches, so
 # start one that stays up (default egress = open, no flags/env) rather than
 # a one-shot exec that would self-remove the instant its command finishes.
+# Unlike the other assertions, the curl here must NOT run inside run_bg's
+# startup command: 'dev fw log' now reads a live NFLOG feed (see
+# lib/dev/fw.sh fw_log), so the DNS query / connection SYN it is meant to
+# catch has to happen *after* tcpdump attaches -- a curl that already
+# completed during run_bg's 4s startup sleep would leave nothing in the feed
+# by the time the reader starts listening.
 "$RUNTIME" rm -f "$N" >/dev/null 2>&1 || true
-run_bg ./dev exec -- sh -c "$CURL_OK; sleep 60"
+run_bg ./dev exec -- sh -c "sleep 60"
 if ! "$RUNTIME" ps -q -f name="^${N}\$" | grep -q .; then
     log_fail "(f) precondition: open container ${N} did not start"
     exit 1
@@ -106,15 +112,33 @@ mode_env=$(./dev exec -- printenv DEVCONTAINER_EGRESS 2>&1) \
 expect_grep "$mode_env" '^open$' \
     || { log_fail "(f) container egress env is not 'open' ($mode_env); fw_log's branch pick can't be verified"; exit 1; }
 
-# fw_log() execs `tcpdump ... -it`; bound it with timeout and detach stdin
-# from a tty exactly as scenario 21 (monitor-firewall-targets-dind) does.
-fw_out=$(timeout 3 ./dev fw log </dev/null 2>&1 || true)
+# fw_log() execs `tcpdump -i nflog:2 ... -it`; bound it with timeout and
+# detach stdin from a tty exactly as scenario 21
+# (monitor-firewall-targets-dind) does. Start the reader in the background
+# first, give it a moment to attach, THEN issue the curl that generates the
+# DNS query + connection it's supposed to catch -- the reverse order (curl
+# first) races the capture and can miss evidence that genuinely exists.
+FW_OUT_FILE=$(mktemp)
+( timeout 6 ./dev fw log </dev/null >"$FW_OUT_FILE" 2>&1 ) &
+fw_log_pid=$!
+sleep 1.5
+curl_out=$(./dev exec -- sh -c "$CURL_OK" 2>&1)
+curl_rc=$?
+sleep 1.5
+wait "$fw_log_pid" 2>/dev/null
+fw_out=$(cat "$FW_OUT_FILE")
+rm -f "$FW_OUT_FILE"
+
+if [[ $curl_rc -ne 0 ]]; then
+    log_fail "(f) outer 'dev exec' (DNS/connection trigger) failed: $curl_out"
+    exit 1
+fi
 
 F_RESULT=pass
 F_REASON="'dev fw log' showed example.com DNS/connection activity in open mode"
 if ! expect_grep "$fw_out" 'example\.com'; then
     F_RESULT=skip
-    F_REASON="container egress=open confirms 'dev fw log' selected the tcpdump (open-mode) branch, but tcpdump produced no example.com line within the timeout -- consistent with this sandbox's nested-podman netlink/NFLOG limits (a documented host limitation, not a code defect), not a fresh assertion failure. fw_out=[$fw_out]"
+    F_REASON="container egress=open confirms 'dev fw log' selected the tcpdump -i nflog:2 (open-mode) branch, but no example.com DNS/connection line appeared within the timeout -- could be a timing race with the capture window, not necessarily a code defect. fw_out=[$fw_out]"
 fi
 
 echo "assertion (f): $F_REASON"
