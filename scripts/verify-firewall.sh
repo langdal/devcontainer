@@ -2,8 +2,10 @@
 # scripts/verify-firewall.sh
 #
 # Run inside the dev container to probe firewall posture.
-# In normal mode: posture checks 1-7 and 13 should pass.
-# In maintenance mode: checks 1, 3, 4, 6, 7, 13 are skipped; 2 and 5 should pass.
+# In normal mode: posture checks 1-7, 13, and 14 should pass.
+# In maintenance mode: checks 1, 3, 4, 6, 7, 13 are skipped; 2, 5, and 14 should pass.
+# Check 14 (link-local/metadata block) runs unconditionally in both modes: the
+# 169.254.0.0/16 / fe80::/10 DROP rule is always-on regardless of egress mode.
 set -u
 
 PASS=0; FAIL=0; SKIP=0
@@ -64,6 +66,14 @@ ipv6_direct_blocked() {
     # cert won't match the bare IP — TLS completing at all means egress leaked.
     # Vacuously passes on hosts with no v6 route at all (connect fails either way).
     ! curl -g -6 -ksS -o /dev/null -m 5 --noproxy '*' 'https://[2606:4700:4700::1111]/' 2>/dev/null
+}
+link_local_blocked() {
+    # The cloud metadata endpoint (169.254.169.254) and the rest of the
+    # link-local range are DROPped on OUTPUT unconditionally — in open and
+    # closed egress modes alike — so this must never be gated on proxy/mode.
+    # --noproxy '*' bypasses tinyproxy to exercise the raw kernel iptables
+    # path directly; the check passes when curl fails to connect.
+    ! curl -s -m 3 -o /dev/null --noproxy '*' http://169.254.169.254/ 2>/dev/null
 }
 
 # Nested-runtime-aware helpers (used only when DEVCONTAINER_DIND or
@@ -157,6 +167,7 @@ SKIP_IN_MAINT=1 run_check "4. raw socket bypass blocked"         raw_socket_bloc
 SKIP_IN_MAINT=1 run_check "6. sudo blocked"                      sudo_blocked
 SKIP_IN_MAINT=1 run_check "7. iptables flush blocked"            iptables_flush_blocked
 SKIP_IN_MAINT=1 run_check "13. direct IPv6 bypass blocked"       ipv6_direct_blocked
+                run_check "14. link-local/metadata blocked"      link_local_blocked
 
 SKIP_UNLESS_NESTED=1 run_check "8. nested engine reachable"         dockerd_reachable
 SKIP_UNLESS_NESTED=1 run_check "9. nested engine rootless"          dockerd_rootless
