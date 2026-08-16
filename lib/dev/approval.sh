@@ -104,25 +104,80 @@ approve_project_allowlist() {
   esac
 }
 
-# --- GITHUB_TOKEN scope guidance --------------------------------------------
-# The passthrough exists for rate-limit identification; a no-permission
-# fine-grained PAT is enough. Warn (never block) when a classic/OAuth token
-# carries scopes an agent inside the container could misuse. Probed once per
-# distinct token; the scopes string is cached in STATE_DIR and the warning
-# re-printed from cache each run so it isn't missed. Probe failures are
-# silent and uncached (retried next run).
-check_github_token() {
-  # The probe itself lives in lib/dev/checks-catalog.sh as _token_scopes, so
-  # this warning and `dev doctor`'s github-token-scopes check can never
-  # disagree about a token again. They used to be separate implementations,
-  # and the newer one had already lost the fine-grained-PAT short-circuit and
-  # the cache. Non-zero means "no token, a fine-grained PAT, or undeterminable"
-  # — all cases where dev up stays quiet.
-  local scopes
-  scopes="$(_token_scopes)" || return 0
-  if [[ -n "$scopes" ]]; then
-    echo "Warning: GITHUB_TOKEN carries OAuth scopes: ${scopes}" >&2
-    echo "         Rate-limit identification needs NO scopes — consider a" >&2
-    echo "         no-permission fine-grained PAT. See README.md > 'GitHub token'." >&2
+# --- GITHUB_TOKEN resolution ------------------------------------------------
+# Two ways a token reaches the container as GITHUB_TOKEN:
+#
+#   1. Ambient GITHUB_TOKEN (the ecosystem-standard name) — scope-guarded.
+#      A no-permission fine-grained PAT, or a classic token with zero scopes,
+#      is minimal and injected silently. A classic token that carries OAuth
+#      scopes is non-minimal: an agent inside the container can read it, so
+#      those scopes become the agent's. dev warns and asks [y/N] before
+#      injecting it (same idiom as the allowlist gate: DEV_ASSUME_YES
+#      auto-approves; --dry-run and a non-TTY stdin fail safe, WITHOUT the
+#      token). A token whose scopes can't be verified (offline / probe failed)
+#      is injected anyway — that case buys nothing on an offline host, so
+#      blocking would only break it.
+#
+#   2. DEV_GITHUB_TOKEN — an explicit, dev-prefixed opt-in. Setting it IS the
+#      act of intent, so its value is injected with no scope check and no
+#      prompt (a broad token here is legitimate). Takes precedence over the
+#      ambient GITHUB_TOKEN.
+#
+# Exports the resolved value into dev's own GITHUB_TOKEN and sets
+# GH_TOKEN_INJECT. lifecycle.sh gates the value-less `-e GITHUB_TOKEN`
+# passthrough on the flag, so the token never appears in the printed --dry-run
+# command. The image-build BuildKit secret (lib/dev/image.sh) reads the
+# exported GITHUB_TOKEN too; it is host-side only and never reaches the running
+# agent, so it stays in use even when container injection is declined. The
+# scope probe (_token_scopes) lives in lib/dev/checks-catalog.sh and is shared
+# with `dev doctor`'s github-token-scopes check, cached once per token.
+resolve_github_token() {
+  local inject=false
+
+  # Method 2: explicit dev-prefixed opt-in wins outright, unprobed.
+  if [[ -n "${DEV_GITHUB_TOKEN:-}" ]]; then
+    export GITHUB_TOKEN="$DEV_GITHUB_TOKEN"
+    echo "Injecting DEV_GITHUB_TOKEN into the container as GITHUB_TOKEN (explicit opt-in; scopes not checked)." >&2
+    inject=true
+  elif [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    # Method 1: scope-guard the ambient token. _token_scopes returns non-zero
+    # for a fine-grained PAT (rc 2) or an unverifiable probe (rc 1); capture
+    # that via `if` so it doesn't trip `set -e` (dev runs -euo pipefail).
+    local scopes rc
+    if scopes="$(_token_scopes)"; then rc=0; else rc=$?; fi
+    if [[ "$rc" -eq 2 ]]; then
+      inject=true                       # fine-grained PAT: minimal by construction
+    elif [[ "$rc" -eq 1 ]]; then
+      echo "Note: could not verify GITHUB_TOKEN scopes (offline or probe failed); injecting it anyway." >&2
+      inject=true
+    elif [[ -z "$scopes" ]]; then
+      inject=true                       # classic token, zero scopes: minimal
+    else
+      echo "Warning: GITHUB_TOKEN carries OAuth scopes: ${scopes}" >&2
+      echo "         An agent inside the container can read it, so those scopes" >&2
+      echo "         become the agent's. Rate-limit identification needs NONE —" >&2
+      echo "         a no-permission fine-grained PAT is enough (README.md >" >&2
+      echo "         'GitHub token'). To hand this token to the agent on purpose," >&2
+      echo "         set DEV_GITHUB_TOKEN instead and this prompt is skipped." >&2
+      if [[ "${DEV_ASSUME_YES:-0}" == "1" ]]; then
+        echo "DEV_ASSUME_YES set — injecting the scoped GITHUB_TOKEN." >&2
+        inject=true
+      elif [[ "$DRY_RUN" == true ]]; then
+        echo "Would prompt to inject the scoped GITHUB_TOKEN; continuing WITHOUT it for --dry-run." >&2
+      elif [[ ! -t 0 ]]; then
+        echo "         stdin is not a TTY; starting WITHOUT GITHUB_TOKEN. Run dev" >&2
+        echo "         interactively, set DEV_ASSUME_YES=1, or use DEV_GITHUB_TOKEN." >&2
+      else
+        local reply=""
+        read -r -p "Inject this scoped GITHUB_TOKEN into the container? [y/N] " reply || reply=""
+        case "$reply" in
+          y|Y|yes|YES) inject=true ;;
+          *) echo "Starting WITHOUT GITHUB_TOKEN (declined)." >&2 ;;
+        esac
+      fi
+    fi
   fi
+
+  # shellcheck disable=SC2034  # consumed by start_container in lib/dev/lifecycle.sh
+  GH_TOKEN_INJECT=$inject
 }

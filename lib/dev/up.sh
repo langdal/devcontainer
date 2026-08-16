@@ -261,7 +261,7 @@ cmd_start() {
   resolve_container_name_and_guard
 
   ensure_state_dir
-  check_github_token
+  resolve_github_token
   approve_project_allowlist
 
   # Compare host UID/GID and dev-script version to the labels on $IMAGE_TAG.

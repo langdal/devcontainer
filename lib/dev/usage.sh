@@ -122,10 +122,18 @@ ENVIRONMENT:
   DEV_SHARED_HOME=1  Use the legacy shared home volume (devcontainer-home) for
                      every workspace instead of the per-workspace default
                      (devcontainer-home-<dir>).
-  GITHUB_TOKEN       If set on the host, passed through into the container
-                     as an env var, and also forwarded to image builds as a
-                     BuildKit secret so 'mise install' can hit the GitHub
-                     API authenticated (avoids the 60/hr anonymous limit).
+  GITHUB_TOKEN       If set on the host, injected into the container as an env
+                     var (and forwarded to image builds as a BuildKit secret)
+                     so 'mise install' can hit the GitHub API authenticated,
+                     avoiding the 60/hr anonymous limit. A no-permission
+                     fine-grained PAT is enough. Scope-guarded: a classic token
+                     carrying OAuth scopes prompts [y/N] before it is handed to
+                     the agent (DEV_ASSUME_YES=1 auto-approves; a non-TTY or
+                     --dry-run run starts WITHOUT it).
+  DEV_GITHUB_TOKEN   Explicit opt-in: injected as GITHUB_TOKEN with no scope
+                     check and no prompt, taking precedence over an ambient
+                     GITHUB_TOKEN. Use this to hand the agent a broader-scoped
+                     token deliberately.
 
 EXAMPLES:
   dev up                         # Start or attach to container with default shell
