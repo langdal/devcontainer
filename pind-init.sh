@@ -55,21 +55,28 @@ EOF
 
 # 4. containers.conf: pin slirp4netns via default_rootless_network_cmd (NOT
 #    podman 5.x's pasta default, whose host-loopback mapping does not expose
-#    10.0.2.2) and inject the proxy env into every nested container so
-#    `podman build` RUN steps and `podman run` workloads reach tinyproxy.
-#    This is the podman analogue of dind's ~/.docker/config.json proxies
-#    block. network_cmd_options enables slirp4netns's allow_host_loopback
-#    (default false) — without it, nested containers get "Network
-#    unreachable" for 10.0.2.2 and have no proxied egress at all. The only
-#    loopback service exposed is tinyproxy, which still enforces the
-#    allowlist, and direct (non-proxy) egress is still dropped by this
-#    container's iptables — same posture as dind.
+#    10.0.2.2) and, in closed mode only, inject the proxy env into every
+#    nested container so `podman build` RUN steps and `podman run` workloads
+#    reach tinyproxy. This is the podman analogue of dind's
+#    ~/.docker/config.json proxies block. network_cmd_options enables
+#    slirp4netns's allow_host_loopback (default false) — without it, nested
+#    containers get "Network unreachable" for 10.0.2.2 and have no proxied
+#    egress at all. The only loopback service exposed is tinyproxy, which
+#    still enforces the allowlist, and direct (non-proxy) egress is still
+#    dropped by this container's iptables — same posture as dind.
+#    In open mode there is no tinyproxy listening (firewall-init.sh only
+#    starts it when closed), so the [containers] env block is proxy-only and
+#    is skipped entirely — nested containers get no proxy env and connect
+#    directly instead of failing against a dead 10.0.2.2:8888.
 cat > "$CFG_DIR/containers.conf" <<EOF
 [network]
 default_rootless_network_cmd = "slirp4netns"
 
 [engine]
 network_cmd_options = ["allow_host_loopback=true"]
+EOF
+if [ "${DEVCONTAINER_EGRESS:-closed}" = closed ]; then
+    cat >> "$CFG_DIR/containers.conf" <<EOF
 
 [containers]
 env = [
@@ -81,17 +88,24 @@ env = [
     "NO_PROXY=localhost,127.0.0.1,::1",
 ]
 EOF
+fi
 chown -R vscode:vscode "$CFG_DIR"
 
-# 5. Export DOCKER_HOST/XDG_RUNTIME_DIR for interactive (login) shells, and
-#    the engine's own-pull proxy (127.0.0.1, main netns).
+# 5. Export DOCKER_HOST/XDG_RUNTIME_DIR for interactive (login) shells, and,
+#    in closed mode, the engine's own-pull proxy (127.0.0.1, main netns). In
+#    open mode there is no tinyproxy listening, so these exports are skipped
+#    (a login shell should connect directly, not against a dead proxy).
 cat > /etc/profile.d/pind.sh <<EOF
 export DOCKER_HOST=unix://${SOCK}
 export XDG_RUNTIME_DIR=${RUN_DIR}
+EOF
+if [ "${DEVCONTAINER_EGRESS:-closed}" = closed ]; then
+    cat >> /etc/profile.d/pind.sh <<EOF
 export HTTPS_PROXY=http://127.0.0.1:8888
 export HTTP_PROXY=http://127.0.0.1:8888
 export NO_PROXY=localhost,127.0.0.1
 EOF
+fi
 chmod 644 /etc/profile.d/pind.sh
 
 # 6. RUN_DIR lives under the /home/vscode named volume; stale sockets / state
@@ -107,13 +121,22 @@ chown vscode:vscode "$LOG"
 
 # 7. Start `podman system service` as vscode in the background. --time=0 =>
 #    no idle-exit timeout (the service stays up for the container lifetime).
-#    HTTPS_PROXY here is for podman's own pulls (main netns => 127.0.0.1).
+#    HTTPS_PROXY here is for podman's own pulls (main netns => 127.0.0.1) —
+#    only meaningful in closed mode; in open mode there is no tinyproxy
+#    listening, so leave the service to pull directly.
+PIND_PROXY_ENV=()
+if [ "${DEVCONTAINER_EGRESS:-closed}" = closed ]; then
+    # shellcheck disable=SC2054  # commas are part of the NO_PROXY value, not element separators
+    PIND_PROXY_ENV=(
+        HTTPS_PROXY=http://127.0.0.1:8888
+        HTTP_PROXY=http://127.0.0.1:8888
+        NO_PROXY=localhost,127.0.0.1
+    )
+fi
 gosu vscode env \
     XDG_RUNTIME_DIR="$RUN_DIR" \
     HOME=/home/vscode \
-    HTTPS_PROXY=http://127.0.0.1:8888 \
-    HTTP_PROXY=http://127.0.0.1:8888 \
-    NO_PROXY=localhost,127.0.0.1 \
+    "${PIND_PROXY_ENV[@]}" \
     PATH=/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     nohup podman system service --time=0 "unix://${SOCK}" \
         > "$LOG" 2>&1 &

@@ -1,6 +1,7 @@
 #!/bin/bash
 # scripts/test/scenarios/32-attack-host-mount.sh
 # platform: linux
+# privilege: root
 set -u
 LIB="$(dirname "$0")/../lib"
 # shellcheck source=scripts/test/lib/assert.sh
@@ -8,6 +9,7 @@ LIB="$(dirname "$0")/../lib"
 # shellcheck source=scripts/test/lib/restore.sh
 . "$LIB/restore.sh"
 require_platform linux
+require_privilege root
 trap restore_host EXIT
 
 cd "$(dirname "$0")/../../.." || exit 1
@@ -16,7 +18,7 @@ D="dev-${WS}-dind"
 remember_container "$D"
 "$RUNTIME" rm -f "$D" 2>/dev/null
 
-./dev --dind -- docker pull alpine:3.20 >/dev/null 2>&1 || true
+./dev exec --dind -- docker pull alpine:3.20 >/dev/null 2>&1 || true
 
 # Drop a sentinel into /etc/test-host-sentinel on the HOST (sudo) so we can
 # tell whether a -v / mount inside the nested container reaches the host.
@@ -26,12 +28,12 @@ sudo sh -c "echo HOST > $HOST_SENTINEL"
 trap 'sudo rm -f '"$HOST_SENTINEL"'; restore_host' EXIT
 
 # Drop a different sentinel into the dev container's /etc.
-./dev --dind -- bash -c 'echo CONTAINER | sudo tee /etc/test-host-sentinel-DEV >/dev/null 2>&1 || true'
+./dev exec --dind -- bash -c 'echo CONTAINER | sudo tee /etc/test-host-sentinel-DEV >/dev/null 2>&1 || true'
 
 # From a nested container, mount / and read /etc/test-host-sentinel-*.
 # The mount points at the dev container's filesystem, NOT the host's,
 # so the HOST sentinel must NOT be visible.
-out=$(./dev --dind -- docker run --rm -v /:/host alpine:3.20 \
+out=$(./dev exec --dind -- docker run --rm -v /:/host alpine:3.20 \
     ls /host/etc 2>&1 | grep test-host-sentinel || echo "")
 host_visible=$(echo "$out" | grep -c "test-host-sentinel-$$" || true)
 

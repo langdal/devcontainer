@@ -1,6 +1,7 @@
 #!/bin/bash
 # scripts/test/scenarios/30-attack-sudo-iptables.sh
 # platform: linux
+# privilege: user
 set -u
 LIB="$(dirname "$0")/../lib"
 # shellcheck source=scripts/test/lib/assert.sh
@@ -17,7 +18,7 @@ remember_container "$D"
 "$RUNTIME" rm -f "$D" 2>/dev/null
 
 # Inside --dind, sudo must NOT work (vscode is not in sudoers).
-out=$(./dev --dind -- bash -c 'sudo -n iptables -F 2>&1 || echo BLOCKED')
+out=$(./dev exec --dind -- bash -c 'sudo -n iptables -F 2>&1 || echo BLOCKED')
 if expect_grep "$out" "BLOCKED"; then
     log_pass "sudo iptables -F denied inside --dind"
     exit 0

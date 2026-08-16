@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install shellcheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck
       - name: Run lint
@@ -29,7 +29,7 @@ jobs:
       matrix:
         distro: [debian, ubuntu]
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install QEMU + tools
         run: |
@@ -57,7 +57,7 @@ jobs:
           fi
 
       - name: Restore image cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/devcontainer-ci/images/${{ matrix.distro }}
           key: vm-image-${{ matrix.distro }}-${{ hashFiles(format('scripts/test/vms/{0}.conf', matrix.distro)) }}
@@ -74,7 +74,7 @@ jobs:
 
       - name: Upload run logs
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: logs-${{ matrix.distro }}
           path: |
@@ -84,9 +84,121 @@ jobs:
             scripts/test/cloud-init-output-${{ matrix.distro }}.log
           if-no-files-found: ignore
 
+  rootless-linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install podman
+        # Installed here, in a privileged workflow step, BEFORE the cell runs.
+        # run-all.sh's auto-install fallback still shells out to sudo when no
+        # runtime is present, and the whole point of this cell is that it needs
+        # none — so the runtime must already exist when it starts. Do not
+        # reorder this after the run step.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends podman uidmap
+
+      - name: Prepare the host for rootless nested engines
+        # Two host preconditions dev's own preflights demand, neither of which
+        # a stock ubuntu-24.04 runner satisfies:
+        #   - subuid/subgid >= 165535. The default useradd grant is 65536, and
+        #     rootless dockerd/podman inside --dind/--pind must map the image's
+        #     vscode range (container ids 100000-165535) or rootlesskit dies.
+        #   - apparmor_restrict_unprivileged_userns=0. Ubuntu 23.10+ ships it
+        #     at 1, which blocks the unprivileged user namespace those nested
+        #     engines create. It is the single largest source of failures on
+        #     the maintainer's own machine (10 of them).
+        # Without both, every --dind/--pind scenario in the user subset refuses
+        # at preflight and this cell is red for host reasons rather than code.
+        run: |
+          # REPLACE the grant, never --add to it. ubuntu-24.04 runners already
+          # ship the user a 165536-231071 range, and adding 200000-265535 on
+          # top overlaps it. newuidmap rejects an overlapping map outright --
+          # "write to uid_map failed: Invalid argument" -- so `podman system
+          # migrate` died and took the whole cell with it before a single
+          # scenario ran. One contiguous range large enough for the image's
+          # vscode mapping, and no overlap to reject.
+          sudo sed -i "/^$USER:/d" /etc/subuid /etc/subgid
+          echo "$USER:100000:400000" | sudo tee -a /etc/subuid /etc/subgid >/dev/null
+          podman system migrate
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          echo "subuid: $(grep "^$USER:" /etc/subuid || echo none)"
+          sysctl kernel.apparmor_restrict_unprivileged_userns || true
+
+      - name: Confirm the runtime really is rootless
+        run: |
+          echo "uid: $(id -u)"
+          podman info --format 'rootless={{.Host.Security.Rootless}}'
+
+      - name: Unprivileged subset under rootless podman
+        env:
+          # Without a token the image build fetches release metadata from the
+          # GitHub API anonymously, against a 60/hr limit shared per runner IP.
+          # That is what makes the uid-gid scenarios fail on a cold cache.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/test/run-rootless.sh
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: logs-rootless-linux
+          path: |
+            scripts/test/last-run.log
+            scripts/test/last-summary.log
+          if-no-files-found: ignore
+
+  macos-checks:
+    # GitHub's macOS runners are themselves VMs with no nested virtualization,
+    # so `podman machine` cannot start there — confirmed 2026-08-15, vfkit
+    # exits immediately. This cell therefore runs NO containers. It verifies
+    # the logic that can be verified without one: the unit suite, and that
+    # `dev doctor` reports on a machine where nothing is set up.
+    runs-on: macos-14
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Unit suite
+        # Exit 77 is "skipped", not "passed": this runner has no container
+        # runtime at all (that is the point of the cell), and the handful of
+        # unit tests that drive `dev` end to end genuinely cannot run without
+        # one. They used to exit 1, which made a correctly-configured cell
+        # look broken. Counting skips separately keeps that visible instead of
+        # laundering it into a pass.
+        run: |
+          fails=0; skips=0
+          for t in scripts/test/unit/*.sh; do
+            n=$(basename "$t" .sh)
+            [ "$n" = "test-runner" ] && continue
+            rc=0; bash "$t" >/tmp/"$n".log 2>&1 || rc=$?
+            case "$rc" in
+              0)  echo "PASS $n" ;;
+              77) echo "SKIP $n (needs a container runtime)"; skips=$((skips+1)) ;;
+              *)  echo "FAIL $n"; sed -n '1,20p' /tmp/"$n".log; fails=$((fails+1)) ;;
+            esac
+          done
+          echo "unit failures: $fails, skipped: $skips"
+          [ "$fails" -eq 0 ]
+
+      - name: dev doctor reports on a bare Mac
+        # No podman, no machine, no image. Doctor's whole promise is that it
+        # still produces a report. Exit 1 is legitimate — it will flag the
+        # missing runtime. A crash, a hang, or an empty report is not.
+        run: |
+          set +e
+          out=$(./dev doctor 2>&1); rc=$?
+          set -e
+          echo "$out"
+          echo "exit=$rc"
+          [ "$rc" -eq 0 ] || [ "$rc" -eq 1 ] || { echo "doctor exited $rc"; exit 1; }
+          echo "$out" | grep -qE '[0-9]+ blocking' || { echo "no tally — doctor bailed"; exit 1; }
+
   ci:
     if: always()
-    needs: [lint, vm-matrix]
+    needs: [lint, vm-matrix, rootless-linux, macos-checks]
     runs-on: ubuntu-24.04
     timeout-minutes: 1
     steps:

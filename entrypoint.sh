@@ -1,48 +1,85 @@
 #!/bin/bash
+# --- Threat model (see SECURITY.md) ---
+# May: run firewall-init.sh as root before anything else and fail closed
+# (abort container startup) if it errors; seed rc files/git identity/JVM
+# proxy config only when absent, never overwriting a value already in the
+# home volume.
+# Must never: start the payload command (gosu vscode "$@") if
+# firewall-init.sh/firewall-disable.sh/dind-init.sh/pind-init.sh reported
+# failure, or fall through to an unfirewalled shell on any error.
 set -u
 
-# --- Suppress AAAA lookups when the container has no IPv6 connectivity ---
-# Docker's default bridge is IPv4-only, so AAAA results can't be used anyway.
-# Some upstream resolvers (typical home routers, also systemd-resolved when it
-# forwards to one) silently drop AAAA queries, which makes glibc's parallel
-# A+AAAA getaddrinfo() intermittently return EAI_AGAIN. Tinyproxy surfaces
-# this as "Temporary failure in name resolution" for the majority of requests.
-# `getent`-style callers escape this via AI_ADDRCONFIG; tinyproxy and many
-# others do not. The fix is identical to what AI_ADDRCONFIG would do: skip
-# AAAA when there's no IPv6 default route.
-if [ -z "$(ip -6 route show default 2>/dev/null)" ] \
-   && [ -w /etc/resolv.conf ] \
-   && ! grep -qE '^options[^#]*\bno-aaaa\b' /etc/resolv.conf; then
-    echo 'options no-aaaa' >> /etc/resolv.conf
+# --- Suppress AAAA lookups (closed mode only) ---
+# Two reasons, either sufficient, both specific to closed (proxied) mode:
+# 1. Firewalled mode: firewall-init.sh default-DROPs IPv6 OUTPUT, so AAAA
+#    results are unusable for direct clients — and worse, actively harmful
+#    for tinyproxy: a runtime that installs a v6 default route (podman 5's
+#    pasta) makes getaddrinfo return AAAA first, and tinyproxy then hangs
+#    ~20s per request trying unreachable v6 upstreams before any fallback.
+# 2. No v6 default route (docker's default bridge): AAAA can't be used, and
+#    some upstream resolvers (home routers, systemd-resolved forwarding to
+#    one) silently drop AAAA queries, making glibc's parallel A+AAAA
+#    getaddrinfo() intermittently return EAI_AGAIN ("Temporary failure in
+#    name resolution" from tinyproxy). `getent`-style callers escape via
+#    AI_ADDRCONFIG; tinyproxy and many others do not.
+# Net: always skip AAAA in closed mode, except in maintenance mode on a host
+# with a real v6 route (the one case where v6 may genuinely work end-to-end).
+# Open mode has no proxy in the loop and OUTPUT stays ACCEPT, so AAAA is not
+# harmful there — leave the resolver alone.
+if [ "${DEVCONTAINER_EGRESS:-closed}" = closed ]; then
+    if { [ -z "${DEVCONTAINER_MAINTENANCE:-}" ] || [ -z "$(ip -6 route show default 2>/dev/null)" ]; } \
+       && [ -w /etc/resolv.conf ] \
+       && ! grep -qE '^options[^#]*\bno-aaaa\b' /etc/resolv.conf; then
+        echo 'options no-aaaa' >> /etc/resolv.conf
+    fi
 fi
 
-# --- Firewall (skipped in maintenance mode) ---
+# Warn (never rewrite) if a stale closed-mode JVM proxy seed is sitting in the
+# PERSISTENT per-workspace home volume while the current mode runs no
+# tinyproxy for it to reach. Shared by maintenance mode and open-egress mode
+# below — both silently break Maven/Gradle downloads the same way
+# (connection-refused to 127.0.0.1:8888) if a prior closed-mode run seeded
+# ~/.m2/settings.xml or ~/.gradle/gradle.properties (see the seeding further
+# down, ~line 172). Don't rewrite the files here: the seeding contract is
+# never to overwrite, and this volume outlives the container; make the
+# failure self-explanatory instead.
+warn_stale_jvm_proxy_seed() {
+    _jvm_mode_label="$1"
+    for _jvm_cfg in /home/vscode/.m2/settings.xml /home/vscode/.gradle/gradle.properties; do
+        if [ -f "$_jvm_cfg" ] && grep -q '8888' "$_jvm_cfg" 2>/dev/null; then
+            echo "Note: $_jvm_cfg points JVM downloads at the firewall proxy" >&2
+            echo "      (127.0.0.1:8888), which does not run in $_jvm_mode_label mode." >&2
+            echo "      Bypass it for this session, e.g.  mvn -s /dev/null ...  or" >&2
+            echo "      gradle -Dhttp.proxyHost= -Dhttps.proxyHost= ..." >&2
+        fi
+    done
+    unset _jvm_cfg _jvm_mode_label
+}
+
+# --- Firewall (skipped in maintenance mode; self-branches on egress mode) ---
 if [ -z "${DEVCONTAINER_MAINTENANCE:-}" ]; then
     if ! /usr/local/sbin/firewall-init.sh; then
         echo "FATAL: firewall-init.sh failed; refusing to start container" >&2
         exit 1
     fi
-    export HTTPS_PROXY=http://127.0.0.1:8888
-    export HTTP_PROXY=http://127.0.0.1:8888
-    export NO_PROXY=localhost,127.0.0.1,host.docker.internal
-    cat > /etc/profile.d/proxy.sh <<'EOF'
+
+    # Proxy plumbing only matters in closed mode: open mode runs no tinyproxy,
+    # so forcing HTTPS_PROXY/HTTP_PROXY on proxy-honouring clients would just
+    # break them (connection refused to a proxy that isn't listening).
+    if [ "${DEVCONTAINER_EGRESS:-closed}" = closed ]; then
+        export HTTPS_PROXY=http://127.0.0.1:8888
+        export HTTP_PROXY=http://127.0.0.1:8888
+        export NO_PROXY=localhost,127.0.0.1,host.docker.internal
+        cat > /etc/profile.d/proxy.sh <<'EOF'
 export HTTPS_PROXY=http://127.0.0.1:8888
 export HTTP_PROXY=http://127.0.0.1:8888
 export NO_PROXY=localhost,127.0.0.1,host.docker.internal
 EOF
-    chmod 644 /etc/profile.d/proxy.sh
-
-    # Opt-in: bring the container up with the firewall already open. Identical
-    # effect to starting normally and then running `dev --disable-firewall`:
-    # firewall-init.sh above set up tinyproxy + iptables; this tears the egress
-    # block down and flips tinyproxy to allow-all. The proxy env vars stay
-    # exported (tinyproxy keeps running, just permissive), so HTTP_PROXY-
-    # honouring clients work exactly as in the toggle-off case.
-    if [ -n "${DEVCONTAINER_FW_DISABLED:-}" ]; then
-        if ! /usr/local/sbin/firewall-disable.sh; then
-            echo "FATAL: firewall-disable.sh failed; refusing to start container" >&2
-            exit 1
-        fi
+        chmod 644 /etc/profile.d/proxy.sh
+    else
+        # Open mode: same stale-seed hazard as maintenance mode (see
+        # warn_stale_jvm_proxy_seed above) — warn only, never overwrite.
+        warn_stale_jvm_proxy_seed "open"
     fi
 fi
 
@@ -61,6 +98,13 @@ echo "=========================================================="
 echo
 EOF
     chmod 644 /etc/profile.d/zz-maint-banner.sh
+
+    # The Maven/Gradle proxy files seeded further down live in the PERSISTENT
+    # per-workspace home volume, which this container mounts too. Maintenance
+    # mode runs no tinyproxy, so those files point every JVM download at a
+    # 127.0.0.1:8888 that nothing is listening on — connection-refused in
+    # exactly the mode meant to have unrestricted egress.
+    warn_stale_jvm_proxy_seed "maintenance"
 fi
 
 # --- DinD mode: launch rootless dockerd ---
@@ -138,6 +182,65 @@ if [[ -f /workspace/mise.toml ]] || [[ -f /workspace/.mise.toml ]]; then
             echo "         on the host: run 'dev' interactively and accept the prompt (or set" >&2
             echo "         DEV_ASSUME_YES=1), then restart the container so mise install retries." >&2
         fi
+    fi
+fi
+
+# Seed Maven/Gradle proxy config. JVM tools ignore HTTP(S)_PROXY env vars, so
+# without these files their downloads bypass tinyproxy, the kernel silently
+# drops the packets, and the user sees "could not be resolved" with no network
+# hint. Seed-only: never overwrite a file the user already customised (same
+# contract as the git identity seeding below). Closed mode only: open mode and
+# maintenance mode both run no tinyproxy, so pointing JVM tools at
+# 127.0.0.1:8888 would just break their downloads (connection refused).
+# DEVCONTAINER_EGRESS is not passed at all in maintenance mode (see
+# lib/dev/lifecycle.sh), so it must be checked explicitly rather than relying
+# on the ${:-closed} default.
+if [ -z "${DEVCONTAINER_MAINTENANCE:-}" ] && [ "${DEVCONTAINER_EGRESS:-closed}" = closed ]; then
+    if [ ! -f /home/vscode/.m2/settings.xml ]; then
+        mkdir -p /home/vscode/.m2
+        cat > /home/vscode/.m2/settings.xml <<'M2EOF'
+<!-- Seeded by the devcontainer entrypoint: JVM tools do not honour the
+     HTTPS_PROXY env var, so Maven needs the firewall proxy configured here.
+     Safe to edit; the entrypoint never overwrites an existing file. -->
+<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0">
+  <proxies>
+    <!-- Two entries, not one. Maven Resolver's DefaultProxySelector matches a
+         proxy's <protocol> against the REPOSITORY URL's scheme, not against
+         the protocol used to reach the proxy. Maven Central and every JVM host
+         in the allowlist are https, so an http-only entry is never selected
+         and the download goes direct, into the firewall's DROP rule. -->
+    <proxy>
+      <id>devcontainer-firewall-http</id>
+      <active>true</active>
+      <protocol>http</protocol>
+      <host>127.0.0.1</host>
+      <port>8888</port>
+      <nonProxyHosts>localhost|127.0.0.1|host.docker.internal</nonProxyHosts>
+    </proxy>
+    <proxy>
+      <id>devcontainer-firewall-https</id>
+      <active>true</active>
+      <protocol>https</protocol>
+      <host>127.0.0.1</host>
+      <port>8888</port>
+      <nonProxyHosts>localhost|127.0.0.1|host.docker.internal</nonProxyHosts>
+    </proxy>
+  </proxies>
+</settings>
+M2EOF
+    fi
+    if [ ! -f /home/vscode/.gradle/gradle.properties ]; then
+        mkdir -p /home/vscode/.gradle
+        cat > /home/vscode/.gradle/gradle.properties <<'GRADLEEOF'
+# Seeded by the devcontainer entrypoint: JVM tools do not honour the
+# HTTPS_PROXY env var, so Gradle needs the firewall proxy configured here.
+# Safe to edit; the entrypoint never overwrites an existing file.
+systemProp.http.proxyHost=127.0.0.1
+systemProp.http.proxyPort=8888
+systemProp.https.proxyHost=127.0.0.1
+systemProp.https.proxyPort=8888
+systemProp.http.nonProxyHosts=localhost|127.0.0.1|host.docker.internal
+GRADLEEOF
     fi
 fi
 

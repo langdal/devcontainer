@@ -1,6 +1,7 @@
 #!/bin/bash
 # scripts/test/scenarios/47-home-volume-isolation.sh
 # platform: linux
+# privilege: user
 #
 # The home volume is per-workspace by default (devcontainer-home-<dir>,
 # <dir> = basename of the launch directory), so one project's agent can't
@@ -47,8 +48,8 @@ remember_container "dev-proj-d"
 
 cd "$PROJ_A" || exit 1
 remember_volume devcontainer-home-proj-a
-if ! "$DEV" -- sh -c 'echo isolated > /home/vscode/.marker47' >/dev/null 2>&1; then
-    log_fail "dev -- (write marker) failed in $PROJ_A"
+if ! "$DEV" exec -- sh -c 'echo isolated > /home/vscode/.marker47' >/dev/null 2>&1; then
+    log_fail "dev exec -- (write marker) failed in $PROJ_A"
     exit 1
 fi
 if ! "$RUNTIME" volume inspect devcontainer-home-proj-a >/dev/null 2>&1; then
@@ -58,7 +59,7 @@ fi
 
 cd "$PROJ_B" || exit 1
 remember_volume devcontainer-home-proj-b
-if "$DEV" -- test -e /home/vscode/.marker47 >/dev/null 2>&1; then
+if "$DEV" exec -- test -e /home/vscode/.marker47 >/dev/null 2>&1; then
     log_fail "proj-b's home volume sees proj-a's marker — home volumes are not isolated"
     exit 1
 fi
@@ -75,8 +76,8 @@ cd "$PROJ_C" || exit 1
 # devcontainer-home is the legacy shared volume; removing it on cleanup is
 # safe on disposable CI VMs and matches scenarios 42/44's convention.
 remember_volume devcontainer-home
-if ! DEV_SHARED_HOME=1 "$DEV" -- sh -c 'echo shared > /home/vscode/.marker47-shared' >/dev/null 2>&1; then
-    log_fail "DEV_SHARED_HOME=1 dev -- (write marker) failed in $PROJ_C"
+if ! DEV_SHARED_HOME=1 "$DEV" exec -- sh -c 'echo shared > /home/vscode/.marker47-shared' >/dev/null 2>&1; then
+    log_fail "DEV_SHARED_HOME=1 dev exec -- (write marker) failed in $PROJ_C"
     exit 1
 fi
 if ! "$RUNTIME" volume inspect devcontainer-home >/dev/null 2>&1; then
@@ -85,7 +86,7 @@ if ! "$RUNTIME" volume inspect devcontainer-home >/dev/null 2>&1; then
 fi
 
 cd "$PROJ_D" || exit 1
-if ! DEV_SHARED_HOME=1 "$DEV" -- test -e /home/vscode/.marker47-shared >/dev/null 2>&1; then
+if ! DEV_SHARED_HOME=1 "$DEV" exec -- test -e /home/vscode/.marker47-shared >/dev/null 2>&1; then
     log_fail "DEV_SHARED_HOME=1 in proj-d did not see proj-c's marker — shared volume not reused"
     exit 1
 fi

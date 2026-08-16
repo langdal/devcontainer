@@ -4,7 +4,7 @@ set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 
 command -v docker >/dev/null 2>&1 || command -v podman >/dev/null 2>&1 \
-    || { echo "no container runtime on PATH"; exit 1; }
+    || { echo "SKIP: no container runtime on PATH"; exit 77; }
 
 STATE_HOME=$(mktemp -d)
 WORKDIR=$(mktemp -d)
@@ -21,7 +21,7 @@ chmod +x "$STUB/curl"
 
 run_dev() {
     (cd "$WORKDIR" && env PATH="$STUB:$PATH" XDG_STATE_HOME="$STATE_HOME" "$@" \
-        "$ROOT/dev" --dry-run </dev/null 2>&1)
+        "$ROOT/dev" up --dry-run </dev/null 2>&1)
 }
 
 # 1. Scoped classic token -> warning naming the scopes.

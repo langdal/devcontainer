@@ -1,3 +1,10 @@
+# --- Threat model (see SECURITY.md) ---
+# May: list hostnames the firewall's tinyproxy filter allows on 80/443.
+# Every entry here is reachable bidirectionally (allowlisting is not
+# exfiltration-proofing — see SECURITY.md §4).
+# Must never: contain a wildcard broader than a vendor's own registry/CDN
+# subdomain set, or a destination this project's tooling does not need.
+#
 # Alexandra
 *.alx.dk
 *.alexandra.dk
@@ -16,12 +23,44 @@ codeload.github.com
 *.githubusercontent.com
 ghcr.io
 
-# Package registries
+# Node / JS package registries
 *.npmjs.org
+registry.yarnpkg.com
+repo.yarnpkg.com
+
+# Python
 pypi.org
 files.pythonhosted.org
+www.python.org
+
+# Rust (crates.io sparse index lives on index.crates.io; rustup for
+# non-mise installs)
 crates.io
 static.crates.io
+index.crates.io
+sh.rustup.rs
+static.rust-lang.org
+
+# Go (toolchain tarballs come from dl.google.com; module proxy + checksum db)
+dl.google.com
+proxy.golang.org
+sum.golang.org
+index.golang.org
+
+# JVM (temurin via adoptium; maven binaries from apache; Maven Central).
+# NOTE: JVM tools ignore HTTPS_PROXY env — Maven needs ~/.m2/settings.xml
+# with a <proxies> entry pointing at 127.0.0.1:8888 (see README).
+api.adoptium.net
+archive.apache.org
+dlcdn.apache.org
+repo.maven.apache.org
+repo1.maven.org
+
+# .NET (install script host + SDK downloads + NuGet)
+dot.net
+builds.dotnet.microsoft.com
+dotnetcli.azureedge.net
+api.nuget.org
 
 # mise / language runtimes
 mise.jdx.dev

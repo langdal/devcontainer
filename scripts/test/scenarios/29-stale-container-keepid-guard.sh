@@ -1,6 +1,7 @@
 #!/bin/bash
 # scripts/test/scenarios/29-stale-container-keepid-guard.sh
 # platform: linux
+# privilege: user
 #
 # dev reuses a name-matched container via `exec`. A container created before
 # --userns=keep-id was applied (older dev version, or a different runtime)
@@ -39,7 +40,7 @@ if ! "$RUNTIME" run -d --name "$N" -v devcontainer-mise:/mise \
     exit 1
 fi
 
-out=$(DEV_ASSUME_YES=1 ./dev -- bash -c \
+out=$(DEV_ASSUME_YES=1 ./dev exec -- bash -c \
     'touch /mise/cache/_guard_probe 2>/dev/null && { echo MISE_WRITABLE; rm -f /mise/cache/_guard_probe; } || echo MISE_DENIED' \
     </dev/null 2>&1)
 

@@ -1,6 +1,7 @@
 #!/bin/bash
 # scripts/test/scenarios/10-cgroupv2-default.sh
 # platform: linux
+# privilege: user
 set -u
 LIB="$(dirname "$0")/../lib"
 # shellcheck source=scripts/test/lib/assert.sh
@@ -19,7 +20,7 @@ fi
 cd "$(dirname "$0")/../../.." || exit 1
 "$RUNTIME" rm -f "dev-$(basename "$(pwd)")"-dind 2>/dev/null
 
-if ! ./dev --dind -- docker version >/dev/null 2>&1; then
+if ! ./dev exec --dind -- docker version >/dev/null 2>&1; then
     log_fail "dev --dind on cgroup v2 failed; check dockerd-rootless.log"
     exit 1
 fi

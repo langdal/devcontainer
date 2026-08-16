@@ -6,7 +6,7 @@
 # non-zero if any check fails.
 #
 # Designed to be invoked by host-side scenario scripts via:
-#     ./dev --dind -- /workspace/scripts/verify-dind.sh
+#     ./dev exec --dind -- /workspace/scripts/verify-dind.sh
 set -u
 
 PASS=0; FAIL=0

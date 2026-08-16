@@ -1,11 +1,13 @@
 #!/bin/bash
 # scripts/test/scenarios/13-apparmor-enforcing.sh
 # platform: linux
+# privilege: root
 set -u
 LIB="$(dirname "$0")/../lib"
 # shellcheck source=scripts/test/lib/assert.sh
 . "$LIB/assert.sh"
 require_platform linux
+require_privilege root
 
 if ! command -v aa-status >/dev/null 2>&1; then
     log_skip "AppArmor not installed on host"
@@ -20,7 +22,7 @@ cd "$(dirname "$0")/../../.." || exit 1
 "$RUNTIME" rm -f "dev-$(basename "$(pwd)")"-dind 2>/dev/null
 
 # We pass --security-opt apparmor=unconfined; this should work in enforcing mode.
-if ! ./dev --dind -- docker version >/dev/null 2>&1; then
+if ! ./dev exec --dind -- docker version >/dev/null 2>&1; then
     log_fail "AppArmor enforcing host: --dind failed"
     exit 1
 fi

@@ -1,8 +1,9 @@
 #!/bin/bash
 # scripts/test/scenarios/21-monitor-firewall-targets-dind.sh
 # platform: linux
+# privilege: user
 #
-# `dev fw log`, `fw drops`, `fw disable`, `fw enable`
+# `dev fw log`, `fw drops`, `fw open`, `fw close`
 # must operate on whichever workspace container is running (normal *or*
 # dind). The dind container has the same firewall stack as the normal one
 # (firewall-init.sh runs unless DEVCONTAINER_MAINTENANCE=1, tinyproxy on
@@ -29,50 +30,61 @@ run_bg() {
 
 "$RUNTIME" rm -f "$N" "$M" "$D" 2>/dev/null
 
-# 0. Regression: with the normal container running, `fw disable`
-#    and `fw enable` must continue to work as before.
-run_bg ./dev -- sleep 60
+# 0. Regression: with the normal container running, `fw open`
+#    and `fw close` must continue to work as before.
+run_bg ./dev exec -- sleep 60
 if ! "$RUNTIME" ps -q -f name="^${N}$" | grep -q .; then
     log_fail "precondition: normal container ${N} did not start"
     exit 1
 fi
-if ! out=$(./dev fw disable 2>&1); then
-    log_fail "fw disable regressed against normal container: $out"
+if ! out=$(./dev fw open 2>&1); then
+    log_fail "fw open regressed against normal container: $out"
     exit 1
 fi
 expect_grep "$out" "firewall disabled" \
-    || { log_fail "fw disable on normal did not print 'firewall disabled': $out"; exit 1; }
-if ! out=$(./dev fw enable 2>&1); then
-    log_fail "fw enable regressed against normal container: $out"
+    || { log_fail "fw open on normal did not print 'firewall disabled': $out"; exit 1; }
+if ! out=$(./dev fw close 2>&1); then
+    log_fail "fw close regressed against normal container: $out"
     exit 1
 fi
 expect_grep "$out" "firewall-init: ready" \
-    || { log_fail "fw enable on normal did not invoke firewall-init.sh: $out"; exit 1; }
+    || { log_fail "fw close on normal did not invoke firewall-init.sh: $out"; exit 1; }
+# Evidence, not just the log line: the "ready" message printed even when
+# fw_close's OPEN-branch regression (C-1) left OUTPUT ACCEPT, so confirm the
+# kernel policy actually flipped to DROP.
+pol=$("$RUNTIME" exec --user root "$N" iptables -S OUTPUT 2>&1 | head -1)
+expect_grep "$pol" "OUTPUT DROP" \
+    || { log_fail "fw close on normal did not set OUTPUT policy to DROP: $pol"; exit 1; }
 "$RUNTIME" stop "$N" 2>/dev/null; "$RUNTIME" rm -f "$N" 2>/dev/null
 
-# 1. With only the dind container running, `fw enable` and
-#    `fw disable` must operate on it instead of erroring
+# 1. With only the dind container running, `fw close` and
+#    `fw open` must operate on it instead of erroring
 #    "container <normal-name> is not running".
-run_bg ./dev --dind -- sleep 60
+run_bg ./dev exec --dind -- sleep 60
 sleep 6   # dockerd-rootless takes longer to come up
 if ! "$RUNTIME" ps -q -f name="^${D}$" | grep -q .; then
     log_fail "precondition: dind container ${D} did not start"
     exit 1
 fi
 
-if ! out=$(./dev fw disable 2>&1); then
-    log_fail "fw disable failed against running dind: $out"
+if ! out=$(./dev fw open 2>&1); then
+    log_fail "fw open failed against running dind: $out"
     exit 1
 fi
 expect_grep "$out" "firewall disabled" \
-    || { log_fail "fw disable on dind did not print 'firewall disabled': $out"; exit 1; }
+    || { log_fail "fw open on dind did not print 'firewall disabled': $out"; exit 1; }
 
-if ! out=$(./dev fw enable 2>&1); then
-    log_fail "fw enable failed against running dind: $out"
+if ! out=$(./dev fw close 2>&1); then
+    log_fail "fw close failed against running dind: $out"
     exit 1
 fi
 expect_grep "$out" "firewall-init: ready" \
-    || { log_fail "fw enable on dind did not invoke firewall-init.sh: $out"; exit 1; }
+    || { log_fail "fw close on dind did not invoke firewall-init.sh: $out"; exit 1; }
+# Same evidence check as step 0 (environmental on hosts where dind itself
+# can't come up, since it depends on the same apparmor/subuid preflights).
+pol=$("$RUNTIME" exec --user root "$D" iptables -S OUTPUT 2>&1 | head -1)
+expect_grep "$pol" "OUTPUT DROP" \
+    || { log_fail "fw close on dind did not set OUTPUT policy to DROP: $pol"; exit 1; }
 
 # `fw log` exec's `tail -F`. Bound it with timeout, redirect stdin from
 # /dev/null so the test passes in non-TTY runs (the existing -it flag
@@ -88,12 +100,12 @@ fi
 
 # 2. With only the maintenance container running, all four management
 #    commands must refuse with a clear maintenance-mode message.
-run_bg ./dev --maintenance -- sleep 60
+run_bg ./dev exec --maint -- sleep 60
 if ! "$RUNTIME" ps -q -f name="^${M}$" | grep -q .; then
     log_fail "precondition: maintenance container ${M} did not start"
     exit 1
 fi
-for action in log drops disable enable; do
+for action in log drops open close; do
     if out=$(./dev fw "$action" </dev/null 2>&1); then
         log_fail "fw $action should have refused while maintenance is running"
         exit 1
@@ -105,8 +117,9 @@ done
 
 # 3. With no workspace container running, the read-only/restore management
 #    commands must error with a clear "not running" / "no container" message.
-#    `fw disable` is excluded here: it doubles as a start command (step 4).
-for action in log drops enable; do
+#    `fw open` is excluded here: it never cold-starts (see step 4, which
+#    exercises the exec --open replacement for the old fw-disable fallthrough).
+for action in log drops close; do
     if out=$(./dev fw "$action" </dev/null 2>&1); then
         log_fail "fw $action should have refused with no container running"
         exit 1
@@ -115,26 +128,34 @@ for action in log drops enable; do
         || { log_fail "fw $action should report no running container; got: $out"; exit 1; }
 done
 
-# 4. `fw disable` with no container running must START a fresh normal
-#    container with the firewall already open (same end state as
-#    start-then-toggle), not error. Confirm via the OUTPUT chain policy:
+# 4. `dev exec --open` (replacing the old `fw disable` cold-start fallthrough)
+#    with no container running must START a fresh normal container with the
+#    firewall already open, not error. Confirm via the OUTPUT chain policy:
 #    ACCEPT when disabled vs the default-deny DROP.
-run_bg ./dev fw disable -- sleep 60
+run_bg ./dev exec --open -- sleep 60
 if ! "$RUNTIME" ps -q -f name="^${N}$" | grep -q .; then
-    log_fail "fw disable with no container running did not start ${N}"
+    log_fail "exec --open with no container running did not start ${N}"
     exit 1
 fi
 sleep 2   # firewall-init.sh + firewall-disable.sh run before the CMD
-out=$(docker exec --user root "$N" iptables -S OUTPUT 2>&1 | head -1)
+out=$("$RUNTIME" exec --user root "$N" iptables -S OUTPUT 2>&1 | head -1)
 expect_grep "$out" "OUTPUT ACCEPT" \
-    || { log_fail "fresh fw disable container should have OUTPUT policy ACCEPT; got: $out"; exit 1; }
-# And it must be re-securable in place with `fw enable`.
-if ! out=$(./dev fw enable 2>&1); then
-    log_fail "fw enable failed against fresh fw-disabled container: $out"
+    || { log_fail "fresh exec --open container should have OUTPUT policy ACCEPT; got: $out"; exit 1; }
+# And it must be re-securable in place with `fw close`.
+if ! out=$(./dev fw close 2>&1); then
+    log_fail "fw close failed against fresh fw-open container: $out"
     exit 1
 fi
 expect_grep "$out" "firewall-init: ready" \
-    || { log_fail "fw enable did not invoke firewall-init.sh: $out"; exit 1; }
+    || { log_fail "fw close did not invoke firewall-init.sh: $out"; exit 1; }
+# This is the C-1 regression check: a container that started with
+# DEVCONTAINER_EGRESS=open (via exec --open) is exactly the case where fw
+# close previously inherited that env and silently stayed in the OPEN
+# branch. Confirm OUTPUT actually flipped to DROP, not just that "ready"
+# printed.
+pol=$("$RUNTIME" exec --user root "$N" iptables -S OUTPUT 2>&1 | head -1)
+expect_grep "$pol" "OUTPUT DROP" \
+    || { log_fail "fw close on a fresh fw-open container did not set OUTPUT policy to DROP: $pol"; exit 1; }
 "$RUNTIME" stop "$N" 2>/dev/null; "$RUNTIME" rm -f "$N" 2>/dev/null
 
 log_pass "monitor + firewall management commands target running normal-or-dind container"

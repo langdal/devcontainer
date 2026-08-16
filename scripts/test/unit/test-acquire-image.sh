@@ -9,7 +9,9 @@ export DEV_CI_CACHE_DIR
 
 # Source: a small file we control.
 echo "hello qemu world" > "$TMPDIR/src.qcow2"
-sha=$(sha256sum "$TMPDIR/src.qcow2" | awk '{print $1}')
+# sha256_of comes from run-in-vm.sh above; macOS has no sha256sum, only
+# `shasum -a 256`, which is exactly what that wrapper exists to paper over.
+sha=$(sha256_of "$TMPDIR/src.qcow2")
 
 # First call: cache miss, downloads.
 out=$(acquire_image "file://$TMPDIR/src.qcow2" "$sha" "testdistro")

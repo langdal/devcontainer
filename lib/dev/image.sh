@@ -106,7 +106,7 @@ check_image_uid_match() {
   fi
   if [[ ! -t 0 ]]; then
     echo "Error: image $tag was built for UID:GID $img_id, but you are $HOST_UID:$HOST_GID." >&2
-    echo "       Run 'dev --build' to rebuild for UID:GID $HOST_UID:$HOST_GID." >&2
+    echo "       Run 'dev up --build' to rebuild for UID:GID $HOST_UID:$HOST_GID." >&2
     exit 1
   fi
   echo "Image $tag was built for UID:GID $img_id, but you are $HOST_UID:$HOST_GID." >&2
@@ -156,7 +156,7 @@ check_image_version_match() {
     return 0
   fi
   if [[ ! -t 0 ]]; then
-    echo "Note: image $tag built with dev version $img_label; current dev script is $VERSION. Run 'dev --build' to rebuild." >&2
+    echo "Note: image $tag built with dev version $img_label; current dev script is $VERSION. Run 'dev up --build' to rebuild." >&2
     return 0
   fi
   echo "Image $tag was built with dev version $img_label; current dev script is $VERSION." >&2
@@ -167,7 +167,7 @@ check_image_version_match() {
       FORCE_BUILD=true
       ;;
     *)
-      echo "Continuing with existing image. Run 'dev --build' later to rebuild." >&2
+      echo "Continuing with existing image. Run 'dev up --build' later to rebuild." >&2
       ;;
   esac
 }

@@ -4,7 +4,14 @@
 # Snapshot/restore primitives. Scenarios call snapshot_* before mutating
 # host state, then `trap restore_host EXIT` to ensure cleanup.
 
-declare -A _RESTORE_SYSCTL=()
+# Indexed, not associative. macOS ships bash 3.2, where `declare -A` is a
+# hard error: the declaration failed, snapshot_sysctl's `["$key"]` subscript
+# was then parsed as arithmetic (sysctl names contain dots, so it threw), and
+# restore_host iterated an empty array. Every scenario sourcing assert.sh
+# printed two errors on a Mac and silently restored no sysctl at all. Entries
+# are "key=value" -- sysctl names never contain '=' -- matching the "path:mode"
+# idiom _RESTORE_FILES_MODE already uses.
+declare -a _RESTORE_SYSCTL=()
 declare -a _RESTORE_PATHS=()
 declare -a _RESTORE_FILES_MODE=()        # entries: "path:mode"
 declare -a _RESTORE_VOLUMES=()           # named volumes to remove
@@ -12,8 +19,9 @@ declare -a _RESTORE_PKGS=()              # packages to apt-remove if we installe
 declare -a _RESTORE_CONTAINERS=()        # containers to force-remove
 
 snapshot_sysctl() {
-    local key="$1"
-    _RESTORE_SYSCTL["$key"]=$(sysctl -n "$key" 2>/dev/null || echo "")
+    local key="$1" val
+    val=$(sysctl -n "$key" 2>/dev/null || echo "")
+    _RESTORE_SYSCTL+=("$key=$val")
 }
 
 snapshot_file_mode() {
@@ -65,8 +73,9 @@ restore_host() {
         rm -rf "$d"
     done
 
-    for k in "${!_RESTORE_SYSCTL[@]}"; do
-        local v="${_RESTORE_SYSCTL[$k]}"
+    for entry in "${_RESTORE_SYSCTL[@]:-}"; do
+        [ -z "$entry" ] && continue
+        local k="${entry%%=*}" v="${entry#*=}"
         [ -z "$v" ] && continue
         sudo sysctl -w "$k=$v" >/dev/null 2>&1
     done

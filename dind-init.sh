@@ -62,22 +62,45 @@ find "$RUN_DIR" -mindepth 1 -delete 2>/dev/null || true
 #     Merge (not clobber) so any `docker login` creds on the home volume
 #     survive. 10.0.2.2:8888 is the slirp gateway -> container loopback ->
 #     tinyproxy, reachable from nested containers once NAT is on (step 5).
+#     Only meaningful in closed mode: in open mode there is no tinyproxy
+#     listening at all (firewall-init.sh only starts it when closed), so
+#     writing this block would point nested builds at a dead proxy instead
+#     of letting them connect directly. The home volume (and therefore
+#     config.json) is persistent per-workspace, so a prior closed-mode run
+#     can leave a stale proxies.default behind; in open mode we must strip
+#     it, not just skip writing it, or a closed->open switch silently leaves
+#     nested `docker build`/`docker run` pointed at a dead 10.0.2.2:8888.
 DOCKER_CFG_DIR=/home/vscode/.docker
 DOCKER_CFG="${DOCKER_CFG_DIR}/config.json"
-mkdir -p "$DOCKER_CFG_DIR"
-[ -s "$DOCKER_CFG" ] || echo '{}' > "$DOCKER_CFG"
-tmp_cfg="$(mktemp)"
-if jq '.proxies.default = {
-        "httpProxy":  "http://10.0.2.2:8888",
-        "httpsProxy": "http://10.0.2.2:8888",
-        "noProxy":    "localhost,127.0.0.1,::1"
-    }' "$DOCKER_CFG" > "$tmp_cfg" 2>/dev/null; then
-    cat "$tmp_cfg" > "$DOCKER_CFG"
-else
-    echo "dind-init: WARNING: could not merge proxy into $DOCKER_CFG (jq failed); nested builds may not reach the network" >&2
+if [ "${DEVCONTAINER_EGRESS:-closed}" = closed ]; then
+    mkdir -p "$DOCKER_CFG_DIR"
+    [ -s "$DOCKER_CFG" ] || echo '{}' > "$DOCKER_CFG"
+    tmp_cfg="$(mktemp)"
+    if jq '.proxies.default = {
+            "httpProxy":  "http://10.0.2.2:8888",
+            "httpsProxy": "http://10.0.2.2:8888",
+            "noProxy":    "localhost,127.0.0.1,::1"
+        }' "$DOCKER_CFG" > "$tmp_cfg" 2>/dev/null; then
+        cat "$tmp_cfg" > "$DOCKER_CFG"
+    else
+        echo "dind-init: WARNING: could not merge proxy into $DOCKER_CFG (jq failed); nested builds may not reach the network" >&2
+    fi
+    rm -f "$tmp_cfg"
+    chown -R vscode:vscode "$DOCKER_CFG_DIR"
+elif [ -s "$DOCKER_CFG" ]; then
+    # Idempotent: a fresh/never-closed home volume has no config.json (the
+    # -s test skips this branch entirely), and `del(.proxies)` is a no-op
+    # when the key is already absent — so this is safe to run on every open
+    # boot regardless of history.
+    tmp_cfg="$(mktemp)"
+    if jq 'del(.proxies)' "$DOCKER_CFG" > "$tmp_cfg" 2>/dev/null; then
+        cat "$tmp_cfg" > "$DOCKER_CFG"
+        chown vscode:vscode "$DOCKER_CFG"
+    else
+        echo "dind-init: WARNING: could not strip stale proxy from $DOCKER_CFG (jq failed); nested builds may point at a dead proxy" >&2
+    fi
+    rm -f "$tmp_cfg"
 fi
-rm -f "$tmp_cfg"
-chown -R vscode:vscode "$DOCKER_CFG_DIR"
 
 touch "$LOG"
 chown vscode:vscode "$LOG"
@@ -103,14 +126,26 @@ chown vscode:vscode "$LOG"
 #                       the rootless ns reach the container's 127.0.0.1, so
 #                       we set HTTPS_PROXY=http://10.0.2.2:8888 here.
 #    HTTPS_PROXY / HTTP_PROXY: registry pulls flow through tinyproxy, which
-#                       is the only outbound path for 80/443.
+#                       is the only outbound path for 80/443 — but only in
+#                       closed mode. In open mode there is no tinyproxy
+#                       listening (firewall-init.sh only starts it when
+#                       closed), so these would point the daemon's pulls at a
+#                       dead proxy instead of letting them connect directly;
+#                       only set them when DEVCONTAINER_EGRESS=closed.
+DIND_PROXY_ENV=()
+if [ "${DEVCONTAINER_EGRESS:-closed}" = closed ]; then
+    # shellcheck disable=SC2054  # commas are part of the NO_PROXY value, not element separators
+    DIND_PROXY_ENV=(
+        HTTPS_PROXY=http://10.0.2.2:8888
+        HTTP_PROXY=http://10.0.2.2:8888
+        NO_PROXY=localhost,127.0.0.1
+    )
+fi
 gosu vscode env \
     XDG_RUNTIME_DIR="$RUN_DIR" \
     HOME=/home/vscode \
     DOCKERD_ROOTLESS_ROOTLESSKIT_DISABLE_HOST_LOOPBACK=false \
-    HTTPS_PROXY=http://10.0.2.2:8888 \
-    HTTP_PROXY=http://10.0.2.2:8888 \
-    NO_PROXY=localhost,127.0.0.1 \
+    "${DIND_PROXY_ENV[@]}" \
     PATH=/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     nohup /usr/local/bin/dockerd-rootless.sh \
         > "$LOG" 2>&1 &

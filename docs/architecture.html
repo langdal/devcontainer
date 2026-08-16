@@ -440,7 +440,7 @@
 
   <div class="seam">
     <span class="rail"></span>
-    <span class="cmd">./dev  →  <b>docker run</b>  (drops into the container)</span>
+    <span class="cmd">dev up / dev exec -- CMD  →  <b>docker run</b>  (drops into the container)</span>
     <span class="rail"></span>
   </div>
 
@@ -518,6 +518,7 @@
 
     <div class="egress">
       <h4><b>The security boundary</b> — the only way out is the gate</h4>
+      <p style="color: var(--muted); font-size: 12.5px; margin: 0 0 12px;"><span class="mono">dev up</span> defaults to <strong>open</strong> egress (no allowlist, no proxy — pictured below is <span class="mono">--closed</span> mode). <span class="mono">dev up --closed</span> (or <span class="mono">DEV_EGRESS=closed</span>) opts back into the gate; <span class="mono">dev fw log</span> shows what left the container either way.</p>
       <div class="flows">
         <div class="flow ok">
           <div class="h">Allowed egress <span class="badge">via proxy</span></div>
@@ -539,20 +540,20 @@
 
   <div class="modes">
     <div class="mode">
-      <div class="k">./dev</div>
-      <div class="v">Normal. Firewall on, no sudo. The everyday hardened shell.</div>
+      <div class="k">dev up</div>
+      <div class="v">Normal. No sudo. Open egress by default — add --closed (or DEV_EGRESS=closed) for the allowlisted gate.</div>
     </div>
     <div class="mode">
-      <div class="k">./dev --maintenance</div>
-      <div class="v">Separate container, firewall off, sudo back on — for installing system packages.</div>
+      <div class="k">dev up --maint</div>
+      <div class="v">Separate container, no firewall ever, sudo back on — for installing system packages.</div>
     </div>
     <div class="mode">
-      <div class="k">./dev --dind</div>
-      <div class="v">Adds rootless dockerd; nested pulls still routed through the proxy.</div>
+      <div class="k">dev up --dind</div>
+      <div class="v">Adds rootless dockerd; in --closed mode nested pulls are routed through the proxy too.</div>
     </div>
     <div class="mode">
-      <div class="k">./dev --pind</div>
-      <div class="v">Rootless podman (daemonless) + a Docker-API compat socket; nested egress still routed through the proxy. Mutually exclusive with --dind.</div>
+      <div class="k">dev up --pind</div>
+      <div class="v">Rootless podman (daemonless) + a Docker-API compat socket; same proxy routing as --dind in --closed mode. Mutually exclusive with --dind.</div>
     </div>
   </div>
 

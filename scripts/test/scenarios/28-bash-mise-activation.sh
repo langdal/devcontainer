@@ -1,6 +1,7 @@
 #!/bin/bash
 # scripts/test/scenarios/28-bash-mise-activation.sh
 # platform: linux
+# privilege: user
 #
 # mise must be *activated* (not merely reachable via the /mise/shims PATH
 # entry) in an interactive shell, because activation is what exports tool env
@@ -23,7 +24,7 @@ remember_container "$N"
 
 for shell in bash zsh; do
     # shellcheck disable=SC2016  # runs in the container shell, not the host
-    out=$(DEV_ASSUME_YES=1 ./dev -- "$shell" -ic 'echo "MISEFN:$(type -t mise 2>/dev/null || whence -w mise)"' </dev/null 2>&1)
+    out=$(DEV_ASSUME_YES=1 ./dev exec -- "$shell" -ic 'echo "MISEFN:$(type -t mise 2>/dev/null || whence -w mise)"' </dev/null 2>&1)
     if ! echo "$out" | grep -Eq 'MISEFN:.*function'; then
         log_fail "mise is not activated in an interactive $shell shell (JAVA_HOME et al. would be unset)"
         echo "$out" | tail -10 >&2

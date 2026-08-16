@@ -22,37 +22,39 @@ docker build -t generic-devcontainer .
 # Start/attach to container (from any project directory).
 # ./dev reads `id -u`/`id -g` and bakes them into the image automatically;
 # no manual --build-arg is needed on macOS or Linux.
-./dev
+./dev up
 
 # Run a command inside the container
-./dev -- npm run dev
+./dev exec -- npm run dev
 
 # Force rebuild (also triggered automatically on UID/GID mismatch)
-./dev --build
+./dev up --build
 
 # Maintenance shell (firewall off, sudo enabled) — for installing system
 # packages or fetching from non-allowlisted hosts. Container is named
 # dev-<dir>-maint and is mutually exclusive with the normal/dind containers.
-./dev --maintenance
+./dev up --maint
 
 # Rootless Docker-in-Docker (separate :dind image, dev-<dir>-dind container).
-./dev --dind
+./dev up --dind
 
 # Rootless Podman-in-Podman (separate :pind image, dev-<dir>-pind container).
 # Daemonless engine; exposes a Docker-API compat socket (DOCKER_HOST) for
 # testcontainers / docker-compose. Mutually exclusive with --dind and
-# --maintenance.
-./dev --pind
+# --maint.
+./dev up --pind
 
-# Toggle the firewall on a running container without restarting. If no
-# container is running, fw disable starts a fresh one with the
-# firewall already off (same end state as start-then-disable).
-./dev fw disable
-./dev fw enable
+# dev up defaults to OPEN egress (no allowlist, no proxy). Add --closed (or
+# set DEV_EGRESS=closed) to opt into the old default-deny + allowlist
+# posture instead. `fw open`/`fw close` toggle an already-running
+# container's egress mode in place without restarting; to start a FRESH
+# container in a given mode instead, use `./dev up --open`/`--closed`.
+./dev fw open
+./dev fw close
 
-# Observe firewall behaviour on a running container:
-./dev fw log     # tail tinyproxy.log
-./dev fw drops   # tcpdump on NFLOG group 1 (iptables drops)
+# Observe egress on a running container, either mode:
+./dev fw log     # closed mode: tail tinyproxy.log; open mode: DNS + connection log
+./dev fw drops   # tcpdump on NFLOG group 1 (iptables drops; closed mode only)
 
 # Remove this workspace's dev container(s) and prompt per named volume.
 ./dev reset
@@ -70,21 +72,17 @@ docker build -t generic-devcontainer .
 ./dev dotfile add ~/.config/nvim
 ./dev dotfile rm ~/.config/nvim
 
-# Scaffold a self-contained .devcontainer/ for VS Code's "Reopen in Container".
-./dev scaffold
-
 # Update a git-checkout install to the latest released tag.
 ./dev update
-```
 
-Note: the old flag spellings (`--disable-firewall`, `--enable-firewall`,
-`--monitor`, `--monitor-fw`, `--reset`, `--self-update`,
-`--create-dev-container`) still work as deprecated aliases — they warn to
-stderr and route to the subcommand above.
+# Check the host for everything dev needs (no image or container required).
+./dev doctor
+```
 
 Useful environment variables for `./dev`:
 
 - `DEV_RUNTIME=docker|podman` — force a runtime when both are installed (default: docker preferred on Linux; podman only on macOS).
+- `DEV_EGRESS=open|closed` — default egress mode for `dev up`/`dev exec` when neither `--open` nor `--closed` is given (default: `open`). Precedence: an explicit `--open`/`--closed` flag beats `DEV_EGRESS` beats the built-in `open` default; any other value is an error. Ignored under `--maint`, which never runs a firewall.
 - `DEV_ASSUME_YES=1` — accept the rebuild prompts non-interactively. Covers the UID/GID mismatch prompt (which also wipes named volumes) and the dev-script version mismatch prompt (image rebuild only, volumes untouched). Also auto-approves `.devcontainer-allowlist` changes without the interactive diff/prompt, so setting it globally waives that review.
 - `DEV_SKIP_APPARMOR_CHECK=1` — bypass the `--dind`/`--pind` AppArmor preflight (only safe with a custom profile that grants `userns,`).
 - `DEV_SKIP_SUBID_CHECK=1` — bypass the `--dind`/`--pind` preflight that requires a rootless-runtime host to grant ≥165535 subuids/subgids (rootless dockerd/podman must map the image's `vscode:100000:65536` range inside the container's user namespace; the typical 65536-id grant is too small).
@@ -96,14 +94,70 @@ Useful environment variables for `./dev`:
 There is an automated end-to-end test suite under `scripts/test/`:
 
 ```bash
-# Full matrix
+# Full matrix, rootful docker. Needs passwordless sudo.
 sudo bash scripts/test/run-all.sh
+
+# The unprivileged subset under rootless podman. No sudo anywhere.
+bash scripts/test/run-rootless.sh
 
 # Run one scenario directly (each script under scenarios/ is self-contained
 # and uses helpers from scripts/test/lib/). Pass/fail is determined by
-# log_pass/log_fail/log_skip lines.
+# log_pass/log_fail/log_skip lines; any [FAIL] line fails the scenario,
+# whatever else it printed.
 bash scripts/test/scenarios/22-cold-start-budget.sh
 ```
+
+Scenarios declare what they need in front-matter, and the orchestrator
+filters on it:
+
+```bash
+# platform: linux        # linux | darwin | any
+# privilege: root        # root = changes HOST state (sysctls, AppArmor,
+                         # package installs, device nodes); user = needs
+                         # only a working runtime
+```
+
+`DEV_TEST_PRIVILEGE=user` runs only the `user` subset and requires no sudo;
+unset means "run everything". 9 of the 41 scenarios are `root`.
+
+Two cells on the dev host, both measured with `GITHUB_TOKEN` set — without it
+the numbers are not reproducible, for the reason below. Treat any tally as
+**indicative only, not a baseline to compare against** (see
+`docs/ci-testing.md`, which is authoritative): pass/fail/skip counts shift
+with host state (`kernel.apparmor_restrict_unprivileged_userns`, subuid/subgid
+grants) that vary between machines and over time. Compare the failure SET,
+not just the tally: a run can hit the same count with a different set.
+
+| Cell | Command |
+| --- | --- |
+| rootful docker | `sudo --preserve-env=GITHUB_TOKEN bash scripts/test/run-all.sh` |
+| rootless podman | `bash scripts/test/run-rootless.sh` |
+
+As last re-measured 2026-08-16, every failure in both was environmental, not a defect,
+and it is now the same story in each cell: exactly 10 failures, all tracing to
+`kernel.apparmor_restrict_unprivileged_userns=1` on this host, which blocks
+the rootless nested engines that every `--dind`/`--pind` scenario needs.
+Host-specific, not inherent to unprivileged operation. The rootless cell's
+failure set adds `16-rootless-subid-preflight` and drops one the rootful cell
+skips, so compare sets rather than assuming the two 10s are identical.
+
+**Set `GITHUB_TOKEN` before every run.** The 60/hr anonymous limit is per IP
+and shared with everything else on the host, so it is usually already spent by
+the time a suite reaches the image-building scenarios. It does not fail
+loudly: the affected scenarios just fail, with no rate-limit text anywhere in
+the log, which reads as a code regression. Confirmed on 2026-08-16 — a run
+with the quota exhausted produced 23/11/6, and the single extra failure
+(`46-version-mismatch`) passed on its own the moment a token was present. A
+scopeless or fine-grained PAT is enough; it raises the limit to 5000/hr and
+grants nothing. Under `sudo`, pass it with
+`sudo --preserve-env=GITHUB_TOKEN` rather than on the command line, so it
+does not appear in `ps`.
+
+Comparing two runs requires capturing each to its own file —
+`scripts/test/last-run.log` is shared and overwritten per run — and requires
+that nothing else drives the suite concurrently. Two agents running it at once
+share one image tag, one container namespace and one volume namespace, and
+will produce results that agree with each other and with nothing else.
 
 The orchestrator needs passwordless `sudo`. It auto-installs `docker.io`,
 `docker-buildx`, and `podman` on Debian/Ubuntu hosts if a runtime is
@@ -115,7 +169,8 @@ at `scripts/test/last-run.log` and `scripts/test/last-summary.log`.
 
 In addition there are two in-container probes:
 
-- `scripts/verify-firewall.sh` — 12 checks. 7 cover the firewall posture;
+- `scripts/verify-firewall.sh` — 13 checks. 8 cover the firewall posture
+  (including the direct-IPv6-bypass probe);
   checks 8–12 activate when `DEVCONTAINER_DIND=1` or `DEVCONTAINER_PIND=1`
   and verify the rootless nested engine, registry pulls through the proxy,
   and that nested containers can reach loopback ports but not the internet.
@@ -126,7 +181,26 @@ In addition there are two in-container probes:
   `docker -H "$DOCKER_HOST" ...` talk to the Docker-API compat socket
   directly via curl instead.
 
-There is no linter or CI pipeline.
+Linting is `bash scripts/lint.sh`: shellcheck over every tracked shell file,
+hadolint on the Dockerfile, actionlint on the workflows, the line budgets over
+`dev` and `lib/dev/*.sh`, and a bash 3.2 portability gate. That last one
+matters because macOS still ships bash 3.2 as `/bin/bash` and `dev` plus the
+test harness run there directly: `declare -A`, `mapfile`, `${var^}` and
+friends are rejected in host-side files. Container-side scripts
+(`entrypoint.sh`, `firewall-init.sh`, `dind-init.sh`, `scripts/verify-*.sh`)
+run against bash 5 and are exempt, as is `scripts/test/run-e2e.sh`, which is
+Linux-only by construction.
+
+lint.sh fetches pinned hadolint and actionlint binaries into
+`${XDG_CACHE_HOME:-~/.cache}/devcontainer-ci/bin` on first run — a network
+fetch and an executable written outside the repo, worth knowing before running
+it on a machine you care about. Every platform's checksum is pinned and
+verification fails closed: an unrecognised platform or a missing digest tool
+refuses rather than skipping.
+
+CI is `.github/workflows/ci.yml`. All jobs gate: `rootless-linux` and
+`macos-checks` lost their bootstrap `continue-on-error` after their first
+green runs (2026-08-16, run 31938260294).
 
 ## Architecture
 
@@ -138,6 +212,43 @@ Three components, each with a distinct role:
 
 - **dev** — Host-side bash script managing the container lifecycle. Handles image auto-build, container reuse (attach to running/restart stopped), volume mounts, port forwarding, and `GITHUB_TOKEN` passthrough.
 
+`dev` itself is a thin subcommand router: it sources every file under
+`lib/dev/*.sh` and dispatches the first argument to a `cmd_*` function.
+Each verb (`up`/`exec`/`shell`, `down`/`status`, `fw`, `agent`, `dotfile`,
+`reset`, `update`, `install`, `doctor`) gets roughly one module, plus a
+handful of shared-concern modules split out of the old monolith:
+`container.sh` and `volumes.sh` (container lifecycle and mount/volume
+logic), `lifecycle.sh` (`start_container`, the terminal step of the start
+flow: reuse-vs-create, assembling the runtime's `run` command, exec or
+`--dry-run` print), `image.sh` (image build, UID/version label checks,
+rebuild cleanup), `inject.sh` (shared plumbing behind `agent`/`dotfile`),
+`runtime.sh` (docker/podman detection), `approval.sh` (the
+project-allowlist diff/approve flow), `usage.sh` (the `--help` text), and
+`checks.sh` + `checks-catalog.sh` + `checks-catalog-nested.sh` (the
+host-check registry shared by `dev doctor` and the blocking preflights in
+`dev up`). `scripts/lint.sh` enforces a line-budget gate over `dev` and
+`lib/dev/*.sh` so this stays split rather than regrowing into one large
+file.
+
+`checks.sh` holds the `CHECKS` array (one entry per requirement:
+`id|phase|applies-to|severity|title`) plus the machinery that reads it
+(`check_field`, `check_applies`, `run_check`, `checks_select`);
+`checks-catalog.sh` holds the `_chk_<id>` / `_chk_<id>_fix` probe/fix
+function pairs the registry dispatches to by name. `checks-catalog-nested.sh`
+holds the subset of those pairs for `block-if-nested` checks only (userns
+sysctl, subid grant, fuse device, cgroup2 — the `--dind`/`--pind`-only
+gates), split out once `checks-catalog.sh` grew past its own line-budget.
+There are four
+severities: `block` refuses in both `dev up` and `dev doctor`;
+`block-if-nested` blocks only under `--dind`/`--pind`; `block-in-doctor`
+blocks `dev doctor` (readiness) but never `dev up`, because
+`lib/dev/image.sh` already guards the real build site with the same probe;
+`advise` never blocks anything. `dev doctor` runs every applicable entry,
+`cmd_start` runs the blocking subset, so the two can never disagree about
+whether a host is usable. Probes reach the outside world only through the
+indirections in `runtime.sh`, which is what makes the macOS checks
+testable from Linux.
+
 ## Key Design Decisions
 
 - **Mise data lives at `/mise/`**, not in the home directory. `MISE_DATA_DIR`, `MISE_CONFIG_DIR`, and `MISE_CACHE_DIR` all point there. This allows the mise volume (`devcontainer-mise`) and the home volume to be independent.
@@ -147,19 +258,19 @@ Three components, each with a distinct role:
 - **Containers are `--rm`** (ephemeral) but the `dev` script reuses a running/stopped container named `dev-<dirname>` before creating a new one.
 - **Base tools** (node LTS, ripgrep, eza, lazygit, neovim) are defined in `mise.base.toml` and baked into the image at build time. The name is deliberate: mise auto-discovers `mise.toml` / `.mise.toml`, so the baked-tools list lives under a non-discoverable name to keep it separable from the project-level `mise.toml` that consumers (and this repo itself) place at the workspace root.
 - **Developer tools** for working on *this* repo (shellcheck, hadolint, actionlint, jq) live in a workspace-root `mise.toml`. Running `mise install` from the repo root installs them; `entrypoint.sh` also runs `mise install` automatically when the container starts with `/workspace/mise.toml` present. Per-project tools in *consuming* projects come from their own `mise.toml`.
-- **Opt-in Docker-in-Docker** via `./dev --dind`. Builds a separate
+- **Opt-in Docker-in-Docker** via `./dev up --dind`. Builds a separate
   `generic-devcontainer:dind` image (the `dind` target in the multi-stage
   Dockerfile) that adds rootless `dockerd`, fuse-overlayfs, and
   slirp4netns. The container is named `dev-<dir>-dind`, mounts
   `/dev/fuse` + `/dev/net/tun`, and uses a dedicated `devcontainer-dind`
   cache volume. Registry pulls flow through `tinyproxy` via the
   slirp4netns gateway (`HTTPS_PROXY=http://10.0.2.2:8888`). Mutually
-  exclusive with `--maintenance` and `--pind` (four-way conflict guard
+  exclusive with `--maint` and `--pind` (four-way conflict guard
   between normal / maintenance / dind / pind containers). On Ubuntu 23.10+/Linux 6.x
   hosts `./dev` preflights `kernel.apparmor_restrict_unprivileged_userns=0`
   and refuses to start with a remediation message if it is `1`. See
   README.md for details.
-- **Opt-in Podman-in-Podman** via `./dev --pind`. Builds a separate
+- **Opt-in Podman-in-Podman** via `./dev up --pind`. Builds a separate
   `generic-devcontainer:pind` image (the `pind` target in the multi-stage
   Dockerfile) that adds rootless `podman`, fuse-overlayfs, and
   slirp4netns. The container is named `dev-<dir>-pind` and uses a
@@ -176,7 +287,7 @@ Three components, each with a distinct role:
   CLI compatibility comes from the `podman-docker` shim
   (`/usr/bin/docker` → podman) plus a `docker-compose` symlink to the
   compose v2 plugin — not the real Docker CLI. Mutually exclusive with
-  `--dind` and `--maintenance` (four-way conflict guard: normal /
+  `--dind` and `--maint` (four-way conflict guard: normal /
   maintenance / dind / pind). Shares the same `kernel.apparmor_restrict_unprivileged_userns=0`
   and subuid/subgid preflights as `--dind`. See README.md for details.
 - **Opt-in agent credential injection** via `./dev agent add <name>`
@@ -205,8 +316,28 @@ Three components, each with a distinct role:
 ## Firewall (security boundary)
 
 The firewall is the project's primary security feature — the threat model
-is "an AI agent running as `vscode` cannot exfiltrate workspace contents
-to arbitrary hosts." Two layers, enforced in the kernel and at L7:
+is containment of agent reach: the agent must not find or use host
+keys/secrets by accident, or reach outside the sandbox in misguided
+loyalty to a task. Allowlisted hosts are reachable and bidirectional by
+design; this is **not** exfiltration prevention (see SECURITY.md for the
+full write-up).
+
+`dev up` defaults to **open** egress: no allowlist, no proxy, outbound
+traffic is unrestricted. `dev up --closed` opts into the old default-deny +
+curated-allowlist posture instead. Precedence, most-specific wins: an
+explicit `--open`/`--closed` flag on `dev up`/`dev exec` beats
+`DEV_EGRESS=open|closed` (a host env var that sets the default for every
+invocation) beats the built-in `open` default. `--maint` never runs a
+firewall regardless of egress mode. Isolation — no sudo, no host mounts
+beyond the workspace, per-workspace home volume, the always-on
+link-local/cloud-metadata block — is unchanged by egress mode; only closed
+mode adds the hostname allowlist. `dev fw log` shows egress activity in
+either mode — closed mode's tinyproxy log (hostnames from CONNECT), or open
+mode's DNS-query + connection (NFLOG) log, since there is no proxy to log
+through when open — so you don't have to close the firewall to get
+visibility into what a container reached.
+
+In closed mode, two layers enforce it, in the kernel and at L7:
 
 - **iptables** defaults `OUTPUT` to DROP. DNS is allowed; only the `proxy`
   user can reach `:80`/`:443`. Raw-socket bypasses by `vscode` are dropped
@@ -214,34 +345,46 @@ to arbitrary hosts." Two layers, enforced in the kernel and at L7:
 - **tinyproxy** runs in the container and filters HTTPS by hostname
   (CONNECT). Clients honour `HTTPS_PROXY=http://127.0.0.1:8888`, exported
   by the entrypoint.
-- **`vscode` has no sudo** in normal mode. There is no path to disable
-  iptables from inside the container.
+- **`vscode` has no sudo** in normal mode, in either egress mode. There is
+  no path to disable iptables from inside the container.
 
-Two allowlist files merge at container startup (deduplicated):
+Two allowlist files merge at container startup (deduplicated), consulted
+only in closed mode:
 
 - `allowlist.base` — baked into the image at `/etc/devcontainer/allowlist.base`
   (Anthropic, GitHub, common registries, mise, OS mirrors). Edit and rebuild
   to change.
-- `.devcontainer-allowlist` at the workspace root — optional, read at every
-  container start. No image rebuild needed; restart the container.
-- `allowlist.dind` — additionally merged when DinD is active (Docker Hub,
-  MCR, Quay, GCR, etc.). `--pind` reuses this same file (there is no
+- `.devcontainer-allowlist` at the workspace root — optional, project-specific.
+  Because the workspace is agent-writable, the firewall **never** reads this
+  file directly: `firewall-init.sh` only ever consumes the host-side
+  APPROVED snapshot at `/etc/devcontainer/project/allowlist.approved`,
+  mounted read-only. `dev` (`lib/dev/approval.sh`) maintains that snapshot —
+  on every start it diffs the workspace file against the last approved copy
+  (kept under `~/.local/state/devcontainer/`) and prompts to approve
+  changes; declined or non-interactive runs start WITHOUT the project
+  allowlist (fail-safe, never blocks). Editing the workspace file alone has
+  no effect until it is approved; restart after approving to pick it up (no
+  image rebuild needed).
+- `allowlist.dind` — additionally merged when DinD/PinD is active (Docker
+  Hub, MCR, Quay, GCR, etc.). `--pind` reuses this same file (there is no
   separate `allowlist.pind`) since both nested engines pull from the same
   registries.
 
 Format: one entry per line, `#` comments. Bare hostname matches exactly;
 `*.example.com` matches any subdomain (list both if you need both).
 
-When the firewall is in the way, prefer `--maintenance` (its own container,
-sudo + no firewall) over toggling on the running container — the toggle
-flags do not change the container name, so there is no visible signal that
-the firewall is off.
+When the firewall is in the way on a closed run, prefer `--maint` (its own
+container, sudo + no firewall) over toggling a running container open — the
+toggle flags do not change the container name, so there is no visible
+signal that egress is currently open.
 
 For reaching a service on the Docker host (local LLM server, metrics
-endpoint, etc.) prefer `--host-port PORT` (repeatable) over `--maintenance`
-or `--network host`. It adds `--add-host=host.docker.internal:host-gateway`
+endpoint, etc.) prefer `--host-port PORT` (repeatable) over `--maint` or
+`--network host`. It adds `--add-host=host.docker.internal:host-gateway`
 plus a single iptables `ACCEPT` rule for that port against the host gateway
-IP only — the rest of the firewall posture is unchanged. Inside the
-container, reach the service at `host.docker.internal:PORT`. The env
-contract is `DEVCONTAINER_HOST_PORTS=p1,p2,...`, consumed by
-`firewall-init.sh`.
+IP only. In closed mode the rest of the firewall posture is unchanged; in
+open mode the gateway is already reachable like any other host, so
+`--host-port` is mainly useful there for a stable `host.docker.internal`
+hostname, or for `--closed` runs. Inside the container, reach the service at
+`host.docker.internal:PORT`. The env contract is
+`DEVCONTAINER_HOST_PORTS=p1,p2,...`, consumed by `firewall-init.sh`.

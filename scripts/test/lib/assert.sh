@@ -27,7 +27,13 @@ export RUNTIME
 export SCENARIO_RESULT=""
 
 _scenario_name() {
-    basename "${BASH_SOURCE[2]:-${BASH_SOURCE[1]:-unknown}}" .sh
+    # The scenario file is the OUTERMOST frame, not one at a fixed depth.
+    # log_* is called both directly from a scenario (depth 2) and from helpers
+    # defined in THIS file -- require_platform, require_privilege -- where a
+    # fixed depth resolves to assert.sh itself and the run-all summary labels
+    # the row "assert" instead of the scenario that skipped.
+    local n=$(( ${#BASH_SOURCE[@]} - 1 ))
+    basename "${BASH_SOURCE[$n]:-unknown}" .sh
 }
 
 log_pass() {
@@ -77,5 +83,32 @@ require_platform() {
         darwin) [[ "$got" == "darwin" ]] || { log_skip "scenario is $want only (host is $got)"; exit 0; } ;;
         any)    : ;;
         *)      log_fail "unknown platform tag: $want"; exit 1 ;;
+    esac
+}
+
+# Read scenario front-matter privilege tag. Returns "root" / "user" / "any".
+# "root" means the scenario manipulates HOST state — sysctls, AppArmor
+# profiles, package installs, device nodes — and cannot run in a cell that has
+# no sudo. "user" means it needs only a working runtime.
+scenario_privilege() {
+    local f="${BASH_SOURCE[1]}"
+    local tag
+    tag=$(awk '/^# privilege:/{print $3; exit}' "$f" 2>/dev/null)
+    echo "${tag:-any}"
+}
+
+# Skip the scenario when the current run cannot grant what it needs.
+# DEV_TEST_PRIVILEGE is set by the orchestrator: "root" (the default sudo
+# invocation) runs everything; "user" runs only what needs no host changes.
+# Unset means "run everything", so existing invocations are unaffected.
+require_privilege() {
+    local want="$1"
+    local have="${DEV_TEST_PRIVILEGE:-root}"
+    case "$want" in
+        root)
+            [[ "$have" == root ]] || {
+                log_skip "scenario needs host privileges (run is $have)"; exit 0; } ;;
+        user|any) : ;;
+        *) log_fail "unknown privilege tag: $want"; exit 1 ;;
     esac
 }

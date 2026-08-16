@@ -1,3 +1,10 @@
+# --- Threat model (see SECURITY.md) ---
+# May: strip vscode's sudo, stage the firewall scripts + base allowlist
+# read-only, rename the tinyproxy binary so no host AppArmor profile
+# attaches to it, create the unprivileged 'proxy' user iptables keys off.
+# Must never: leave vscode with sudo/root in the default (non-maintenance,
+# non-dind, non-pind) image, or bake host secrets/credentials into a layer.
+#
 # Pinned to a sha256 digest so the same image is reproduced byte-for-byte.
 # Bump the digest deliberately by re-running:
 #     docker manifest inspect mcr.microsoft.com/devcontainers/base:ubuntu \
@@ -51,6 +58,16 @@ RUN apt-get update && \
         iproute2 \
         tcpdump && \
     rm -rf /var/lib/apt/lists/*
+
+# Run tinyproxy from a copied path. AppArmor attaches profiles by binary path
+# and that attachment crosses the container boundary under rootless runtimes
+# (container processes run unconfined, so a host /etc/apparmor.d/tinyproxy
+# profile confines the CONTAINER's tinyproxy too — it then cannot read
+# /etc/tinyproxy/filter or write its pidfile and the firewall fails closed at
+# startup). A name no host profile attaches to sidesteps that entirely. Short
+# name on purpose: it must survive the kernel's 15-char comm truncation so
+# `pkill -x dc-tinyproxy` still matches (see firewall-init.sh).
+RUN cp "$(command -v tinyproxy)" /usr/local/sbin/dc-tinyproxy
 
 # Strip vscode's passwordless sudo. vscode is the agent-facing user; if it
 # can sudo, it can flush iptables and defeat the firewall. Maintenance mode

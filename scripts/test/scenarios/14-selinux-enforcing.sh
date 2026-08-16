@@ -1,6 +1,7 @@
 #!/bin/bash
 # scripts/test/scenarios/14-selinux-enforcing.sh
 # platform: linux
+# privilege: user
 set -u
 LIB="$(dirname "$0")/../lib"
 # shellcheck source=scripts/test/lib/assert.sh
@@ -19,7 +20,7 @@ fi
 cd "$(dirname "$0")/../../.." || exit 1
 "$RUNTIME" rm -f "dev-$(basename "$(pwd)")"-dind 2>/dev/null
 
-if ! ./dev --dind -- docker version >/dev/null 2>&1; then
+if ! ./dev exec --dind -- docker version >/dev/null 2>&1; then
     log_fail "SELinux enforcing host: --dind failed (may need --security-opt label=disable)"
     exit 1
 fi

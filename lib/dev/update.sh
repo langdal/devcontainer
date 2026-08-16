@@ -2,6 +2,21 @@
 # lib/dev/update.sh — `dev update` (self-update the git checkout to latest tag).
 # Sourced by dev; not executed directly.
 
+# cmd_update [--dry-run]: the `dev update` verb.
+cmd_update() {
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      --dry-run) DRY_RUN=true; shift ;;
+      *)
+        echo "Error: dev update: unknown option: $1" >&2
+        exit 1
+        ;;
+    esac
+  done
+  self_update
+  exit 0
+}
+
 # --self-update: pull the latest tag in the script's git checkout in place.
 # Detection model: we treat "installed via install.sh OR manual git clone" as
 # the same case — both produce a git checkout at SCRIPT_DIR. The git checkout
@@ -41,10 +56,15 @@ self_update() {
     git -C "$SCRIPT_DIR" fetch --tags --prune origin
   fi
 
-  # Same sort as install.sh: version:refname picks the highest semver tag.
+  # Same sort AND prerelease filter as install.sh: version:refname picks the
+  # highest semver tag, but without a versionsort.suffix hint it ranks
+  # v1.0.0-rc.1 after v1.0.0 (longer string wins on tie) — so filter to
+  # strict vMAJOR.MINOR.PATCH tags first, keeping prereleases (-rc, -beta,
+  # ...) from ever becoming the update target.
   local latest
   latest="$(git -C "$SCRIPT_DIR" ls-remote --tags --refs --sort='version:refname' origin 2>/dev/null \
     | awk -F/ '{print $NF}' \
+    | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' \
     | tail -1)"
   if [[ -z "$latest" ]]; then
     echo "Error: no tags advertised by origin ($origin_url)." >&2
@@ -66,5 +86,5 @@ self_update() {
 
   git -C "$SCRIPT_DIR" checkout --quiet --force "$latest"
   echo "Updated dev to $latest. The image will prompt for a rebuild on the"
-  echo "next 'dev' run (or run 'dev --build' now to rebuild immediately)."
+  echo "next 'dev' run (or run 'dev up --build' now to rebuild immediately)."
 }

@@ -1,6 +1,7 @@
 #!/bin/bash
 # scripts/test/scenarios/25-private-registry-allowlist.sh
 # platform: linux
+# privilege: user
 set -u
 LIB="$(dirname "$0")/../lib"
 # shellcheck source=scripts/test/lib/assert.sh
@@ -41,7 +42,11 @@ cleanup_extra() {
 # Add to the existing trap.
 trap 'cleanup_extra; restore_host' EXIT
 
-filter=$(DEV_ASSUME_YES=1 ./dev --dind -- cat /etc/tinyproxy/filter 2>&1) \
+# DEV_EGRESS=closed: this scenario inspects tinyproxy's filter file, which
+# only exists in closed mode -- open mode (the default since the
+# egress-open work) runs no tinyproxy at all. Pinned the same way as
+# scenario 26.
+filter=$(DEV_ASSUME_YES=1 DEV_EGRESS=closed ./dev exec --dind -- cat /etc/tinyproxy/filter 2>&1) \
     || { log_fail "could not read /etc/tinyproxy/filter inside container"; exit 1; }
 
 escaped="${SENTINEL//./\\\\.}"

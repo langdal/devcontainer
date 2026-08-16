@@ -1,6 +1,7 @@
 #!/bin/bash
 # scripts/test/scenarios/49-agent-inject-podman.sh
 # platform: linux
+# privilege: user
 #
 # The docker path of `dev agent` (scenario 48) never exercises the
 # runtime-specific behaviour that two real host bugs slipped through:
@@ -43,7 +44,7 @@ fi
 # The helper image must exist in podman storage. run-all builds it when the
 # detected runtime is podman; on a docker-only build it won't be here.
 if ! podman image inspect generic-devcontainer >/dev/null 2>&1; then
-    log_skip "generic-devcontainer not in podman storage (build: DEV_RUNTIME=podman ./dev --build)"; exit 0
+    log_skip "generic-devcontainer not in podman storage (build: DEV_RUNTIME=podman ./dev up --build)"; exit 0
 fi
 
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"

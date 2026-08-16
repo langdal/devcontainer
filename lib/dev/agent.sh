@@ -2,7 +2,10 @@
 # lib/dev/agent.sh — `dev agent {add,list,rm}` handlers. Copy a curated,
 # per-agent allowlist of credentials + settings from the host into this
 # workspace's home volume. One-way snapshot: never a host mount, never baked
-# into an image. Sourced by dev; not executed directly.
+# into an image. This file owns the per-agent manifests, host resolution
+# (including the macOS Keychain fallback) and the command UI; the storage
+# routing and the helper-container copy itself live in lib/dev/inject.sh.
+# Sourced by dev; not executed directly.
 
 # Known agent names, in display order. 'all' is a pseudo-name expanded by
 # _agent_expand; it is intentionally NOT in this list.
@@ -15,6 +18,53 @@ AGENT_KNOWN=(claude opencode pi)
 # (never a real path); the copy path materializes it into a real staged file.
 CLAUDE_KEYCHAIN_SERVICE='Claude Code-credentials'
 AGENT_KEYCHAIN_CLAUDE_SRC='keychain:claude-credentials'
+
+# cmd_agent <action> [args]: the `dev agent` verb. Validates the action, pulls
+# out the storage-routing flags, and calls the matching handler.
+cmd_agent() {
+  agent_action="${1:-}"
+  case "$agent_action" in
+    add|list|rm) shift ;;
+    ''|-h|--help|help) _agent_usage; exit 0 ;;
+    *)
+      echo "Error: dev agent: expected an action (add|list|rm), got '${agent_action:-<none>}'" >&2
+      echo "Run 'dev --help' for usage information" >&2
+      exit 1
+      ;;
+  esac
+  # --dind/--pind route the helper containers at the storage the target
+  # container actually uses. On macOS+podman the dind/pind container and its
+  # home volume live in a *separate* rootful podman connection; without this
+  # routing, `agent add` writes into the default rootless home volume that the
+  # dind/pind container never mounts (creds silently never appear inside).
+  # Extract the flags here so they apply uniformly to add/list/rm, then pass
+  # the remaining args (agent names, --dry-run) through untouched.
+  AGENT_DIND=false
+  AGENT_PIND=false
+  agent_args=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --dind) AGENT_DIND=true; shift ;;
+      --pind) AGENT_PIND=true; shift ;;
+      *) agent_args+=("$1"); shift ;;
+    esac
+  done
+  if [[ "$AGENT_DIND" == true && "$AGENT_PIND" == true ]]; then
+    echo "Error: dev agent: --dind and --pind are mutually exclusive." >&2
+    exit 1
+  fi
+  # The handlers validate their args before calling resolve_agent_storage
+  # themselves (and skip it entirely for `add --dry-run`, which needs no
+  # runtime), so bad input fails without the storage-detection hint. Pass the
+  # storage flags through for that deferred resolution.
+  set -- ${agent_args[@]+"${agent_args[@]}"}
+  case "$agent_action" in
+    add)  _agent_add  "$AGENT_DIND" "$AGENT_PIND" "$@" ;;
+    list) _agent_list "$AGENT_DIND" "$AGENT_PIND" "$@" ;;
+    rm)   _agent_rm   "$AGENT_DIND" "$AGENT_PIND" "$@" ;;
+  esac
+  exit 0
+}
 
 # _agent_macos_keychain_has_creds: 0 if Claude Code's OAuth token is present in
 # the macOS login Keychain. Non-macOS (no `security`) returns non-zero, so the
@@ -136,116 +186,6 @@ _agent_expand() {
   printf '%s\n' "${out[@]}" | awk '!seen[$0]++'
 }
 
-# _agent_keepid: prints "true" when this runtime would create the workspace
-# container with --userns=keep-id (rootless podman only), matching the logic
-# in start_container. Otherwise "false".
-_agent_keepid() {
-  # shellcheck disable=SC2086  # intentional word-splitting of RUNTIME_ARGS
-  if $RUNTIME $RUNTIME_ARGS --version 2>/dev/null | grep -qi podman && runtime_is_rootless; then
-    echo true
-  else
-    echo false
-  fi
-}
-
-# _agent_require_image: fail clearly if the helper image is not built yet.
-# The agent helpers (copy/probe/rm) all run this image; the dev agent path
-# never builds it (unlike the start path), so check before any helper run.
-_agent_require_image() {
-  # shellcheck disable=SC2086  # intentional word-splitting of RUNTIME_ARGS
-  if ! $RUNTIME $RUNTIME_ARGS image inspect "$IMAGE_TAG" >/dev/null 2>&1; then
-    echo "Error: image '$IMAGE_TAG' is not built yet. Run './dev --build' (or start the container once with './dev') first." >&2
-    exit 1
-  fi
-}
-
-# _stage_and_extract <label_prefix>: read TSV lines (SRC_ABS \t DEST_REL \t
-# MODE) on stdin, stage them into a temp dir (dereferencing symlinks, so links
-# pointing outside the copied tree become real files), then extract them into
-# the workspace home volume through a short-lived helper container running as
-# vscode with the same --userns=keep-id args the real container uses — so
-# ownership is correct on Docker, rootful podman, and rootless podman alike.
-# MODE "0600" tightens that dest to 600 after extraction (secrets); any other
-# value preserves the staged perms. Prints "<prefix>+ <dest>" per copied entry
-# (and warnings on broken symlinks). Returns the helper's exit code. Shared by
-# `dev agent add` (via _agent_copy_into_volume) and `dev dotfile add`.
-_stage_and_extract() {
-  local prefix="$1"
-  _agent_require_image
-
-  local staging
-  staging="$(mktemp -d)"
-  local -a secret_dests=()
-  local src dest mode
-  while IFS=$'\t' read -r src dest mode; do
-    [[ -n "$src" ]] || continue
-    mkdir -p "$staging/$(dirname "$dest")"
-    if [[ -d "$src" ]]; then
-      mkdir -p "$staging/$dest"
-      # -R recurse, -L dereference: links pointing outside the copied tree
-      # become real files. Broken links make cp non-zero; warn, don't abort.
-      if ! cp -RL "$src/." "$staging/$dest/" 2>/dev/null; then
-        echo "${prefix}warning: some entries under ${dest} were skipped (broken symlinks?)" >&2
-      fi
-    else
-      if ! cp -L "$src" "$staging/$dest" 2>/dev/null; then
-        echo "${prefix}warning: skipped ${dest} (broken symlink?)" >&2
-        continue
-      fi
-    fi
-    echo "${prefix}+ ${dest}"
-    [[ "$mode" == 0600 ]] && secret_dests+=("$dest")
-  done
-
-  # Ensure the volume exists; under keep-id also make sure it is owned by the
-  # host user before we write (reuses lifecycle.sh's one-time migration).
-  # Create only when missing: `docker volume create` is idempotent, but
-  # `podman volume create` errors ("volume already exists") on an existing
-  # volume, which under set -e would abort before the copy ever runs.
-  local keepid
-  keepid="$(_agent_keepid)"
-  if ! _agent_volume_exists; then
-    # shellcheck disable=SC2086  # intentional word-splitting of RUNTIME_ARGS
-    $RUNTIME $RUNTIME_ARGS volume create "$HOME_VOLUME" >/dev/null
-  fi
-  [[ "$keepid" == true ]] && migrate_volume_for_keepid "$HOME_VOLUME"
-
-  # Remote command: extract, then tighten secret modes. Quote each dest.
-  local remote='cd /home/vscode && tar -xf -'
-  if [[ ${#secret_dests[@]} -gt 0 ]]; then
-    remote+=' && chmod 600'
-    local d
-    for d in "${secret_dests[@]}"; do
-      remote+=" $(printf '%q' "$d")"
-    done
-  fi
-
-  local -a keepid_args=()
-  [[ "$keepid" == true ]] && keepid_args=(--userns=keep-id)
-
-  # On macOS the host tar is bsdtar, which stores each file's macOS xattrs
-  # (notably com.apple.provenance) as LIBARCHIVE.xattr.* extended headers plus
-  # an AppleDouble copy. GNU tar inside the container doesn't know that keyword
-  # and prints a warning per file ("Ignoring unknown extended header keyword
-  # ..."). Strip both at creation so the stream is clean; these flags are
-  # bsdtar-only (GNU tar lacks --no-mac-metadata and never emits these anyway).
-  local -a tar_args=()
-  if tar --version 2>/dev/null | grep -qi bsdtar; then
-    tar_args+=(--no-xattrs --no-mac-metadata)
-  fi
-
-  local rc=0
-  # shellcheck disable=SC2086  # intentional word-splitting of RUNTIME_ARGS
-  tar "${tar_args[@]+"${tar_args[@]}"}" -C "$staging" -cf - . \
-    | $RUNTIME $RUNTIME_ARGS run --rm -i \
-        ${keepid_args[@]+"${keepid_args[@]}"} -u vscode \
-        -v "$HOME_VOLUME":/home/vscode \
-        --entrypoint sh "$IMAGE_TAG" -c "$remote" \
-    || rc=$?
-  rm -rf "$staging"
-  return $rc
-}
-
 # _agent_materialize_keychain <tmpdir>: read 4-field resolved TSV (SRC \t DEST
 # \t KIND \t MODE) on stdin; for each line whose SRC is the Keychain sentinel,
 # dump the Keychain payload to a file under <tmpdir> and rewrite SRC to that
@@ -351,12 +291,6 @@ if (d.hasCompletedOnboarding !== true) {
     "$@" -u vscode \
     -v "$HOME_VOLUME":/home/vscode \
     --entrypoint sh "$IMAGE_TAG" -c 'node'
-}
-
-# _agent_volume_exists: 0 if the workspace home volume exists.
-_agent_volume_exists() {
-  # shellcheck disable=SC2086  # intentional word-splitting of RUNTIME_ARGS
-  $RUNTIME $RUNTIME_ARGS volume inspect "$HOME_VOLUME" >/dev/null 2>&1
 }
 
 # _agent_all_dests <name>: print every manifest DEST_REL for the agent
@@ -509,7 +443,7 @@ mount, never baked into an image). Re-run 'add' to refresh (tokens expire).
 Preview with 'dev agent add <name> --dry-run'. Remove with 'dev agent rm'
 or wipe the whole home volume with 'dev reset'.
 
-For a container started with 'dev --dind' or 'dev --pind', pass the matching
+For a container started with 'dev up --dind' or 'dev up --pind', pass the matching
 --dind/--pind flag (e.g. 'dev agent add claude --pind'). On macOS+podman the
 dind/pind container uses a separate storage backend, and without the flag the
 credentials land in a home volume that container never mounts.

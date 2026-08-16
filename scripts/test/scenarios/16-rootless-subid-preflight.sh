@@ -1,6 +1,7 @@
 #!/bin/bash
 # scripts/test/scenarios/16-rootless-subid-preflight.sh
 # platform: linux
+# privilege: user
 #
 # Under a rootless runtime the dind container's user namespace only spans
 # the ids granted in /etc/subuid + /etc/subgid (typically 65536). rootless
@@ -39,7 +40,7 @@ if [ "$total" -ge 165535 ]; then
     # Sufficient grant: the preflight must NOT block. --dry-run exercises
     # the preflight (it runs before the dry-run printout) without starting
     # a container.
-    out=$(timeout 60 ./dev --dry-run --dind -- docker version 2>&1)
+    out=$(timeout 60 ./dev exec --dry-run --dind -- docker version 2>&1)
     rc=$?
     if [ "$rc" != 0 ] || echo "$out" | grep -q "DEV_SKIP_SUBID_CHECK"; then
         log_fail "preflight blocked --dind despite a sufficient subuid grant ($total): $out"
@@ -47,7 +48,7 @@ if [ "$total" -ge 165535 ]; then
     fi
 
     # --pind shares the same preflight; a sufficient grant must not block it either.
-    out=$(timeout 60 ./dev --dry-run --pind -- docker version 2>&1)
+    out=$(timeout 60 ./dev exec --dry-run --pind -- docker version 2>&1)
     rc=$?
     if [ "$rc" != 0 ] || echo "$out" | grep -q "DEV_SKIP_SUBID_CHECK"; then
         log_fail "preflight blocked --pind despite a sufficient subuid grant ($total): $out"
@@ -62,7 +63,7 @@ fi
 
 # Insufficient grant: dev should refuse fast (well under 30s), emitting
 # the remediation message on stderr.
-out=$(timeout 30 ./dev --dind -- docker version 2>&1)
+out=$(timeout 30 ./dev exec --dind -- docker version 2>&1)
 rc=$?
 
 if [ "$rc" = 0 ]; then
@@ -80,7 +81,7 @@ fi
 # Verify the bypass env var actually bypasses the preflight. We don't
 # expect rootless dockerd to succeed (the grant is still too small), but
 # the failure should now come from dind-init/rootlesskit, not the preflight.
-out=$(timeout 60 env DEV_SKIP_SUBID_CHECK=1 ./dev --dind -- docker version 2>&1)
+out=$(timeout 60 env DEV_SKIP_SUBID_CHECK=1 ./dev exec --dind -- docker version 2>&1)
 if expect_grep "$out" "DEV_SKIP_SUBID_CHECK=1 to bypass"; then
     log_fail "DEV_SKIP_SUBID_CHECK=1 did not bypass the preflight"
     "$RUNTIME" rm -f "dev-$(basename "$(pwd)")"-dind 2>/dev/null
@@ -93,7 +94,7 @@ fi
 
 # Insufficient grant: --pind shares the same preflight and should refuse
 # fast (well under 30s), emitting the same remediation message on stderr.
-out=$(timeout 30 ./dev --pind -- docker version 2>&1)
+out=$(timeout 30 ./dev exec --pind -- docker version 2>&1)
 rc=$?
 
 if [ "$rc" = 0 ]; then
@@ -109,7 +110,7 @@ if ! expect_grep "$out" "usermod --add-subuids"; then
 fi
 
 # Verify the bypass env var actually bypasses the preflight for --pind too.
-out=$(timeout 60 env DEV_SKIP_SUBID_CHECK=1 ./dev --pind -- docker version 2>&1)
+out=$(timeout 60 env DEV_SKIP_SUBID_CHECK=1 ./dev exec --pind -- docker version 2>&1)
 if expect_grep "$out" "DEV_SKIP_SUBID_CHECK=1 to bypass"; then
     log_fail "DEV_SKIP_SUBID_CHECK=1 did not bypass the preflight for --pind"
     "$RUNTIME" rm -f "dev-$(basename "$(pwd)")"-pind 2>/dev/null

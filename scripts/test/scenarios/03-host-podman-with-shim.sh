@@ -1,6 +1,7 @@
 #!/bin/bash
 # scripts/test/scenarios/03-host-podman-with-shim.sh
 # platform: linux
+# privilege: root
 set -u
 LIB="$(dirname "$0")/../lib"
 # shellcheck source=scripts/test/lib/assert.sh
@@ -10,6 +11,7 @@ LIB="$(dirname "$0")/../lib"
 # shellcheck source=scripts/test/lib/restore.sh
 . "$LIB/restore.sh"
 require_platform linux
+require_privilege root
 trap restore_host EXIT
 
 # podman-docker provides /usr/bin/docker as a shim that calls podman. It
@@ -34,7 +36,7 @@ if ! command -v podman >/dev/null 2>&1; then
 fi
 
 cd "$(dirname "$0")/../../.." || exit 1
-out=$(./dev --dry-run 2>&1) || { log_fail "dev --dry-run failed: $out"; exit 1; }
+out=$(./dev up --dry-run 2>&1) || { log_fail "dev up --dry-run failed: $out"; exit 1; }
 # detect_runtime prefers docker — even when docker is the podman shim. That's
 # correct: dev does not (and should not) try to inspect what 'docker' really is.
 if expect_grep "$out" '^docker run '; then

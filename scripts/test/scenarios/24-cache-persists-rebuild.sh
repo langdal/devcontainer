@@ -1,6 +1,7 @@
 #!/bin/bash
 # scripts/test/scenarios/24-cache-persists-rebuild.sh
 # platform: linux
+# privilege: user
 set -u
 LIB="$(dirname "$0")/../lib"
 # shellcheck source=scripts/test/lib/assert.sh
@@ -17,15 +18,15 @@ remember_container "$D"
 "$RUNTIME" rm -f "$D" 2>/dev/null
 
 # Step A: pull alpine.
-./dev --dind -- docker pull alpine:3.20 >/dev/null || { log_fail "initial pull failed"; exit 1; }
+./dev exec --dind -- docker pull alpine:3.20 >/dev/null || { log_fail "initial pull failed"; exit 1; }
 "$RUNTIME" rm -f "$D" 2>/dev/null
 
 # Step B: rebuild the :dind image (--build).
-./dev --dind --build -- docker version >/dev/null || { log_fail "rebuild start failed"; exit 1; }
+./dev exec --dind --build -- docker version >/dev/null || { log_fail "rebuild start failed"; exit 1; }
 "$RUNTIME" rm -f "$D" 2>/dev/null
 
 # Step C: confirm alpine still cached.
-out=$(./dev --dind -- docker images alpine --format '{{.Repository}}:{{.Tag}}' 2>&1)
+out=$(./dev exec --dind -- docker images alpine --format '{{.Repository}}:{{.Tag}}' 2>&1)
 if expect_grep "$out" '^alpine:3.20$'; then
     log_pass "image cache survives --build rebuild"
     exit 0

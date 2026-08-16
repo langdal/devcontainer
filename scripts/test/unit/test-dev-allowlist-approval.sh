@@ -5,7 +5,7 @@ set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 
 command -v docker >/dev/null 2>&1 || command -v podman >/dev/null 2>&1 \
-    || { echo "no container runtime on PATH"; exit 1; }
+    || { echo "SKIP: no container runtime on PATH"; exit 77; }
 
 STATE_HOME=$(mktemp -d)
 WORKDIR=$(mktemp -d)
@@ -15,7 +15,7 @@ trap 'rm -rf "$STATE_HOME" "$WORKDIR"' EXIT
 # interfere. Extra env (e.g. DEV_ASSUME_YES=1) is passed as leading args.
 run_dev() {
     (cd "$WORKDIR" && env XDG_STATE_HOME="$STATE_HOME" "$@" \
-        "$ROOT/dev" --dry-run </dev/null 2>&1)
+        "$ROOT/dev" up --dry-run </dev/null 2>&1)
 }
 
 snapshot() {
@@ -72,7 +72,7 @@ echo "example.com" > "$WORKDIR/.devcontainer-allowlist"
 out=$(run_dev)   # plain run: establishes the 'Would prompt' baseline
 echo "$out" | grep -q 'Would prompt' || { echo "baseline prompt missing: $out"; exit 1; }
 out=$( (cd "$WORKDIR" && env XDG_STATE_HOME="$STATE_HOME" \
-    "$ROOT/dev" --dry-run --maintenance </dev/null 2>&1) )
+    "$ROOT/dev" up --dry-run --maint </dev/null 2>&1) )
 echo "$out" | grep -q 'Would prompt' \
     && { echo "maintenance mode prompted for allowlist"; exit 1; }
 

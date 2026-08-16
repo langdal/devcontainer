@@ -1,6 +1,7 @@
 #!/bin/bash
 # scripts/test/scenarios/27-mise-install-allowlist-hint.sh
 # platform: linux
+# privilege: user
 #
 # A project mise tool whose download host lives only in the workspace
 # .devcontainer-allowlist is blocked by the firewall until that allowlist is
@@ -54,7 +55,7 @@ NOTE='was NOT'   # distinctive fragment of the entrypoint hint
 # shellcheck disable=SC2086  # intentional glob
 rm -rf $STATE_GLOB
 "$RUNTIME" rm -f "$N" 2>/dev/null
-out=$(cd "$WS_DIR" && "$DEV" -- true </dev/null 2>&1)
+out=$(cd "$WS_DIR" && "$DEV" exec -- true </dev/null 2>&1)
 if ! echo "$out" | grep -q "$NOTE"; then
     log_fail "unapproved-allowlist install failure did not print the actionable NOTE"
     echo "$out" | tail -20 >&2
@@ -65,7 +66,7 @@ fi
 # --- Approved: install still fails (bogus version) but hint must NOT appear -
 # shellcheck disable=SC2086  # intentional glob
 rm -rf $STATE_GLOB
-out=$(cd "$WS_DIR" && DEV_ASSUME_YES=1 "$DEV" -- true 2>&1)
+out=$(cd "$WS_DIR" && DEV_ASSUME_YES=1 "$DEV" exec -- true 2>&1)
 if echo "$out" | grep -q "$NOTE"; then
     log_fail "approved allowlist run still printed the unapproved-allowlist NOTE"
     echo "$out" | tail -20 >&2

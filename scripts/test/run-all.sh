@@ -31,7 +31,13 @@ fi
 # that touches the workspace path.
 # shellcheck source=scripts/test/lib/privilege.sh
 . "$(dirname "$0")/lib/privilege.sh"
-drop_privs_if_root "$@"
+# Scenarios read this through require_privilege. Unset means "run
+# everything", so the existing `sudo bash run-all.sh` invocation is
+# untouched.
+export DEV_TEST_PRIVILEGE="${DEV_TEST_PRIVILEGE:-root}"
+if [ "$DEV_TEST_PRIVILEGE" = root ]; then
+    drop_privs_if_root "$@"
+fi
 
 # shellcheck source=scripts/test/lib/runtime.sh
 . "$(dirname "$0")/lib/runtime.sh"
@@ -61,15 +67,22 @@ echo "Log:       $LAST_LOG"
 echo
 
 # ---- Preconditions ----
-if ! sudo -n true 2>/dev/null; then
-    echo "FATAL: this orchestrator needs passwordless sudo (or run as root)." | tee -a "$LAST_LOG"
-    exit 1
+# The unprivileged subset manipulates no host state, so it must run without
+# sudo — that is the whole point of the rootless cell. Only the full run
+# needs it.
+if [ "$DEV_TEST_PRIVILEGE" = root ]; then
+    if ! sudo -n true 2>/dev/null; then
+        echo "FATAL: this orchestrator needs passwordless sudo (or run as root)." | tee -a "$LAST_LOG"
+        echo "       For the unprivileged subset instead: DEV_TEST_PRIVILEGE=user bash $0" | tee -a "$LAST_LOG"
+        exit 1
+    fi
 fi
 
 # ---- Auto-install runtimes if missing ----
 # The orchestrator needs at least docker (or podman) on PATH so the dev
 # script can build images. Install via apt on Debian/Ubuntu hosts.
-if ! command -v docker >/dev/null 2>&1 && ! command -v podman >/dev/null 2>&1; then
+if [ "$DEV_TEST_PRIVILEGE" = root ] \
+   && ! command -v docker >/dev/null 2>&1 && ! command -v podman >/dev/null 2>&1; then
     if command -v apt-get >/dev/null 2>&1; then
         echo "Installing docker.io + docker-buildx + podman..." | tee -a "$LAST_LOG"
         sudo apt-get update -qq >/dev/null 2>&1
@@ -84,6 +97,37 @@ fi
 if ! command -v docker >/dev/null 2>&1 && ! command -v podman >/dev/null 2>&1; then
     echo "FATAL: install attempt finished but no runtime is on PATH." | tee -a "$LAST_LOG"
     exit 1
+fi
+
+# A runtime on PATH is not the same as a runtime that can BUILD. docker needs
+# the buildx plugin for the Dockerfile's BuildKit features, and the gate above
+# only fires when NO runtime exists at all — so a host with docker and no
+# buildx sailed past it, failed every image build, and still produced a
+# summary that read as clean (2026-08-15). Install it on its own terms.
+if [ "$DEV_TEST_PRIVILEGE" = root ] \
+   && command -v docker >/dev/null 2>&1 && ! docker buildx version >/dev/null 2>&1; then
+    if command -v apt-get >/dev/null 2>&1; then
+        echo "docker is present but 'docker buildx' is not; installing docker-buildx..." | tee -a "$LAST_LOG"
+        sudo apt-get update -qq >/dev/null 2>&1
+        sudo apt-get install -y --no-install-recommends docker-buildx 2>&1 | tail -3 | tee -a "$LAST_LOG"
+    fi
+fi
+
+# ---- Readiness gate: let `dev doctor` decide whether this host can run ----
+# The orchestrator used to keep its own idea of a working host, and it drifted
+# from dev's — which is how the buildx gap above went unnoticed through a whole
+# review. There is now one source of truth, so ask it. A host the doctor will
+# not certify produces meaningless suite results, so refuse rather than report
+# a tally nobody can trust.
+if [ -x "$WORKSPACE/dev" ]; then
+    if ! doctor_out=$("$WORKSPACE/dev" doctor 2>&1); then
+        {
+            echo "FATAL: 'dev doctor' refuses this host, so suite results would be meaningless."
+            echo "$doctor_out"
+        } | tee -a "$LAST_LOG"
+        exit 1
+    fi
+    echo "dev doctor: host certified." | tee -a "$LAST_LOG"
 fi
 
 # ---- Inject a deterministic DNS for the test run ----
@@ -107,20 +151,20 @@ fi
 
 # ---- Build the base, :dind, and :pind images up front so scenarios don't race the build ----
 echo "Building images..."
-if ! ./dev --build --dry-run >/dev/null 2>&1; then
+if ! ./dev up --build --dry-run >/dev/null 2>&1; then
     : # dry-run sanity probe is best-effort
 fi
-if ! ./dev --build -- true 2>&1 | tee -a "$LAST_LOG"; then
+if ! ./dev exec --build -- true 2>&1 | tee -a "$LAST_LOG"; then
     echo "FATAL: failed to build base image" | tee -a "$LAST_LOG"
     exit 1
 fi
 "$RT" rm -f "dev-$(basename "$WORKSPACE")" 2>/dev/null || true
-if ! ./dev --build --dind -- true 2>&1 | tee -a "$LAST_LOG"; then
+if ! ./dev exec --build --dind -- true 2>&1 | tee -a "$LAST_LOG"; then
     echo "FATAL: failed to build :dind image" | tee -a "$LAST_LOG"
     exit 1
 fi
 "$RT" rm -f "dev-$(basename "$WORKSPACE")"-dind 2>/dev/null || true
-if ! ./dev --build --pind -- true 2>&1 | tee -a "$LAST_LOG"; then
+if ! ./dev exec --build --pind -- true 2>&1 | tee -a "$LAST_LOG"; then
     echo "FATAL: failed to build :pind image" | tee -a "$LAST_LOG"
     exit 1
 fi
@@ -133,6 +177,15 @@ declare -a SKIP_NAMES=()
 
 for scenario in "$LOG_DIR"/scenarios/[0-9]*.sh; do
     name=$(basename "$scenario" .sh)
+    # Skip scenarios this run cannot satisfy. The scenario's own
+    # require_privilege call would also skip, but filtering here keeps them
+    # out of the tally entirely — a cell should report what it ran, not pad
+    # its skip count with work it was never going to attempt.
+    scen_priv=$(awk '/^# privilege:/{print $3; exit}' "$scenario")
+    scen_priv="${scen_priv:-any}"
+    if [ "$DEV_TEST_PRIVILEGE" != root ] && [ "$scen_priv" = root ]; then
+        continue
+    fi
     echo
     echo "=== Running $name ==="
     {
@@ -140,8 +193,17 @@ for scenario in "$LOG_DIR"/scenarios/[0-9]*.sh; do
         echo "=== $name ==="
     } >> "$LAST_LOG"
     if out=$(bash "$scenario" 2>&1); then
-        # Scenario exited 0 — last log line tells us PASS or SKIP.
-        if echo "$out" | grep -q '^\[PASS\]'; then
+        # Exit 0 is necessary but NOT sufficient. A scenario that calls
+        # log_fail and keeps going still exits 0, and the old test — "any
+        # [PASS] line present" — counted it as passing. 48-agent-inject did
+        # exactly that under the rootless cell: 10 [FAIL] lines, 18 [PASS]
+        # lines, exit 0, reported PASS. Any [FAIL] line means the scenario
+        # failed, whatever else it printed.
+        if echo "$out" | grep -q '^\[FAIL\]'; then
+            FAIL=$((FAIL+1))
+            FAIL_NAMES+=("$name")
+            echo "${RED}FAIL${RESET}  $name"
+        elif echo "$out" | grep -q '^\[PASS\]'; then
             PASS=$((PASS+1))
             echo "${GREEN}PASS${RESET}  $name"
             tail -1 <<< "$out" >> "$SUMMARY_LOG"

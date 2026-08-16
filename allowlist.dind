@@ -1,7 +1,16 @@
 # Registry hostnames consumed by rootless dockerd in --dind mode.
 # Merged into the tinyproxy filter only when DEVCONTAINER_DIND=1.
+#
+# --- Threat model (see SECURITY.md) ---
+# May: list additional hostnames merged into the filter only in --dind/--pind
+# mode (nested-engine registry pulls).
+# Must never: be merged when neither DEVCONTAINER_DIND nor DEVCONTAINER_PIND
+# is set, or list a destination beyond container-registry infrastructure.
 
-# Docker Hub
+# Docker Hub. index.docker.io is the Hub API endpoint used by several
+# clients (crane, containerd, docker login flows); registry-1.docker.io
+# serves the actual registry protocol.
+index.docker.io
 registry-1.docker.io
 auth.docker.io
 production.cloudflare.docker.com

@@ -13,7 +13,7 @@
 # testcontainers / docker-compose rely on.
 #
 # Designed to be invoked by host-side scenario scripts via:
-#     ./dev --pind -- /workspace/scripts/verify-pind.sh
+#     ./dev exec --pind -- /workspace/scripts/verify-pind.sh
 set -u
 
 PASS=0; FAIL=0

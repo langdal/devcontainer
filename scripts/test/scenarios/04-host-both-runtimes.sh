@@ -1,6 +1,7 @@
 #!/bin/bash
 # scripts/test/scenarios/04-host-both-runtimes.sh
 # platform: linux
+# privilege: root
 set -u
 LIB="$(dirname "$0")/../lib"
 # shellcheck source=scripts/test/lib/assert.sh
@@ -10,6 +11,7 @@ LIB="$(dirname "$0")/../lib"
 # shellcheck source=scripts/test/lib/restore.sh
 . "$LIB/restore.sh"
 require_platform linux
+require_privilege root
 trap restore_host EXIT
 
 # Both docker and podman must be present.
@@ -21,7 +23,7 @@ apt_install_remember podman || { log_skip "could not install podman"; exit 0; }
 remember_pkg_install podman
 
 cd "$(dirname "$0")/../../.." || exit 1
-out=$(./dev --dry-run 2>&1) || { log_fail "dev --dry-run failed: $out"; exit 1; }
+out=$(./dev up --dry-run 2>&1) || { log_fail "dev up --dry-run failed: $out"; exit 1; }
 if expect_grep "$out" '^docker run '; then
     log_pass "both runtimes installed: dev prefers docker"
     exit 0

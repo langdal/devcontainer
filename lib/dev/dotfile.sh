@@ -5,11 +5,53 @@
 # dereferencing symlinks. A one-way snapshot, same mechanism and storage
 # routing as `dev agent`: never a host mount, never baked into an image.
 #
-# Reuses agent.sh's _stage_and_extract + volume helpers (_agent_require_image,
-# _agent_keepid, _agent_volume_exists) and lifecycle.sh's migrate_volume_for_keepid.
+# Reuses inject.sh's _stage_and_extract + volume helpers (_agent_require_image,
+# _agent_keepid, _agent_volume_exists) and volumes.sh's migrate_volume_for_keepid.
 # The dispatch in `dev` has already set IMAGE_TAG / RUNTIME_ARGS / HOST_UID for
 # the target storage via resolve_agent_storage. Sourced by dev; not executed
 # directly.
+
+# cmd_dotfile <action> [args]: the `dev dotfile` verb (also reachable as
+# `dev dotfiles`). Validates the action, pulls out the storage-routing flags,
+# and calls the matching handler.
+cmd_dotfile() {
+  dotfile_action="${1:-}"
+  case "$dotfile_action" in
+    add|rm) shift ;;
+    ''|-h|--help|help) _dotfile_usage; exit 0 ;;
+    *)
+      echo "Error: dev dotfile: expected an action (add|rm), got '${dotfile_action:-<none>}'" >&2
+      echo "Run 'dev --help' for usage information" >&2
+      exit 1
+      ;;
+  esac
+  # Pull out --dind/--pind (storage routing, same semantics as `dev agent`)
+  # so they apply regardless of position; leave everything else (paths and
+  # add's --secret) for the action handler.
+  DOTFILE_DIND=false
+  DOTFILE_PIND=false
+  dotfile_args=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --dind) DOTFILE_DIND=true; shift ;;
+      --pind) DOTFILE_PIND=true; shift ;;
+      *) dotfile_args+=("$1"); shift ;;
+    esac
+  done
+  if [[ "$DOTFILE_DIND" == true && "$DOTFILE_PIND" == true ]]; then
+    echo "Error: dev dotfile: --dind and --pind are mutually exclusive." >&2
+    exit 1
+  fi
+  # The handlers validate their path args before calling resolve_agent_storage
+  # themselves, so a bad path fails without the storage-detection hint. Pass
+  # the storage flags through for that deferred resolution.
+  set -- ${dotfile_args[@]+"${dotfile_args[@]}"}
+  case "$dotfile_action" in
+    add) _dotfile_add "$DOTFILE_DIND" "$DOTFILE_PIND" "$@" ;;
+    rm)  _dotfile_rm  "$DOTFILE_DIND" "$DOTFILE_PIND" "$@" ;;
+  esac
+  exit 0
+}
 
 # _dotfile_abs <path>: resolve <path> to an absolute path. Expands a leading ~
 # (belt-and-suspenders: the shell already does this for unquoted args) and
