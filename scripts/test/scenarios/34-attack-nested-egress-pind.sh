@@ -17,9 +17,14 @@ P="dev-${WS}-pind"
 remember_container "$P"
 "$RUNTIME" rm -f "$P" 2>/dev/null
 
-./dev exec --pind -- podman pull alpine:3.20 >/dev/null 2>&1 || true
+# DEV_EGRESS=closed: this scenario asserts a nested container CANNOT reach
+# example.com, which is a closed-mode containment guarantee -- in open mode
+# (the default since the egress-open work) a nested container has open
+# egress by design, routed through the parent's open egress, and would
+# legitimately reach example.com. Pinned the same way as scenario 26.
+DEV_EGRESS=closed ./dev exec --pind -- podman pull alpine:3.20 >/dev/null 2>&1 || true
 
-out=$(./dev exec --pind -- podman run --rm alpine:3.20 \
+out=$(DEV_EGRESS=closed ./dev exec --pind -- podman run --rm alpine:3.20 \
     sh -c 'wget -T3 -q -O- https://example.com 2>&1 || echo NESTED_BLOCKED') \
     || { log_fail "outer exec failed (image/pind/podman?): $out"; exit 1; }
 if expect_grep "$out" "NESTED_BLOCKED"; then

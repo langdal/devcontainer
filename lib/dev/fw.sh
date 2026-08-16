@@ -77,15 +77,23 @@ cmd_fw() {
 # container (normal or dind/pind) to already be running; never returns.
 fw_log() {
   require_workspace_firewall_container "fw log"
+  # Allocate a TTY only when stdin AND stdout are real terminals; otherwise
+  # the runtime rejects -it with "the input device is not a TTY" and headless
+  # invocations (CI, `dev fw log </dev/null >file`) fail with no output at
+  # all. Mirrors start_container's TTY_FLAGS in lib/dev/lifecycle.sh.
+  _fw_tty_flags=(-i)
+  if [[ -t 0 && -t 1 ]]; then
+    _fw_tty_flags=(-it)
+  fi
   # shellcheck disable=SC2086  # intentional word-splitting of $MANAGED_RUNTIME_ARGS
   _fw_log_mode="$($RUNTIME $MANAGED_RUNTIME_ARGS exec "$MANAGED_NAME" printenv DEVCONTAINER_EGRESS 2>/dev/null || true)"
   if [[ "$_fw_log_mode" == open ]]; then
     # shellcheck disable=SC2086  # intentional word-splitting of $MANAGED_RUNTIME_ARGS
-    exec $RUNTIME $MANAGED_RUNTIME_ARGS exec -it --user root "$MANAGED_NAME" \
+    exec $RUNTIME $MANAGED_RUNTIME_ARGS exec "${_fw_tty_flags[@]}" --user root "$MANAGED_NAME" \
         tcpdump -i nflog:2 -nn -l
   else
     # shellcheck disable=SC2086  # intentional word-splitting of $MANAGED_RUNTIME_ARGS
-    exec $RUNTIME $MANAGED_RUNTIME_ARGS exec -it "$MANAGED_NAME" tail -F /var/log/tinyproxy.log
+    exec $RUNTIME $MANAGED_RUNTIME_ARGS exec "${_fw_tty_flags[@]}" "$MANAGED_NAME" tail -F /var/log/tinyproxy.log
   fi
 }
 
@@ -95,8 +103,14 @@ fw_log() {
 # `tcpdump`).
 fw_drops() {
   require_workspace_firewall_container "fw drops"
+  # Allocate a TTY only when stdin AND stdout are real terminals; see fw_log
+  # above and start_container in lib/dev/lifecycle.sh for the same idiom.
+  _fw_tty_flags=(-i)
+  if [[ -t 0 && -t 1 ]]; then
+    _fw_tty_flags=(-it)
+  fi
   # shellcheck disable=SC2086  # intentional word-splitting of $MANAGED_RUNTIME_ARGS
-  exec $RUNTIME $MANAGED_RUNTIME_ARGS exec -it --user root "$MANAGED_NAME" \
+  exec $RUNTIME $MANAGED_RUNTIME_ARGS exec "${_fw_tty_flags[@]}" --user root "$MANAGED_NAME" \
       tcpdump -i nflog:1 -nn -l
 }
 
