@@ -101,15 +101,28 @@ passing `--open`/`--closed` alongside `--maint` only prints a warning
 **Both modes**, `firewall-init.sh` runs as root at container start via
 `entrypoint.sh`, which fails closed: any non-zero exit aborts container
 startup rather than falling through to an unfirewalled shell
-(`entrypoint.sh:38-42`). It always installs the link-local block (§2) first,
-before either mode's OUTPUT policy is programmed.
+(`entrypoint.sh:38-42`). The link-local block (§2) always terminates every
+other 169.254.0.0/16 destination (e.g. the cloud metadata endpoint) before
+either mode's OUTPUT policy is programmed — see below for the one
+deliberate exception open mode carves out of that ordering for its own
+DNS logging.
 
-**Open (default).** After the baseline block, `firewall-init.sh` installs
-rate-limited NFLOG rules that log the first packet (SYN) of every new
-outbound TCP connection (`FW-CONN`) and every outbound DNS query (`FW-DNS`,
-UDP+TCP port 53), all into the same group 2, then sets the OUTPUT policy to
-ACCEPT for both IPv4 and IPv6 (`firewall-init.sh:install_egress_logging`,
-called from both the IPv4 and IPv6 open branches). No tinyproxy, no allowlist, no `HTTPS_PROXY`/
+**Open (default).** `firewall-init.sh` installs rate-limited NFLOG rules
+that log the first packet (SYN) of every new outbound TCP connection
+(`FW-CONN`) and every outbound DNS query (`FW-DNS`, UDP+TCP port 53), all
+into the same group 2, *before* the baseline link-local block runs
+(`firewall-init.sh:install_egress_logging`, called from both the IPv4 and
+IPv6 open branches, ahead of `install_baseline_blocks`). That ordering is
+deliberate: `install_baseline_blocks`'s link-local-resolver exemption
+unconditionally ACCEPTs port-53 traffic to the container's own resolver
+when it happens to be a 169.254.x address — the common case under rootless
+podman's pasta/slirp4netns — and ACCEPT is terminating, so a DNS-log rule
+installed afterward would never see that traffic. NFLOG is non-terminating
+(it logs, then falls through to the next rule), so installing it first only
+adds visibility; the baseline block's link-local DROP still terminates
+every *other* 169.254.0.0/16 destination exactly as before. After both are
+installed, `firewall-init.sh` sets the OUTPUT policy to ACCEPT for both
+IPv4 and IPv6. No tinyproxy, no allowlist, no `HTTPS_PROXY`/
 `HTTP_PROXY` exports, no `no-aaaa` resolver edit, no Maven/Gradle proxy
 seeding — `entrypoint.sh` gates all of that behind closed mode
 (`entrypoint.sh:29`, `44-57`, `182`). The container can reach any host on any

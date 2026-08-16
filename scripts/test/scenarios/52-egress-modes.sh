@@ -118,30 +118,40 @@ expect_grep "$mode_env" '^open$' \
 # first, give it a moment to attach, THEN issue the curl that generates the
 # DNS query + connection it's supposed to catch -- the reverse order (curl
 # first) races the capture and can miss evidence that genuinely exists.
-FW_OUT_FILE=$(mktemp)
-( timeout 6 ./dev fw log </dev/null >"$FW_OUT_FILE" 2>&1 ) &
-fw_log_pid=$!
-sleep 1.5
-curl_out=$(./dev exec -- sh -c "$CURL_OK" 2>&1)
-curl_rc=$?
-sleep 1.5
-wait "$fw_log_pid" 2>/dev/null
-fw_out=$(cat "$FW_OUT_FILE")
-rm -f "$FW_OUT_FILE"
+#
+# DNS-via-nflog:2 has been verified to genuinely work on rootless podman (see
+# report), so a miss here is a real assertion, not a documented skip. One
+# bounded retry guards only against a pure attach/curl timing race (tcpdump
+# not fully attached to nflog:2 yet when the curl fires); a miss on both
+# attempts is a hard failure.
+fw_out=""
+for attempt in 1 2; do
+    FW_OUT_FILE=$(mktemp)
+    ( timeout 6 ./dev fw log </dev/null >"$FW_OUT_FILE" 2>&1 ) &
+    fw_log_pid=$!
+    sleep 1.5
+    curl_out=$(./dev exec -- sh -c "$CURL_OK" 2>&1)
+    curl_rc=$?
+    sleep 1.5
+    wait "$fw_log_pid" 2>/dev/null
+    fw_out=$(cat "$FW_OUT_FILE")
+    rm -f "$FW_OUT_FILE"
 
-if [[ $curl_rc -ne 0 ]]; then
-    log_fail "(f) outer 'dev exec' (DNS/connection trigger) failed: $curl_out"
-    exit 1
-fi
+    if [[ $curl_rc -ne 0 ]]; then
+        log_fail "(f) outer 'dev exec' (DNS/connection trigger) failed on attempt $attempt: $curl_out"
+        exit 1
+    fi
 
-F_RESULT=pass
-F_REASON="'dev fw log' showed example.com DNS/connection activity in open mode"
-if ! expect_grep "$fw_out" 'example\.com'; then
-    F_RESULT=skip
-    F_REASON="container egress=open confirms 'dev fw log' selected the tcpdump -i nflog:2 (open-mode) branch, but no example.com DNS/connection line appeared within the timeout -- could be a timing race with the capture window, not necessarily a code defect. fw_out=[$fw_out]"
-fi
+    if expect_grep "$fw_out" 'example\.com'; then
+        break
+    fi
+    echo "assertion (f): attempt $attempt found no example.com line yet, retrying once -- fw_out=[$fw_out]"
+done
 
-echo "assertion (f): $F_REASON"
+expect_grep "$fw_out" 'example\.com' \
+    || { log_fail "(f) 'dev fw log' showed no example.com DNS/connection activity in open mode after 2 attempts: fw_out=[$fw_out]"; exit 1; }
+
+echo "assertion (f): 'dev fw log' showed example.com DNS/connection activity in open mode"
 
 # ---------- (g) fw close/open toggle actually flips the kernel policy ----------
 # Regression guard for C-1: `dev fw close` on a container that was started
@@ -180,9 +190,5 @@ echo "assertion (e-closed): link-local (169.254.169.254) blocked under closed eg
 
 ./dev down >/dev/null 2>&1
 
-if [[ "$F_RESULT" == pass ]]; then
-    log_pass "egress open/closed contract holds: precedence (a-d), link-local DROP in both modes (e), open-mode fw log observability (f), fw close/open toggle (g): $F_REASON"
-else
-    log_skip "egress open/closed contract holds for (a)-(e) and (g); (f) degraded gracefully: $F_REASON"
-fi
+log_pass "egress open/closed contract holds: precedence (a-d), link-local DROP in both modes (e), open-mode fw log observability (f), fw close/open toggle (g)"
 exit 0
