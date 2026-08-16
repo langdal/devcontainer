@@ -16,7 +16,7 @@ fail=0
 chk() { # description, expected-exit, grep-pattern, cmd...
     local desc="$1" want_rc="$2" pat="$3"; shift 3
     local out rc
-    out=$("$@" 2>&1); rc=$?
+    out=$("$@" </dev/null 2>&1); rc=$?
     if [ "$rc" -ne "$want_rc" ]; then
         log_fail "$desc: expected exit $want_rc, got $rc — output: $out"; fail=1; return
     fi
@@ -29,7 +29,7 @@ chk() { # description, expected-exit, grep-pattern, cmd...
 chk "usage lists up"        0 'dev up'      ./dev --help
 chk "usage lists exec"      0 'dev exec'    ./dev --help
 chk "usage lists status"    0 'dev status'  ./dev --help
-chk "usage lists fw off"    0 'off'         ./dev --help
+chk "usage lists fw open"   0 'fw open'     ./dev --help
 
 # up: verb parses, --dry-run prints the run command without executing.
 chk "up --dry-run works"    0 'Would\|docker\|podman' ./dev up --dry-run
@@ -45,9 +45,15 @@ chk "exec --dry-run works"  0 'Would\|docker\|podman' ./dev exec --dry-run -- tr
 chk "up --maint accepted"   0 '' ./dev up --maint --dry-run
 # Mode mutual exclusion still enforced through the verb path.
 chk "up --dind --pind mutex" 1 'mutually exclusive' ./dev up --dind --pind --dry-run
+# --closed is accepted as an explicit egress mode.
+chk "up --closed accepted"  0 '' ./dev up --closed --dry-run
+# DEV_EGRESS host env sets the default egress mode.
+chk "DEV_EGRESS closed resolves" 0 '' env DEV_EGRESS=closed ./dev up --dry-run
+# A bogus DEV_EGRESS value is a hard error, not a silent fallback.
+chk "DEV_EGRESS bogus rejected" 2 "open' or 'closed" env DEV_EGRESS=bogus ./dev up --dry-run
 
-# fw: new action names exist; action list names off/on.
-chk "fw bad action lists off|on" 1 'off' ./dev fw bogus
+# fw: new action names exist; action list names open/close/log/drops.
+chk "fw bad action lists open|close" 1 'open|close' ./dev fw bogus
 
 # shell/status/down are container-free when nothing is running.
 # (Scenario harness guarantees no dev-<ws> containers; be defensive anyway.)
@@ -64,8 +70,10 @@ chk "unknown verb exits 2" 2 '' ./dev frobnicate
 chk "bare dev prints usage"        0 'VERBS' ./dev
 chk "legacy --dind start rejected" 2 '' ./dev --dind -- true
 chk "legacy -- start rejected"     2 '' ./dev -- true
-chk "fw disable removed"           1 'off'  ./dev fw disable
-chk "fw enable removed"            1 'on'   ./dev fw enable
+chk "fw off removed"      1 "renamed: use 'dev fw open'"  ./dev fw off
+chk "fw on removed"       1 "renamed: use 'dev fw close'" ./dev fw on
+chk "fw disable removed" 1 "renamed: use 'dev fw open'"  ./dev fw disable
+chk "fw enable removed"  1 "renamed: use 'dev fw close'" ./dev fw enable
 chk "--disable-firewall removed"   2 ''     ./dev --disable-firewall
 
 [ "$fail" -eq 0 ] || exit 1
