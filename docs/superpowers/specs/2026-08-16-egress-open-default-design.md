@@ -173,9 +173,13 @@ and the proxy log is authoritative).
 - README: new top TLDR (the closed-loop-dev framing + one-line install in
   one section) and org-messaging points — "the agent closes the code loop;
   the human owns the environment loop" and "commit inside / push outside is
-  a review gate." Update every mode/flag/`fw` reference to open/closed and
-  the new default. Update `docs/architecture.html` (still shows removed
-  `--maintenance` spellings).
+  a review gate." Call out **egress observability as a key feature** in the
+  TLDR/motivation: even wide-open, `dev fw log` shows every host the agent
+  reached (DNS names + connections). It's the transparency companion to those
+  two points — the human owns the boundary *and* can see what the agent did
+  inside it, without having to confine it to get visibility. Update every
+  mode/flag/`fw` reference to open/closed and the new default. Update
+  `docs/architecture.html` (still shows removed `--maintenance` spellings).
 - CLAUDE.md: update the firewall/mode description and the `DEV_EGRESS` env.
 
 ## 6. Testing
