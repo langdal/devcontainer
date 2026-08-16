@@ -199,6 +199,30 @@ cmd_doctor() {
   fi
   [[ -n "$phase0_buf" ]] && rm -f "$phase0_buf"
 
+  # --dind/--pind promise to check nested prerequisites, but every
+  # block-if-nested check is scoped linux:* -- unprivileged userns, the subuid
+  # grant, /dev/fuse, cgroup v2 are all properties of a LINUX host. On macOS
+  # the nested engine runs inside the podman machine VM, so none of them apply
+  # to the Mac itself and the report would otherwise print "0 blocking" having
+  # verified nothing at all about nested readiness. Silence reading as approval
+  # is the failure mode this whole registry exists to prevent, so say it.
+  if [[ "$NESTED" == true ]]; then
+    local _n_entry _n_seen=false
+    for _n_entry in "${CHECKS[@]}"; do
+      [[ "$(check_field "$_n_entry" 4)" == block-if-nested ]] || continue
+      check_applies "$(check_field "$_n_entry" 3)" "$os" "${RUNTIME:-}" || continue
+      _n_seen=true
+      break
+    done
+    if [[ "$_n_seen" != true ]]; then
+      printf '  %s  %s\n' "$(_doc_glyph na)" "nested prerequisites not checkable on $os"
+      printf '       They are properties of a Linux host; here the nested engine runs\n'
+      printf '       inside the podman machine VM. --dind/--pind readiness is NOT\n'
+      printf '       verified by this report.\n'
+      na=$((na + 1))
+    fi
+  fi
+
   echo
   printf '%d blocking, %d advisory, %d passed, %d not applicable\n' \
     "$blocking" "$advisories" "$passed" "$na"

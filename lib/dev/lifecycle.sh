@@ -185,7 +185,12 @@ start_container() {
   fi
 
   if [[ "$DRY_RUN" == true ]]; then
-    echo "${DOCKER_CMD[*]}"
+    # %q-quote each element rather than "${DOCKER_CMD[*]}". The array holds
+    # values that can contain spaces -- a git identity like "Jakob Langdal" --
+    # and [*] flattens them, so the printed command could not be pasted back:
+    # podman would see `DEV_GIT_NAME=Jakob` plus a stray `Langdal` argument.
+    # Execution below is unaffected; it uses [@]. %q leaves safe words alone.
+    printf '%q ' "${DOCKER_CMD[@]}"; echo
   else
     exec "${DOCKER_CMD[@]}"
   fi
