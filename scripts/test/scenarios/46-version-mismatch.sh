@@ -73,7 +73,7 @@ if ! echo "$out" | grep -q "$SCRIPT_VERSION"; then
     exit 1
 fi
 
-img_version=$(docker image inspect generic-devcontainer \
+img_version=$("$RUNTIME" image inspect generic-devcontainer \
     --format '{{ index .Config.Labels "dev.version" }}' 2>/dev/null)
 if [ "$img_version" != "$OLD_VERSION" ]; then
     log_fail "image was rebuilt without consent: label=$img_version"
@@ -92,7 +92,7 @@ if ! DEV_ASSUME_YES=1 ./dev exec -- true >/dev/null 2>&1; then
     exit 1
 fi
 
-img_version=$(docker image inspect generic-devcontainer \
+img_version=$("$RUNTIME" image inspect generic-devcontainer \
     --format '{{ index .Config.Labels "dev.version" }}' 2>/dev/null)
 if [ "$img_version" != "$SCRIPT_VERSION" ]; then
     log_fail "label not updated after rebuild: got '$img_version', want '$SCRIPT_VERSION'"

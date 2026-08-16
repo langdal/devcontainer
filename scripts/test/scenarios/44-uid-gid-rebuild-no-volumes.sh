@@ -41,7 +41,7 @@ if ! DEV_ASSUME_YES=1 ./dev exec -- true >/dev/null 2>&1; then
     exit 1
 fi
 
-img_uid=$(docker image inspect generic-devcontainer \
+img_uid=$("$RUNTIME" image inspect generic-devcontainer \
     --format '{{ index .Config.Labels "dev.uid" }}' 2>/dev/null)
 if [ "$img_uid" != "$HOST_UID" ]; then
     log_fail "labels not updated after rebuild: $img_uid"

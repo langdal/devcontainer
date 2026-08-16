@@ -55,7 +55,7 @@ OLD_IMAGE_ID=$("$RUNTIME" images -q generic-devcontainer)
 #    which can race dev's `rm -f` and intermittently report "failed to
 #    remove container". Without it, dev's `rm -f` is the sole remover — no
 #    race. Cleanup is still guaranteed by remember_container + restore trap.
-docker run -d --name "$CN" --entrypoint sleep generic-devcontainer 3600 >/dev/null
+"$RUNTIME" run -d --name "$CN" --entrypoint sleep generic-devcontainer 3600 >/dev/null
 
 if ! DEV_ASSUME_YES=1 ./dev exec -- true >/dev/null 2>&1; then
     log_fail "dev failed during rebuild path"
@@ -70,7 +70,7 @@ if [ "$OLD_IMAGE_ID" = "$NEW_IMAGE_ID" ]; then
     exit 1
 fi
 
-img_uid=$(docker image inspect generic-devcontainer \
+img_uid=$("$RUNTIME" image inspect generic-devcontainer \
     --format '{{ index .Config.Labels "dev.uid" }}' 2>/dev/null)
 if [ "$img_uid" != "$HOST_UID" ]; then
     log_fail "labels still mismatched after rebuild: $img_uid"

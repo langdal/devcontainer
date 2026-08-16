@@ -48,7 +48,7 @@ if ! echo "$out" | grep -q "dev up --build"; then
 fi
 
 # Image must still have the 4242 labels (no auto-rebuild).
-img_uid=$(docker image inspect generic-devcontainer \
+img_uid=$("$RUNTIME" image inspect generic-devcontainer \
     --format '{{ index .Config.Labels "dev.uid" }}' 2>/dev/null)
 if [ "$img_uid" != "4242" ]; then
     log_fail "image was rebuilt without consent: labels=$img_uid"

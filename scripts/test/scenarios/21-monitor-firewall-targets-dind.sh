@@ -127,7 +127,7 @@ if ! "$RUNTIME" ps -q -f name="^${N}$" | grep -q .; then
     exit 1
 fi
 sleep 2   # firewall-init.sh + firewall-disable.sh run before the CMD
-out=$(docker exec --user root "$N" iptables -S OUTPUT 2>&1 | head -1)
+out=$("$RUNTIME" exec --user root "$N" iptables -S OUTPUT 2>&1 | head -1)
 expect_grep "$out" "OUTPUT ACCEPT" \
     || { log_fail "fresh exec --open container should have OUTPUT policy ACCEPT; got: $out"; exit 1; }
 # And it must be re-securable in place with `fw on`.

@@ -35,7 +35,7 @@ build_image_with_uid_gid 4242 4242 || exit 1
 
 # Plant a marker in devcontainer-home that the rebuild path must wipe.
 "$RUNTIME" volume create devcontainer-home >/dev/null
-docker run --rm -v devcontainer-home:/h busybox \
+"$RUNTIME" run --rm -v devcontainer-home:/h busybox \
     sh -c 'echo old > /h/marker' >/dev/null 2>&1
 
 # DEV_ASSUME_YES=1 bypasses the prompt. The command runs inside the
@@ -51,7 +51,7 @@ if [ "$rc" -eq 0 ]; then
 fi
 
 # Image labels now match host.
-img_uid=$(docker image inspect generic-devcontainer \
+img_uid=$("$RUNTIME" image inspect generic-devcontainer \
     --format '{{ index .Config.Labels "dev.uid" }}' 2>/dev/null)
 if [ "$img_uid" != "$HOST_UID" ]; then
     log_fail "image not rebuilt to host UID; labels=$img_uid"
