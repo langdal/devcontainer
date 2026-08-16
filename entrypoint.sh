@@ -9,8 +9,8 @@
 # failure, or fall through to an unfirewalled shell on any error.
 set -u
 
-# --- Suppress AAAA lookups ---
-# Two reasons, either sufficient:
+# --- Suppress AAAA lookups (closed mode only) ---
+# Two reasons, either sufficient, both specific to closed (proxied) mode:
 # 1. Firewalled mode: firewall-init.sh default-DROPs IPv6 OUTPUT, so AAAA
 #    results are unusable for direct clients — and worse, actively harmful
 #    for tinyproxy: a runtime that installs a v6 default route (podman 5's
@@ -22,41 +22,38 @@ set -u
 #    getaddrinfo() intermittently return EAI_AGAIN ("Temporary failure in
 #    name resolution" from tinyproxy). `getent`-style callers escape via
 #    AI_ADDRCONFIG; tinyproxy and many others do not.
-# Net: always skip AAAA except in maintenance mode on a host with a real v6
-# route (the one case where v6 may genuinely work end-to-end).
-if { [ -z "${DEVCONTAINER_MAINTENANCE:-}" ] || [ -z "$(ip -6 route show default 2>/dev/null)" ]; } \
-   && [ -w /etc/resolv.conf ] \
-   && ! grep -qE '^options[^#]*\bno-aaaa\b' /etc/resolv.conf; then
-    echo 'options no-aaaa' >> /etc/resolv.conf
+# Net: always skip AAAA in closed mode, except in maintenance mode on a host
+# with a real v6 route (the one case where v6 may genuinely work end-to-end).
+# Open mode has no proxy in the loop and OUTPUT stays ACCEPT, so AAAA is not
+# harmful there — leave the resolver alone.
+if [ "${DEVCONTAINER_EGRESS:-closed}" = closed ]; then
+    if { [ -z "${DEVCONTAINER_MAINTENANCE:-}" ] || [ -z "$(ip -6 route show default 2>/dev/null)" ]; } \
+       && [ -w /etc/resolv.conf ] \
+       && ! grep -qE '^options[^#]*\bno-aaaa\b' /etc/resolv.conf; then
+        echo 'options no-aaaa' >> /etc/resolv.conf
+    fi
 fi
 
-# --- Firewall (skipped in maintenance mode) ---
+# --- Firewall (skipped in maintenance mode; self-branches on egress mode) ---
 if [ -z "${DEVCONTAINER_MAINTENANCE:-}" ]; then
     if ! /usr/local/sbin/firewall-init.sh; then
         echo "FATAL: firewall-init.sh failed; refusing to start container" >&2
         exit 1
     fi
-    export HTTPS_PROXY=http://127.0.0.1:8888
-    export HTTP_PROXY=http://127.0.0.1:8888
-    export NO_PROXY=localhost,127.0.0.1,host.docker.internal
-    cat > /etc/profile.d/proxy.sh <<'EOF'
+
+    # Proxy plumbing only matters in closed mode: open mode runs no tinyproxy,
+    # so forcing HTTPS_PROXY/HTTP_PROXY on proxy-honouring clients would just
+    # break them (connection refused to a proxy that isn't listening).
+    if [ "${DEVCONTAINER_EGRESS:-closed}" = closed ]; then
+        export HTTPS_PROXY=http://127.0.0.1:8888
+        export HTTP_PROXY=http://127.0.0.1:8888
+        export NO_PROXY=localhost,127.0.0.1,host.docker.internal
+        cat > /etc/profile.d/proxy.sh <<'EOF'
 export HTTPS_PROXY=http://127.0.0.1:8888
 export HTTP_PROXY=http://127.0.0.1:8888
 export NO_PROXY=localhost,127.0.0.1,host.docker.internal
 EOF
-    chmod 644 /etc/profile.d/proxy.sh
-
-    # Opt-in: bring the container up with the firewall already open. Identical
-    # effect to starting normally and then running `dev fw off`:
-    # firewall-init.sh above set up tinyproxy + iptables; this tears the egress
-    # block down and flips tinyproxy to allow-all. The proxy env vars stay
-    # exported (tinyproxy keeps running, just permissive), so HTTP_PROXY-
-    # honouring clients work exactly as in the toggle-off case.
-    if [ -n "${DEVCONTAINER_FW_DISABLED:-}" ]; then
-        if ! /usr/local/sbin/firewall-disable.sh; then
-            echo "FATAL: firewall-disable.sh failed; refusing to start container" >&2
-            exit 1
-        fi
+        chmod 644 /etc/profile.d/proxy.sh
     fi
 fi
 
@@ -176,8 +173,13 @@ fi
 # without these files their downloads bypass tinyproxy, the kernel silently
 # drops the packets, and the user sees "could not be resolved" with no network
 # hint. Seed-only: never overwrite a file the user already customised (same
-# contract as the git identity seeding below).
-if [ -n "${HTTPS_PROXY:-}" ]; then
+# contract as the git identity seeding below). Closed mode only: open mode and
+# maintenance mode both run no tinyproxy, so pointing JVM tools at
+# 127.0.0.1:8888 would just break their downloads (connection refused).
+# DEVCONTAINER_EGRESS is not passed at all in maintenance mode (see
+# lib/dev/lifecycle.sh), so it must be checked explicitly rather than relying
+# on the ${:-closed} default.
+if [ -z "${DEVCONTAINER_MAINTENANCE:-}" ] && [ "${DEVCONTAINER_EGRESS:-closed}" = closed ]; then
     if [ ! -f /home/vscode/.m2/settings.xml ]; then
         mkdir -p /home/vscode/.m2
         cat > /home/vscode/.m2/settings.xml <<'M2EOF'

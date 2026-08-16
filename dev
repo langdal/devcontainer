@@ -115,11 +115,11 @@ HOST_PORTS=()
 # shellcheck disable=SC2034  # consumed by start_container/attach_existing_container (lib/dev/{lifecycle,container}.sh)
 CMD_ARGS=()
 
-# Set true by cmd_up/cmd_exec's `--open` flag: a fresh container should come up
-# with the firewall already torn down (DEVCONTAINER_FW_DISABLED=1 in
-# start_container).
-# shellcheck disable=SC2034  # consumed by start_container (lib/dev/lifecycle.sh)
-FW_DISABLED_START=false
+# Egress mode for the container being started: open (default) or closed.
+# Seeded from DEV_EGRESS in cmd_start, overridable there by --open/--closed;
+# passed to the container as DEVCONTAINER_EGRESS by start_container.
+# shellcheck disable=SC2034  # consumed by cmd_start (lib/dev/up.sh) and start_container (lib/dev/lifecycle.sh)
+EGRESS_MODE=open
 
 # Per-workspace host-side state (lib/dev/approval.sh): the state dir holding the
 # approved project allowlist + the GITHUB_TOKEN scope cache, and whether that

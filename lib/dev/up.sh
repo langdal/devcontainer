@@ -12,9 +12,7 @@ cmd_up() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --maint) UP_ARGS+=(--maintenance); shift ;;
-      --open)
-        # shellcheck disable=SC2034  # consumed by start_container (lib/dev/lifecycle.sh)
-        FW_DISABLED_START=true; shift ;;
+      --open|--closed) UP_ARGS+=("$1"); shift ;;
       --)
         echo "Error: 'dev up' does not take a command; use 'dev exec' -- CMD [ARGS...]." >&2
         exit 2 ;;
@@ -33,9 +31,7 @@ cmd_exec() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --maint) EXEC_ARGS+=(--maintenance); shift ;;
-      --open)
-        # shellcheck disable=SC2034  # consumed by start_container (lib/dev/lifecycle.sh)
-        FW_DISABLED_START=true; shift ;;
+      --open|--closed) EXEC_ARGS+=("$1"); shift ;;
       --)      _saw_ddash=true
                # $# counts the `--` itself, so 1 means nothing follows it.
                # Without this guard `dev exec --` would cold-start and attach
@@ -66,8 +62,26 @@ cmd_exec() {
 # Assignments here are deliberately global (consumed by start_container and
 # the lib/dev/* helpers); do not make them local.
 cmd_start() {
+  # Precedence: explicit --open/--closed (below) > DEV_EGRESS > default open.
+  case "${DEV_EGRESS:-open}" in
+    open|closed) EGRESS_MODE="${DEV_EGRESS:-open}" ;;
+    *) echo "Error: DEV_EGRESS must be 'open' or 'closed', got '$DEV_EGRESS'" >&2; exit 2 ;;
+  esac
+
+  _EGRESS_MODE_EXPLICIT=false
   while [[ $# -gt 0 ]]; do
     case $1 in
+      --open)
+        EGRESS_MODE=open
+        _EGRESS_MODE_EXPLICIT=true
+        shift
+        ;;
+      --closed)
+        # shellcheck disable=SC2034  # consumed by start_container (lib/dev/lifecycle.sh)
+        EGRESS_MODE=closed
+        _EGRESS_MODE_EXPLICIT=true
+        shift
+        ;;
       --dry-run)
         DRY_RUN=true
         shift
@@ -155,13 +169,11 @@ cmd_start() {
     echo "Error: --pind and --dind are mutually exclusive." >&2
     exit 1
   fi
-  # Maintenance mode already runs without a firewall, and entrypoint.sh nests
-  # the FW_DISABLED branch inside the non-maintenance block — so --open here is
-  # a silent no-op rather than an error. Reject it, as the pre-verb CLI did.
-  if [[ "$MAINTENANCE" == true && "${FW_DISABLED_START:-false}" == true ]]; then
-    echo "Error: --open is meaningless with --maint (maintenance mode already has" >&2
-    echo "       no firewall). Drop --open." >&2
-    exit 2
+  # Maintenance mode never runs the firewall at all, so egress mode is
+  # irrelevant there — warn (not error) when the caller explicitly asked for
+  # one, and continue with maintenance's usual no-firewall behavior.
+  if [[ "$MAINTENANCE" == true && "${_EGRESS_MODE_EXPLICIT:-false}" == true ]]; then
+    echo "Warning: egress mode is ignored in maintenance mode (no firewall runs)." >&2
   fi
 
   # block-if-nested checks apply only to --dind/--pind.

@@ -9,7 +9,7 @@
 # start path; either exec's into the container or, under --dry-run, prints the
 # command. Reads the start-path globals assembled by cmd_start (RUNTIME,
 # RUNTIME_ARGS, CONTAINER_NAME, IMAGE_TAG, DIND, MAINTENANCE, DEFAULT_PORTS,
-# EXTRA_PORTS, HOST_PORTS, CMD_ARGS, FW_DISABLED_START, DRY_RUN, GITHUB_TOKEN, …).
+# EXTRA_PORTS, HOST_PORTS, CMD_ARGS, EGRESS_MODE, DRY_RUN, GITHUB_TOKEN, …).
 start_container() {
   # Allocate a TTY only when stdin AND stdout are real terminals; otherwise
   # docker rejects -it with "the input device is not a TTY" and scripted
@@ -169,11 +169,12 @@ start_container() {
     DOCKER_CMD+=(-e DEVCONTAINER_PIND=1)
   fi
 
-  # --disable-firewall with no running container: bring the fresh container up
-  # with the firewall already torn down (entrypoint still runs firewall-init.sh,
-  # then firewall-disable.sh).
-  if [[ "$FW_DISABLED_START" == true ]]; then
-    DOCKER_CMD+=(-e DEVCONTAINER_FW_DISABLED=1)
+  # Egress mode: tell entrypoint.sh (which passes it straight through to
+  # firewall-init.sh) whether to run open (no proxy/allowlist, IP-layer only)
+  # or closed (tinyproxy + allowlist, default-DROP). Maintenance mode never
+  # runs the firewall at all, so the mode is meaningless there and left unset.
+  if [[ "$MAINTENANCE" != true ]]; then
+    DOCKER_CMD+=(-e "DEVCONTAINER_EGRESS=${EGRESS_MODE:-open}")
   fi
 
   DOCKER_CMD+=("$IMAGE_TAG")

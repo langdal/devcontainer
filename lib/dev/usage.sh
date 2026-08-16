@@ -12,7 +12,12 @@ VERBS:
   up              Build image if needed, start the container, attach a shell.
                   --dind | --pind | --maint   Container mode (mutually
                                                exclusive).
-                  --open           Start with the firewall already disabled.
+                  --open           Start with egress open: no proxy, no
+                                   allowlist, unfiltered outbound traffic
+                                   (default; ignored in --maint, which never
+                                   runs the firewall). See DEV_EGRESS below.
+                  --closed         Start with egress closed: tinyproxy +
+                                   hostname allowlist, default-deny iptables.
                   --build          Force rebuild the image.
                   --dry-run        Print the run command without executing.
                   --port PORT      Add additional port forwarding (repeatable).
@@ -32,17 +37,20 @@ VERBS:
                   report with fixes. Works before anything is set up.
                   Options: --dind / --pind (also require nested-mode
                   prerequisites). Exits 1 if anything blocking fails.
-  fw off          Toggle the firewall off on the running workspace container
-                  (normal or dind) in place: flush OUTPUT rules + ACCEPT
+  fw open         Toggle egress open on the running workspace container
+                  (normal, dind, or pind) in place: flush OUTPUT rules + ACCEPT
                   policy, and switch tinyproxy to an allow-all filter
                   (SIGHUP reload). Errors if nothing is running — use
-                  'dev up --open' to start a fresh container with the
-                  firewall already open.
-  fw on           Re-run firewall-init.sh on the running workspace container
+                  'dev up --open' to start a fresh container with egress
+                  already open.
+  fw close        Re-run firewall-init.sh on the running workspace container
                   to rebuild the allowlist filter and restore the
                   default-deny iptables policy.
-  fw log          Tail the firewall proxy log of the running workspace
-                  container (/var/log/tinyproxy.log). Does not start one.
+  fw log          Tail the running workspace container's egress log: in
+                  closed mode, the tinyproxy log (/var/log/tinyproxy.log,
+                  hostname-level); in open mode, tcpdump on the DNS port plus
+                  the FW-CONN NFLOG group (connection tuples only — no
+                  URLs/headers without a proxy). Does not start one.
   fw drops        Stream packets dropped by iptables in the running workspace
                   container (tcpdump on NFLOG group 1). Does not start one.
   agent add NAME  Copy a curated set of an agent's credentials + settings
@@ -83,6 +91,12 @@ VERBS:
   --version       Print the dev script version and exit
 
 ENVIRONMENT:
+  DEV_EGRESS=open|closed
+                     Default egress mode for 'dev up'/'dev exec' when neither
+                     --open nor --closed is given (default: open). An
+                     explicit --open/--closed flag always wins over this. Any
+                     other value is an error (exit 2). Ignored in --maint,
+                     which never runs the firewall.
   DEV_RUNTIME=docker|podman
                      Force a runtime when both are installed. Default:
                      docker preferred on Linux; podman only on macOS.
@@ -122,15 +136,16 @@ EXAMPLES:
   dev up --host-port 8080         # Reach host service at host.docker.internal:8080
   dev up --maint                  # Start in maintenance mode (no firewall, sudo enabled)
   dev up --dind                   # Start with rootless docker available inside
-  dev up --open                   # Start fresh with the firewall already off
+  dev up --open                   # Start fresh with egress open (the default)
+  dev up --closed                 # Start fresh with egress closed (proxy + allowlist)
   dev exec -- npm run dev         # Run a custom command in the container
   dev shell                       # Attach another shell to the running container
   dev down                        # Stop this workspace's container(s)
-  dev status                      # Show what is running and its firewall state
-  dev fw log                      # Tail firewall proxy log of running container
+  dev status                      # Show what is running, its firewall state, and egress mode
+  dev fw log                      # Tail egress log of the running container (mode-aware)
   dev fw drops                    # Stream iptables-dropped packets of running container
-  dev fw off                      # Toggle the firewall off on the running container
-  dev fw on                       # Restore the firewall on the running container
+  dev fw open                     # Toggle egress open on the running container
+  dev fw close                    # Restore egress closed on the running container
   dev reset                       # Remove containers + prompt per volume
   dev update                      # Update the checkout to the latest tag
   dev update --dry-run            # Show what update would do
