@@ -54,6 +54,14 @@ seeding. This extends what `firewall-disable.sh` already does (flush OUTPUT
 to ACCEPT) and is what makes open mode behave like the host: any port, any
 protocol — raw TCP to an external DB, SSH, gRPC — not just proxy-aware HTTP.
 
+Proxy-free does **not** mean unobservable. Open mode keeps egress visibility
+at the kernel layer instead of the proxy layer (§3, "Egress logging"): DNS
+queries reveal the hostnames the container tries to reach, and a
+new-connection NFLOG records outbound connections at IP:port for every
+protocol. `dev fw log` surfaces both. The ceiling without terminating TLS is
+hostname + IP:port (no URLs/methods) — closed mode's proxy log is still the
+richer per-request audit trail when that matters.
+
 **Closed mode is today's behavior unchanged** (default-DROP OUTPUT, only the
 `proxy` uid reaches :80/:443, tinyproxy hostname filter from
 base+approved-project allowlists), plus the same always-on link-local DROP
@@ -99,8 +107,23 @@ link-local, exempt that address from the block so DNS still works. Unlikely
 on the target hosts, but the block must not break name resolution.
 
 - **Open path** (`DEVCONTAINER_EGRESS=open`): `install_baseline_blocks`, then
-  OUTPUT policy ACCEPT (v4+v6). No proxy, no filter. entrypoint skips the
-  proxy exports / `proxy.sh` / `no-aaaa` / m2+gradle seeding.
+  a new-connection log rule (below), then OUTPUT policy ACCEPT (v4+v6). No
+  proxy, no filter. entrypoint skips the proxy exports / `proxy.sh` /
+  `no-aaaa` / m2+gradle seeding.
+
+**Egress logging (open mode).** Two proxy-free sources, both cheap and
+unbypassable:
+- New-connection NFLOG: `-A OUTPUT -p tcp --syn -m limit --limit 60/min
+  --limit-burst 20 -j NFLOG --nflog-group 2 --nflog-prefix "FW-CONN"` (v4+v6),
+  installed before the ACCEPT policy takes over. Group 2 keeps it distinct
+  from the link-local drop log (group 1). Records IP:port for every protocol,
+  including connections to literal IPs a DNS log would miss.
+- DNS-query visibility: not a persistent rule — `dev fw log` reads it live
+  (below) via `tcpdump` on port 53, which prints query names (`A? host`).
+  tcpdump is already in the image.
+Closed mode's richer per-hostname proxy log is unchanged; the connection
+NFLOG is open-mode-only (in closed mode the owner-rule already gates egress
+and the proxy log is authoritative).
 - **Closed path**: today's `firewall-init.sh` body, plus
   `install_baseline_blocks`. entrypoint does today's proxy plumbing.
 - **`firewall-disable.sh`** (used by `fw open` and the open cold-start):
@@ -121,6 +144,12 @@ on the target hosts, but the block must not break name resolution.
   `off|on` → `open|close` in `lib/dev/fw.sh` and its usage text. `fw close`
   with a non-existent container errors as `fw on` does today; `fw open` on a
   fresh workspace cold-starts open (as `fw off` does today).
+- `dev fw log` is mode-aware: in **closed** mode it tails the tinyproxy
+  CONNECT log (today's behavior); in **open** mode it shows the kernel-level
+  egress view — `tcpdump` on port 53 (DNS query names) merged with `tcpdump
+  -i nflog:2` (the FW-CONN connection log). Same command, right source per
+  mode, so an agent/operator runs one thing regardless. `fw drops` stays
+  group 1 (link-local + any closed-mode DROPs).
 - `dev status` reports egress mode (`open`/`closed`) per container, inferred
   from the running container's state (the existing banner-file check
   distinguishes; extend it to name the mode).
@@ -161,7 +190,9 @@ on the target hosts, but the block must not break name resolution.
   assertion — probe a direct connect to 169.254.169.254 and require it to
   fail open and closed). Follow the correct assertion shape (assert on the
   inner probe's result, not `|| echo` on the outer `dev exec` — see the
-  final-review C4 finding).
+  final-review C4 finding). Plus (f): in open mode, after the container makes
+  a request to a known host, `dev fw log` surfaces that host (DNS name and/or
+  its connection) — asserts the kernel-level observability actually works.
 - `scripts/verify-firewall.sh`: add a metadata/link-local DROP probe that
   runs in both modes.
 - Full `run-all` matrix green (CI's rootless-linux + vm-matrix cells).
