@@ -54,9 +54,15 @@ _doc_engine_ver() {
 # to exist and detect_runtime has run, so $RUNTIME is always set here.
 # Degrades gracefully: any field this cannot determine (no engine reachable,
 # version banner didn't parse) is simply omitted, never printed as "unknown".
+# Host and Workspace never depend on a runtime, so they are printable even on
+# a machine where none exists. Split out so the no-runtime path can reuse them.
+_doc_host_line() {
+  printf 'Host      %s %s, %s\n' "$1" "$(uname -r 2>/dev/null)" "$(uname -m 2>/dev/null)"
+}
+
 _doc_header() {
   local os="$1"
-  printf 'Host      %s %s, %s\n' "$os" "$(uname -r 2>/dev/null)" "$(uname -m 2>/dev/null)"
+  _doc_host_line "$os"
 
   local cli_ver engine_raw engine_ver line="$RUNTIME"
   cli_ver="$(_doc_cli_ver "$(_runtime_version)")"
@@ -195,6 +201,14 @@ cmd_doctor() {
       done
     done
   else
+    # detect_runtime cannot run here (it exits rather than returns), but the
+    # Host and Workspace lines never needed it. Without them the report opened
+    # mid-table, with no record of which OS, kernel, arch or directory produced
+    # it -- on precisely the unconfigured machine whose report gets pasted into
+    # a bug thread. Found by CI's bare-macOS runner, which has no podman at all.
+    _doc_host_line "$os"
+    printf 'Runtime   none detected\n'
+    printf 'Workspace %s\n' "$(basename "$(pwd)")"
     [[ -n "$phase0_buf" ]] && cat "$phase0_buf"
   fi
   [[ -n "$phase0_buf" ]] && rm -f "$phase0_buf"

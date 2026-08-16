@@ -117,7 +117,15 @@ jobs:
         # Without both, every --dind/--pind scenario in the user subset refuses
         # at preflight and this cell is red for host reasons rather than code.
         run: |
-          sudo usermod --add-subuids 200000-265535 --add-subgids 200000-265535 "$USER"
+          # REPLACE the grant, never --add to it. ubuntu-24.04 runners already
+          # ship the user a 165536-231071 range, and adding 200000-265535 on
+          # top overlaps it. newuidmap rejects an overlapping map outright --
+          # "write to uid_map failed: Invalid argument" -- so `podman system
+          # migrate` died and took the whole cell with it before a single
+          # scenario ran. One contiguous range large enough for the image's
+          # vscode mapping, and no overlap to reject.
+          sudo sed -i "/^$USER:/d" /etc/subuid /etc/subgid
+          echo "$USER:100000:400000" | sudo tee -a /etc/subuid /etc/subgid >/dev/null
           podman system migrate
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
           echo "subuid: $(grep "^$USER:" /etc/subuid || echo none)"
@@ -160,18 +168,25 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Unit suite
+        # Exit 77 is "skipped", not "passed": this runner has no container
+        # runtime at all (that is the point of the cell), and the handful of
+        # unit tests that drive `dev` end to end genuinely cannot run without
+        # one. They used to exit 1, which made a correctly-configured cell
+        # look broken. Counting skips separately keeps that visible instead of
+        # laundering it into a pass.
         run: |
-          fails=0
+          fails=0; skips=0
           for t in scripts/test/unit/*.sh; do
             n=$(basename "$t" .sh)
             [ "$n" = "test-runner" ] && continue
-            if bash "$t" >/tmp/"$n".log 2>&1; then
-              echo "PASS $n"
-            else
-              echo "FAIL $n"; sed -n '1,20p' /tmp/"$n".log; fails=$((fails+1))
-            fi
+            rc=0; bash "$t" >/tmp/"$n".log 2>&1 || rc=$?
+            case "$rc" in
+              0)  echo "PASS $n" ;;
+              77) echo "SKIP $n (needs a container runtime)"; skips=$((skips+1)) ;;
+              *)  echo "FAIL $n"; sed -n '1,20p' /tmp/"$n".log; fails=$((fails+1)) ;;
+            esac
           done
-          echo "unit failures: $fails"
+          echo "unit failures: $fails, skipped: $skips"
           [ "$fails" -eq 0 ]
 
       - name: dev doctor reports on a bare Mac

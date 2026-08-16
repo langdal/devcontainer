@@ -5,7 +5,7 @@
 set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 command -v docker >/dev/null 2>&1 || command -v podman >/dev/null 2>&1 \
-    || { echo "no container runtime on PATH"; exit 1; }
+    || { echo "SKIP: no container runtime on PATH"; exit 77; }
 # Every dev() call below runs with $WORK as cwd, so the workspace basename is
 # a fresh mktemp name — never "devcontainer" (this repo's own workspace). That
 # guarantees the runtime-detection assertions (fw log / status) see no

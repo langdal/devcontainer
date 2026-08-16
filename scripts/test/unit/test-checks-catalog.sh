@@ -83,9 +83,9 @@ _chk_userns_sysctl_fix | grep -q 'apparmor_restrict_unprivileged_userns=0' \
 # _chk_subid_grant short-circuits to 'na' on a rootful runtime, so pin
 # rootlessness here — otherwise this case is decided by whatever runtime the
 # machine running the tests happens to have.
-# shellcheck disable=SC2329  # invoked indirectly via run_check -> _chk_subid_grant
+# shellcheck disable=SC2317,SC2329  # invoked indirectly via run_check -> _chk_subid_grant
 runtime_is_rootless() { return 0; }
-# shellcheck disable=SC2329  # invoked indirectly via subid_total override below
+# shellcheck disable=SC2317,SC2329  # invoked indirectly via subid_total override below
 _subid_stub() { echo 200000; }
 subid_total() { _subid_stub; }
 DIND_MIN_SUBIDS=165535 run_check subid-grant; [ "$CHECK_STATE" = pass ] || fail "200000 ids is enough"
@@ -94,12 +94,12 @@ DIND_MIN_SUBIDS=165535 run_check subid-grant; [ "$CHECK_STATE" = fail ] || fail 
 _chk_subid_grant_fix | grep -q 'usermod --add-subuids' || fail "subid fix lost usermod"
 
 # --- fuse-device ---
-# shellcheck disable=SC2329  # invoked indirectly via run_check -> _chk_fuse_device
+# shellcheck disable=SC2317,SC2329  # invoked indirectly via run_check -> _chk_fuse_device
 _have_dev_fuse() { return 0; }; run_check fuse-device; [ "$CHECK_STATE" = pass ] || fail "fuse present"
 _have_dev_fuse() { return 1; }; run_check fuse-device; [ "$CHECK_STATE" = fail ] || fail "fuse missing"
 
 # --- cgroup2 ---
-# shellcheck disable=SC2329  # invoked indirectly via run_check -> _chk_cgroup2
+# shellcheck disable=SC2317,SC2329  # invoked indirectly via run_check -> _chk_cgroup2
 _cgroup_version() { echo 2; }; run_check cgroup2; [ "$CHECK_STATE" = pass ] || fail "cgroup v2"
 _cgroup_version() { echo 1; }; run_check cgroup2; [ "$CHECK_STATE" = fail ] || fail "cgroup v1 must fail"
 
@@ -107,11 +107,11 @@ _cgroup_version() { echo 1; }; run_check cgroup2; [ "$CHECK_STATE" = fail ] || f
 RUNTIME=docker
 DEV_FAKE_RUNTIME_VERSION='podman version 5.7.0' run_check engine-cli-match
 [ "$CHECK_STATE" = pass ] || fail "podman CLI + podman engine agree"
-# shellcheck disable=SC2329  # invoked indirectly via run_check -> _chk_engine_cli_match
+# shellcheck disable=SC2317,SC2329  # invoked indirectly via run_check -> _chk_engine_cli_match
 _engine_server_name() { echo "Podman Engine"; }
 DEV_FAKE_RUNTIME_VERSION='Docker version 29.1.3' run_check engine-cli-match
 [ "$CHECK_STATE" = fail ] || fail "docker CLI on a podman socket must be flagged"
-# shellcheck disable=SC2329  # invoked indirectly via run_check -> _chk_engine_cli_match
+# shellcheck disable=SC2317,SC2329  # invoked indirectly via run_check -> _chk_engine_cli_match
 _engine_server_name() { echo "Engine"; }
 DEV_FAKE_RUNTIME_VERSION='Docker version 29.1.3' run_check engine-cli-match
 [ "$CHECK_STATE" = pass ] || fail "docker CLI + dockerd agree"
@@ -130,26 +130,26 @@ DEV_FAKE_RUNTIME_VERSION='podman version 5.7.0' run_check engine-cli-match
 unset ENGINE_CLI_SWITCHED
 
 # --- disk-space / memory: thresholds from docs/ci-testing.md ---
-# shellcheck disable=SC2329  # invoked indirectly via run_check -> _chk_disk_space
+# shellcheck disable=SC2317,SC2329  # invoked indirectly via run_check -> _chk_disk_space
 _free_disk_gb() { echo 10; }; run_check disk-space; [ "$CHECK_STATE" = pass ] || fail "10 GB is enough"
-# shellcheck disable=SC2329  # invoked indirectly via run_check -> _chk_disk_space
+# shellcheck disable=SC2317,SC2329  # invoked indirectly via run_check -> _chk_disk_space
 _free_disk_gb() { echo 1; };  run_check disk-space; [ "$CHECK_STATE" = fail ] || fail "1 GB is not"
 _free_disk_gb() { echo ""; }; run_check disk-space; [ "$CHECK_STATE" = na ]   || fail "undeterminable free space must be na, not fail"
-# shellcheck disable=SC2329  # invoked indirectly via run_check -> _chk_memory
+# shellcheck disable=SC2317,SC2329  # invoked indirectly via run_check -> _chk_memory
 _total_mem_gb() { echo 16; }; run_check memory;     [ "$CHECK_STATE" = pass ] || fail "16 GB is enough"
-# shellcheck disable=SC2329  # invoked indirectly via run_check -> _chk_memory
+# shellcheck disable=SC2317,SC2329  # invoked indirectly via run_check -> _chk_memory
 _total_mem_gb() { echo 4; };  run_check memory;     [ "$CHECK_STATE" = fail ] || fail "4 GB is not"
-# shellcheck disable=SC2329  # invoked indirectly via run_check -> _chk_memory
+# shellcheck disable=SC2317,SC2329  # invoked indirectly via run_check -> _chk_memory
 _total_mem_gb() { echo ""; }; run_check memory;     [ "$CHECK_STATE" = na ]   || fail "undeterminable memory must be na, not fail"
 _total_mem_gb() { echo garbage; }; run_check memory; [ "$CHECK_STATE" = na ]  || fail "garbage memory reading must be na, not fail"
 
 # --- github-token-scopes: a scoped token is power handed to the agent ---
 GITHUB_TOKEN="" run_check github-token-scopes
 [ "$CHECK_STATE" = na ] || fail "no token means not-applicable, not pass"
-# shellcheck disable=SC2329  # invoked indirectly via run_check -> _chk_github_token_scopes
+# shellcheck disable=SC2317,SC2329  # invoked indirectly via run_check -> _chk_github_token_scopes
 _token_scopes() { echo "repo, workflow"; }
 GITHUB_TOKEN=x run_check github-token-scopes; [ "$CHECK_STATE" = fail ] || fail "scoped token must warn"
-# shellcheck disable=SC2329  # invoked indirectly via run_check -> _chk_github_token_scopes
+# shellcheck disable=SC2317,SC2329  # invoked indirectly via run_check -> _chk_github_token_scopes
 _token_scopes() { echo ""; return 0; }
 GITHUB_TOKEN=x run_check github-token-scopes; [ "$CHECK_STATE" = pass ] || fail "scopeless-and-verified token is fine"
 # curl/transport failure (offline host, proxy interception, timeout) must
@@ -174,7 +174,7 @@ pat_state=$(bash -c '
     || fail "fine-grained PAT needs no probe — expected na, got $pat_state"
 
 # --- selinux ---
-# shellcheck disable=SC2329  # invoked indirectly via run_check -> _chk_selinux_enforcing
+# shellcheck disable=SC2317,SC2329  # invoked indirectly via run_check -> _chk_selinux_enforcing
 _selinux_mode() { echo Enforcing; }; run_check selinux-enforcing; [ "$CHECK_STATE" = fail ] || fail "enforcing"
 _selinux_mode() { echo ""; };        run_check selinux-enforcing; [ "$CHECK_STATE" = na ]   || fail "absent = na"
 

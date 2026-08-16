@@ -3,7 +3,7 @@
 set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 command -v docker >/dev/null 2>&1 || command -v podman >/dev/null 2>&1 \
-    || { echo "no container runtime on PATH"; exit 1; }
+    || { echo "SKIP: no container runtime on PATH"; exit 77; }
 WORK=$(mktemp -d); mkdir -p "$WORK/myproj"; trap 'rm -rf "$WORK"' EXIT
 dev() { (cd "$WORK/myproj" && env -u DEV_SHARED_HOME "$@" "$ROOT/dev" exec --dry-run -- echo hi </dev/null 2>&1); }
 

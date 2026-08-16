@@ -55,7 +55,7 @@ echo "$out" | grep -qi 'no such container' && fail "doctor touched a container"
   # shellcheck source=lib/dev/doctor.sh
   . "$ROOT/lib/dev/doctor.sh"
   detect_runtime()        { RUNTIME=docker; RUNTIME_ARGS=""; }
-  # shellcheck disable=SC2329  # invoked indirectly via run_check's dynamic dispatch
+  # shellcheck disable=SC2317,SC2329  # invoked indirectly via run_check's dynamic dispatch
   _chk_runtime_present()  { return 0; }
   _doc_header()           { :; }   # avoid shelling out to a real runtime
   export DEV_FAKE_OS=Linux DEV_FAKE_CMDS=docker
@@ -96,6 +96,14 @@ doctor_sandboxed() { (cd "$WORK" && PATH="$SANDBOX" "$ROOT/dev" doctor </dev/nul
 out=$(DEV_FAKE_OS=Darwin doctor_sandboxed); rc=$?
 echo "$out" | grep -qE '[0-9]+ (blocking|passed)' \
     || fail "macOS-without-podman: doctor produced no tally, so it bailed mid-report: $out"
+# The header is printable without a runtime and must survive this path. It did
+# not: the report opened mid-table with no record of the OS, kernel, arch or
+# directory that produced it. CI's bare-macOS runner (no podman at all) caught
+# what every developer machine hides by having a runtime installed.
+echo "$out" | grep -q '^Host ' \
+    || fail "macOS-without-podman: report lost its Host header: $out"
+echo "$out" | grep -q '^Workspace ' \
+    || fail "macOS-without-podman: report lost its Workspace line: $out"
 echo "$out" | grep -q 'supported platform' \
     || fail "macOS-without-podman: phase-0 rows missing from report: $out"
 [ "$rc" -eq 1 ] || fail "macOS-without-podman should exit 1 (blocking), got $rc: $out"
