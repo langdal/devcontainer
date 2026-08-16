@@ -6,9 +6,66 @@
 set -euo pipefail
 
 HADOLINT_VERSION="2.14.0"
-HADOLINT_SHA256_LINUX_X64="6bf226944684f56c84dd014e8b979d27425c0148f61b3bd99bcc6f39e9dc5a47"
 ACTIONLINT_VERSION="1.7.12"
-ACTIONLINT_SHA256_LINUX_X64="8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+
+# Every platform is pinned, not just the one the CI box happens to be.
+# Verification used to run on linux/amd64 only, on the stated grounds that
+# "macOS lacks sha256sum" -- macOS has shasum -a 256, so the effect was that
+# the one platform a developer is most likely to run this on installed an
+# executable into ~/.cache on TLS alone. Values come from upstream's own
+# .sha256 sidecars and checksums.txt, fetched 2026-08-16; the two that already
+# existed were re-checked against upstream and matched.
+#
+# Case, not an associative array: macOS runs bash 3.2. Returning empty for an
+# unknown platform is what makes the callers fail closed.
+_hadolint_sha256() {
+    case "$1" in
+        linux-x86_64) echo 6bf226944684f56c84dd014e8b979d27425c0148f61b3bd99bcc6f39e9dc5a47 ;;
+        linux-arm64)  echo 331f1d3511b84a4f1e3d18d52fec284723e4019552f4f47b19322a53ce9a40ed ;;
+        macos-x86_64) echo 2b69a853433f1eca522ffb921cd490bd1321424d03331fd8390f93b7fb4a02e9 ;;
+        macos-arm64)  echo 3625e2e9f43dcfe7bd38738a5f5520ed50ce39ed28485266e6803dd7bc197b10 ;;
+        *)            echo "" ;;
+    esac
+}
+_actionlint_sha256() {
+    case "$1" in
+        linux_amd64)  echo 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8 ;;
+        linux_arm64)  echo 325e971b6ba9bfa504672e29be93c24981eeb1c07576d730e9f7c8805afff0c6 ;;
+        darwin_amd64) echo 5b44c3bc2255115c9b69e30efc0fecdf498fdb63c5d58e17084fd5f16324c644 ;;
+        darwin_arm64) echo aba9ced2dee8d27fecca3dc7feb1a7f9a52caefa1eb46f3271ea66b6e0e6953f ;;
+        *)            echo "" ;;
+    esac
+}
+
+# sha256sum on Linux, shasum -a 256 on macOS. Returns non-zero when neither
+# exists so the caller refuses rather than silently skipping the check.
+_sha256_file() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$1" | awk '{print $1}'
+    else
+        return 1
+    fi
+}
+
+# Verify $1 (a file) against $2 (the expected digest). Any doubt -- unknown
+# platform, no digest tool, mismatch -- deletes the download and fails.
+_verify_or_die() {
+    local file="$1" want="$2" what="$3" actual
+    if [ -z "$want" ]; then
+        echo "$what: no pinned checksum for this platform; refusing to install an unverified binary." >&2
+        rm -f "$file"; return 1
+    fi
+    if ! actual=$(_sha256_file "$file"); then
+        echo "$what: neither sha256sum nor shasum found; refusing to install an unverified binary." >&2
+        rm -f "$file"; return 1
+    fi
+    if [ "$actual" != "$want" ]; then
+        echo "$what checksum mismatch: expected=$want actual=$actual" >&2
+        rm -f "$file"; return 1
+    fi
+}
 
 BIN_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/devcontainer-ci/bin"
 mkdir -p "$BIN_DIR"
@@ -37,15 +94,7 @@ ensure_hadolint() {
     local url="https://github.com/hadolint/hadolint/releases/download/v${HADOLINT_VERSION}/hadolint-${os_tag}-${arch_tag}"
     echo "Fetching hadolint ${HADOLINT_VERSION}..." >&2
     curl --fail --retry 3 --retry-connrefused -L -o "$BIN_DIR/hadolint" "$url"
-    # Verification only on linux/amd64; macOS lacks sha256sum (uses shasum -a 256). Other targets trust TLS + signed releases.
-    if [ "$uname_s" = "linux" ] && [ "$arch_tag" = "x86_64" ]; then
-        local actual
-        actual=$(sha256sum "$BIN_DIR/hadolint" | awk '{print $1}')
-        if [ "$actual" != "$HADOLINT_SHA256_LINUX_X64" ]; then
-            echo "hadolint checksum mismatch: expected=$HADOLINT_SHA256_LINUX_X64 actual=$actual" >&2
-            rm -f "$BIN_DIR/hadolint"; return 1
-        fi
-    fi
+    _verify_or_die "$BIN_DIR/hadolint" "$(_hadolint_sha256 "${os_tag}-${arch_tag}")" hadolint || return 1
     chmod +x "$BIN_DIR/hadolint"
 }
 
@@ -60,14 +109,8 @@ ensure_actionlint() {
     echo "Fetching actionlint ${ACTIONLINT_VERSION}..." >&2
     local tmp; tmp=$(mktemp -d)
     curl --fail --retry 3 --retry-connrefused -L -o "$tmp/$tarball" "$url"
-    # Verification only on linux/amd64; macOS lacks sha256sum (uses shasum -a 256). Other targets trust TLS + signed releases.
-    if [ "$uname_s" = "linux" ] && [ "$arch_tag" = "amd64" ]; then
-        local actual
-        actual=$(sha256sum "$tmp/$tarball" | awk '{print $1}')
-        if [ "$actual" != "$ACTIONLINT_SHA256_LINUX_X64" ]; then
-            echo "actionlint checksum mismatch: expected=$ACTIONLINT_SHA256_LINUX_X64 actual=$actual" >&2
-            rm -rf "$tmp"; return 1
-        fi
+    if ! _verify_or_die "$tmp/$tarball" "$(_actionlint_sha256 "${uname_s}_${arch_tag}")" actionlint; then
+        rm -rf "$tmp"; return 1
     fi
     tar -xzf "$tmp/$tarball" -C "$tmp"
     mv "$tmp/actionlint" "$BIN_DIR/actionlint"
@@ -75,8 +118,8 @@ ensure_actionlint() {
     rm -rf "$tmp"
 }
 
-if [ -z "$HADOLINT_SHA256_LINUX_X64" ] || [ -z "$ACTIONLINT_SHA256_LINUX_X64" ]; then
-    echo "lint.sh: SHA256 constants are empty — see Step 1.2 of the plan." >&2
+if [ -z "$(_hadolint_sha256 linux-x86_64)" ] || [ -z "$(_actionlint_sha256 linux_amd64)" ]; then
+    echo "lint.sh: SHA256 pins are empty — refusing to fetch unverified binaries." >&2
     exit 2
 fi
 
