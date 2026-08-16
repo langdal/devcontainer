@@ -87,10 +87,6 @@ jobs:
   rootless-linux:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
-    # UNVERIFIED: this cell has never run in CI — it cannot be exercised
-    # locally. Non-blocking until one green run exists, then remove this line.
-    # Leaving it blocking would gate every PR on a cell nobody has seen pass.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -162,8 +158,6 @@ jobs:
     # `dev doctor` reports on a machine where nothing is set up.
     runs-on: macos-14
     timeout-minutes: 20
-    # UNVERIFIED, same reasoning as rootless-linux. Remove once green.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 

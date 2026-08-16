@@ -192,9 +192,9 @@ it on a machine you care about. Every platform's checksum is pinned and
 verification fails closed: an unrecognised platform or a missing digest tool
 refuses rather than skipping.
 
-CI is `.github/workflows/ci.yml`. The `rootless-linux` and `macos-checks` jobs
-are still `continue-on-error: true` — they have never completed a green run,
-so they report but do not gate. Remove that flag once each has passed.
+CI is `.github/workflows/ci.yml`. All jobs gate: `rootless-linux` and
+`macos-checks` lost their bootstrap `continue-on-error` after their first
+green runs (2026-08-16, run 31938260294).
 
 ## Architecture
 
