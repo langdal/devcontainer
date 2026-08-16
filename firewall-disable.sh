@@ -29,6 +29,13 @@ if ip6tables -w -F OUTPUT 2>/dev/null; then
     ip6tables -w -P OUTPUT ACCEPT
 fi
 
+# Re-assert the always-on link-local block; opening egress must not open
+# the path to the cloud metadata endpoint. This script runs standalone (it
+# does not source firewall-init.sh), so the rules are inlined rather than
+# calling install_baseline_blocks.
+iptables  -A OUTPUT -d 169.254.0.0/16 -j DROP
+ip6tables -w -A OUTPUT -d fe80::/10   -j DROP 2>/dev/null || true
+
 # Switch tinyproxy to an allow-all filter and reload it in place.
 # The HUP must not abort the script (set -e): a stale pidfile or an
 # already-exited process would otherwise make entrypoint.sh refuse to

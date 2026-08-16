@@ -49,11 +49,13 @@ allowlist_to_filter() {
     done
 }
 
-# Always-on in every mode: link-local (169.254/16, fe80::/10) carries the
-# cloud metadata endpoint (169.254.169.254 on AWS/GCP/Azure/Oracle), a network
-# path to host credentials. Rules precede the chain policy, so this holds
-# whether OUTPUT policy is ACCEPT (open) or DROP (closed). If the container's
-# own resolver is link-local, exempt it so DNS still resolves.
+# Always-on in every mode: link-local (169.254/16 here for v4; fe80::/10 for
+# v6 is re-asserted separately below, immediately after the v6 OUTPUT flush,
+# since that flush would otherwise wipe it) carries the cloud metadata
+# endpoint (169.254.169.254 on AWS/GCP/Azure/Oracle), a network path to host
+# credentials. Rules precede the chain policy, so this holds whether OUTPUT
+# policy ends up ACCEPT (open) or DROP (closed). If the container's own
+# resolver is link-local, exempt it so DNS still resolves.
 install_baseline_blocks() {
     local ns
     while read -r _ ns _; do
@@ -62,33 +64,64 @@ install_baseline_blocks() {
                      iptables  -A OUTPUT -d "$ns" -p tcp --dport 53 -j ACCEPT ;;
         esac
     done < <(grep '^nameserver ' /etc/resolv.conf 2>/dev/null)
-    iptables  -A OUTPUT -d 169.254.0.0/16 -j DROP
-    ip6tables -w -A OUTPUT -d fe80::/10    -j DROP 2>/dev/null || true
+    iptables -A OUTPUT -d 169.254.0.0/16 -j DROP
 }
 
-# --- Merge base + project allowlist into a tinyproxy regex filter ---
-{
-    cat "$BASE"
-    if [ -f "$PROJECT" ]; then
-        cat "$PROJECT"
-    fi
-    if { [ -n "${DEVCONTAINER_DIND:-}" ] || [ -n "${DEVCONTAINER_PIND:-}" ]; } \
-       && [ -f /etc/devcontainer/allowlist.dind ]; then
-        cat /etc/devcontainer/allowlist.dind
-    fi
-} | sed 's/#.*//'           \
-  | tr -d ' \t'             \
-  | awk 'NF'                \
-  | sort -u                 \
-  | allowlist_to_filter > "$FILTER" || exit 1
+# Open-mode egress is unfiltered at the IP layer but must stay observable:
+# log the first packet (SYN) of every new outbound TCP connection, rate
+# limited so a noisy process cannot flood the netlink buffer. Read with
+# `tcpdump -i nflog:2` (mirrors the closed-mode FW-DROP group 1 convention).
+# Takes the iptables binary (and any flags, e.g. "ip6tables -w") to run as
+# its arguments, so the same rule can be installed for both families.
+install_egress_logging() {
+    "$@" -A OUTPUT -m limit --limit 60/min --limit-burst 20 \
+        -p tcp --syn -j NFLOG --nflog-group 2 --nflog-prefix "FW-CONN"
+}
 
-if [ ! -s "$FILTER" ]; then
-    echo "firewall-init: refusing to start with an empty filter" >&2
-    exit 1
-fi
+# --- Apply iptables rules ---
+PROXY_UID="$(id -u proxy)"
 
-# --- Write tinyproxy config ---
-cat > "$CONF" <<'EOF'
+# Reset OUTPUT chain (idempotent across container restarts)
+iptables -F OUTPUT
+iptables -P FORWARD DROP
+iptables -P INPUT ACCEPT   # docker port forwarding lives here
+
+# Baseline blocks first, so they occupy the earliest slots in the chain and
+# take precedence over every ACCEPT rule added below (including the
+# ESTABLISHED,RELATED short-circuit) and over the open-mode ACCEPT policy.
+install_baseline_blocks
+
+if [ "${DEVCONTAINER_EGRESS:-closed}" = "open" ]; then
+    # Open mode: everything except link-local (already dropped above) is
+    # allowed at the IP layer. No proxy, no allowlist. Egress stays
+    # observable via install_egress_logging (new-connection NFLOG).
+    install_egress_logging iptables
+    iptables -P OUTPUT ACCEPT
+    echo "firewall-init: egress OPEN (link-local blocked; connections logged to NFLOG group 2)" >&2
+else
+    # --- Merge base + project allowlist into a tinyproxy regex filter ---
+    {
+        cat "$BASE"
+        if [ -f "$PROJECT" ]; then
+            cat "$PROJECT"
+        fi
+        if { [ -n "${DEVCONTAINER_DIND:-}" ] || [ -n "${DEVCONTAINER_PIND:-}" ]; } \
+           && [ -f /etc/devcontainer/allowlist.dind ]; then
+            cat /etc/devcontainer/allowlist.dind
+        fi
+    } | sed 's/#.*//'           \
+      | tr -d ' \t'             \
+      | awk 'NF'                \
+      | sort -u                 \
+      | allowlist_to_filter > "$FILTER" || exit 1
+
+    if [ ! -s "$FILTER" ]; then
+        echo "firewall-init: refusing to start with an empty filter" >&2
+        exit 1
+    fi
+
+    # --- Write tinyproxy config ---
+    cat > "$CONF" <<'EOF'
 User proxy
 Group proxy
 Port 8888
@@ -105,91 +138,80 @@ FilterExtended Yes
 FilterURLs No
 EOF
 
-touch /var/log/tinyproxy.log
-chown proxy:proxy /var/log/tinyproxy.log
-chmod 0755 /run
+    touch /var/log/tinyproxy.log
+    chown proxy:proxy /var/log/tinyproxy.log
+    chmod 0755 /run
 
-tinyproxy_listening() {
-    ss -lnt 'sport = :8888' 2>/dev/null | grep -q ':8888'
-}
+    tinyproxy_listening() {
+        ss -lnt 'sport = :8888' 2>/dev/null | grep -q ':8888'
+    }
 
-# --- Start tinyproxy (daemonizes by default; skip if already running so this
-#     script is safe to re-run on a live container, e.g. `dev fw on`).
-#     If already running, SIGHUP it so the just-rewritten filter is picked up. ---
-if tinyproxy_listening; then
-    echo "firewall-init: tinyproxy already listening on 127.0.0.1:8888, reloading filter" >&2
-    if [ -f /run/tinyproxy.pid ]; then
-        kill -HUP "$(cat /run/tinyproxy.pid)"
+    # --- Start tinyproxy (daemonizes by default; skip if already running so
+    #     this script is safe to re-run on a live container, e.g. `dev fw
+    #     on`). If already running, SIGHUP it so the just-rewritten filter is
+    #     picked up. ---
+    if tinyproxy_listening; then
+        echo "firewall-init: tinyproxy already listening on 127.0.0.1:8888, reloading filter" >&2
+        if [ -f /run/tinyproxy.pid ]; then
+            kill -HUP "$(cat /run/tinyproxy.pid)"
+        else
+            pkill -HUP -x dc-tinyproxy
+        fi
     else
-        pkill -HUP -x dc-tinyproxy
-    fi
-else
-    # dc-tinyproxy is a copy of the tinyproxy binary at a path no host
-    # AppArmor profile attaches to (see Dockerfile).
-    if ! dc-tinyproxy -c "$CONF"; then
-        echo "firewall-init: tinyproxy failed to start" >&2
-        exit 1
-    fi
-    for _ in {1..10}; do
-        tinyproxy_listening && break
-        sleep 0.2
-    done
-    if ! tinyproxy_listening; then
-        echo "firewall-init: tinyproxy did not bind to 127.0.0.1:8888" >&2
-        exit 1
-    fi
-fi
-
-# --- Apply iptables rules ---
-PROXY_UID="$(id -u proxy)"
-
-# Reset OUTPUT chain (idempotent across container restarts)
-iptables -F OUTPUT
-iptables -P OUTPUT DROP
-iptables -P FORWARD DROP
-iptables -P INPUT ACCEPT   # docker port forwarding lives here
-
-# Baseline blocks first, so they occupy the earliest slots in the chain and
-# take precedence over every ACCEPT rule added below (including the
-# ESTABLISHED,RELATED short-circuit).
-install_baseline_blocks
-
-iptables -A OUTPUT -o lo -j ACCEPT
-iptables -A OUTPUT -p udp --dport 53 -j ACCEPT
-iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT
-iptables -A OUTPUT -m owner --uid-owner "$PROXY_UID" \
-                  -p tcp -m multiport --dports 80,443 -j ACCEPT
-iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
-
-# Optional: punch a hole to specific ports on the host gateway. Set by
-# `dev up --host-port PORT`, which also adds --add-host=host.docker.internal:host-gateway
-# at run time. Scoped to the gateway IP only so the firewall still default-drops
-# every other destination. Fail-closed: if the hostname doesn't resolve or any
-# port is invalid, the firewall does not come up.
-if [ -n "${DEVCONTAINER_HOST_PORTS:-}" ]; then
-    HOST_GW="$(getent ahostsv4 host.docker.internal 2>/dev/null | awk 'NR==1 {print $1}')" || true
-    if [ -z "$HOST_GW" ]; then
-        echo "firewall-init: DEVCONTAINER_HOST_PORTS set but host.docker.internal does not resolve" >&2
-        exit 1
-    fi
-    IFS=',' read -ra _HOST_PORTS <<< "$DEVCONTAINER_HOST_PORTS"
-    for port in "${_HOST_PORTS[@]}"; do
-        port="${port//[[:space:]]/}"
-        [ -z "$port" ] && continue
-        if ! [[ "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
-            echo "firewall-init: invalid host port '$port' in DEVCONTAINER_HOST_PORTS" >&2
+        # dc-tinyproxy is a copy of the tinyproxy binary at a path no host
+        # AppArmor profile attaches to (see Dockerfile).
+        if ! dc-tinyproxy -c "$CONF"; then
+            echo "firewall-init: tinyproxy failed to start" >&2
             exit 1
         fi
-        iptables -A OUTPUT -p tcp -d "$HOST_GW" --dport "$port" -j ACCEPT
-    done
-    echo "firewall-init: opened host gateway $HOST_GW for ports: $DEVCONTAINER_HOST_PORTS" >&2
-fi
+        for _ in {1..10}; do
+            tinyproxy_listening && break
+            sleep 0.2
+        done
+        if ! tinyproxy_listening; then
+            echo "firewall-init: tinyproxy did not bind to 127.0.0.1:8888" >&2
+            exit 1
+        fi
+    fi
 
-# Log packets that fell through every ACCEPT above — i.e. exactly what the
-# default-DROP policy is about to discard. Rate-limited so a noisy app cannot
-# flood the netlink buffer. Read with `tcpdump -i nflog:1` (see `dev fw drops`).
-iptables -A OUTPUT -m limit --limit 60/min --limit-burst 20 \
-                  -j NFLOG --nflog-group 1 --nflog-prefix "FW-DROP"
+    iptables -P OUTPUT DROP
+    iptables -A OUTPUT -o lo -j ACCEPT
+    iptables -A OUTPUT -p udp --dport 53 -j ACCEPT
+    iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT
+    iptables -A OUTPUT -m owner --uid-owner "$PROXY_UID" \
+                      -p tcp -m multiport --dports 80,443 -j ACCEPT
+    iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+
+    # Optional: punch a hole to specific ports on the host gateway. Set by
+    # `dev up --host-port PORT`, which also adds --add-host=host.docker.internal:host-gateway
+    # at run time. Scoped to the gateway IP only so the firewall still default-drops
+    # every other destination. Fail-closed: if the hostname doesn't resolve or any
+    # port is invalid, the firewall does not come up.
+    if [ -n "${DEVCONTAINER_HOST_PORTS:-}" ]; then
+        HOST_GW="$(getent ahostsv4 host.docker.internal 2>/dev/null | awk 'NR==1 {print $1}')" || true
+        if [ -z "$HOST_GW" ]; then
+            echo "firewall-init: DEVCONTAINER_HOST_PORTS set but host.docker.internal does not resolve" >&2
+            exit 1
+        fi
+        IFS=',' read -ra _HOST_PORTS <<< "$DEVCONTAINER_HOST_PORTS"
+        for port in "${_HOST_PORTS[@]}"; do
+            port="${port//[[:space:]]/}"
+            [ -z "$port" ] && continue
+            if ! [[ "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+                echo "firewall-init: invalid host port '$port' in DEVCONTAINER_HOST_PORTS" >&2
+                exit 1
+            fi
+            iptables -A OUTPUT -p tcp -d "$HOST_GW" --dport "$port" -j ACCEPT
+        done
+        echo "firewall-init: opened host gateway $HOST_GW for ports: $DEVCONTAINER_HOST_PORTS" >&2
+    fi
+
+    # Log packets that fell through every ACCEPT above — i.e. exactly what the
+    # default-DROP policy is about to discard. Rate-limited so a noisy app cannot
+    # flood the netlink buffer. Read with `tcpdump -i nflog:1` (see `dev fw drops`).
+    iptables -A OUTPUT -m limit --limit 60/min --limit-burst 20 \
+                      -j NFLOG --nflog-group 1 --nflog-prefix "FW-DROP"
+fi
 
 # --- Mirror the egress policy for IPv6 ---
 # iptables above only filters IPv4. Some runtimes give the container a global
@@ -198,18 +220,28 @@ iptables -A OUTPUT -m limit --limit 60/min --limit-burst 20 \
 # fail-closed posture. (The host-port holes are IPv4-only by construction:
 # host.docker.internal resolves to the v4 host gateway.)
 if ip6tables -w -F OUTPUT 2>/dev/null; then
-    ip6tables -w -P OUTPUT DROP
     ip6tables -w -P FORWARD DROP
     ip6tables -w -P INPUT ACCEPT
 
-    ip6tables -w -A OUTPUT -o lo -j ACCEPT
-    ip6tables -w -A OUTPUT -p udp --dport 53 -j ACCEPT
-    ip6tables -w -A OUTPUT -p tcp --dport 53 -j ACCEPT
-    ip6tables -w -A OUTPUT -m owner --uid-owner "$PROXY_UID" \
-                      -p tcp -m multiport --dports 80,443 -j ACCEPT
-    ip6tables -w -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
-    ip6tables -w -A OUTPUT -m limit --limit 60/min --limit-burst 20 \
-                      -j NFLOG --nflog-group 1 --nflog-prefix "FW-DROP6"
+    # Re-assert the link-local block that the flush above just wiped (see
+    # install_baseline_blocks), before either branch below sets the OUTPUT
+    # policy — so it holds whether that policy ends up ACCEPT (open) or DROP
+    # (closed).
+    ip6tables -w -A OUTPUT -d fe80::/10 -j DROP 2>/dev/null || true
+
+    if [ "${DEVCONTAINER_EGRESS:-closed}" = "open" ]; then
+        ip6tables -w -P OUTPUT ACCEPT
+    else
+        ip6tables -w -P OUTPUT DROP
+        ip6tables -w -A OUTPUT -o lo -j ACCEPT
+        ip6tables -w -A OUTPUT -p udp --dport 53 -j ACCEPT
+        ip6tables -w -A OUTPUT -p tcp --dport 53 -j ACCEPT
+        ip6tables -w -A OUTPUT -m owner --uid-owner "$PROXY_UID" \
+                          -p tcp -m multiport --dports 80,443 -j ACCEPT
+        ip6tables -w -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+        ip6tables -w -A OUTPUT -m limit --limit 60/min --limit-burst 20 \
+                          -j NFLOG --nflog-group 1 --nflog-prefix "FW-DROP6"
+    fi
 else
     # Kernel without ip6table_filter. That is only safe when the container
     # has no routable IPv6 at all; otherwise refuse rather than leave an
@@ -227,4 +259,4 @@ rm -f /etc/profile.d/zz-fw-disabled-banner.sh
 # Diagnostics go to stderr: this script is invoked by entrypoint.sh purely
 # for its side effects, so stdout must stay clean for the payload command
 # in `dev -- <cmd>` (otherwise `x=$(dev -- some-cmd)` captures this line).
-echo "firewall-init: ready ($(wc -l < "$FILTER") allowlist entries, proxy uid=$PROXY_UID)" >&2
+echo "firewall-init: ready (mode=${DEVCONTAINER_EGRESS:-closed}, proxy uid=$PROXY_UID)" >&2
