@@ -39,10 +39,13 @@ trap 'cleanup_extra; restore_host' EXIT
 
 # Simulate the agent extending its own allowlist: write the entry and start
 # non-interactively with NO approval (fresh state, DEV_ASSUME_YES unset).
+# DEV_EGRESS=closed: the filter this scenario inspects is tinyproxy's, which
+# only runs in closed mode -- open mode (the default since the egress-open
+# work) has no tinyproxy filter file at all.
 echo "$SENTINEL" >> "$ALLOWLIST"
 rm -f "${XDG_STATE_HOME:-$HOME/.local/state}/devcontainer/${WS}"-*/allowlist.approved
 
-filter=$(./dev exec -- cat /etc/tinyproxy/filter </dev/null 2>&1) \
+filter=$(DEV_EGRESS=closed ./dev exec -- cat /etc/tinyproxy/filter </dev/null 2>&1) \
     || { log_fail "could not read filter (unapproved run)"; exit 1; }
 escaped="${SENTINEL//./\\\\.}"
 if echo "$filter" | grep -Eq "^\\^${escaped}\\\$$"; then
@@ -52,7 +55,7 @@ fi
 "$RUNTIME" rm -f "$N" 2>/dev/null
 
 # Same entry, approved -> merged.
-filter=$(DEV_ASSUME_YES=1 ./dev exec -- cat /etc/tinyproxy/filter 2>&1) \
+filter=$(DEV_EGRESS=closed DEV_ASSUME_YES=1 ./dev exec -- cat /etc/tinyproxy/filter 2>&1) \
     || { log_fail "could not read filter (approved run)"; exit 1; }
 if ! echo "$filter" | grep -Eq "^\\^${escaped}\\\$$"; then
     log_fail "approved allowlist entry missing from filter"
