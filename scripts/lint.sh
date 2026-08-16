@@ -79,7 +79,11 @@ if ! command -v shellcheck >/dev/null 2>&1; then
     echo "shellcheck is required. Install via 'apt install shellcheck' or 'brew install shellcheck'." >&2
     exit 2
 fi
-mapfile -d '' shell_files < <(git ls-files -z '*.sh' 'dev' 'entrypoint.sh' 'firewall-init.sh' 'dind-init.sh' 2>/dev/null)
+# Not mapfile: this script is itself host-side and must run under macOS's
+# bash 3.2, which has no mapfile/readarray. See the bash 3.2 section below.
+shell_files=()
+while IFS= read -r -d '' f; do shell_files+=("$f"); done \
+    < <(git ls-files -z '*.sh' 'dev' 'entrypoint.sh' 'firewall-init.sh' 'dind-init.sh' 2>/dev/null)
 if [ ${#shell_files[@]} -gt 0 ]; then
     if ! shellcheck -x "${shell_files[@]}"; then fail=1; fi
 else
@@ -116,5 +120,38 @@ for f in lib/dev/*.sh; do
     [ "$(wc -l < "$f")" -le "$budget" ] || { echo "$f exceeds $budget lines"; over=1; }
 done
 [ "$over" -eq 0 ] || fail=1
+
+echo
+echo "=== bash 3.2 portability (host-side files) ==="
+# macOS still ships bash 3.2 as /bin/bash, and `dev` plus the test harness run
+# there directly. Constructs added in bash 4+ do not fail loudly: `declare -A`
+# errors once and then every subscripted write is silently reinterpreted as
+# arithmetic, so a snapshot/restore helper quietly restores nothing. That is
+# exactly how it reached a Mac unnoticed on 2026-08-16.
+#
+# Scope is host-side only. entrypoint.sh, firewall-init.sh, dind-init.sh and
+# scripts/verify-*.sh run inside the container against bash 5, so bash 4+
+# constructs are legitimate there. scripts/lint.sh is excluded because it
+# necessarily contains these patterns as literals.
+b32_files=()
+for f in dev lib/dev/*.sh scripts/test/lib/*.sh scripts/test/unit/*.sh \
+         scripts/test/scenarios/*.sh scripts/test/*.sh; do
+    case "$f" in
+        # Linux-only by construction: drives QEMU distro VMs through apt/dnf
+        # and GNU `find -printf`, none of which exist on macOS. It cannot run
+        # there at all, so bash 4+ constructs are legitimate.
+        scripts/test/run-e2e.sh) continue ;;
+    esac
+    [ -f "$f" ] && b32_files+=("$f")
+done
+# shellcheck disable=SC2016  # single quotes intended: these are regexes, not expansions
+b32_re='declare -A|typeset -A|local -A|declare -n|local -n|readarray|mapfile|;;&|&>>|\[\[ -v |\$\{[A-Za-z_][A-Za-z0-9_]*(,,|\^\^|,\}|\^\})'
+if [ ${#b32_files[@]} -gt 0 ] \
+   && grep -nE "$b32_re" "${b32_files[@]}" 2>/dev/null | grep -v '^[^:]*:[0-9]*: *#'; then
+    echo "^^ bash 4+ construct in a host-side file — macOS runs bash 3.2" >&2
+    fail=1
+else
+    echo "ok (${#b32_files[@]} host-side files)"
+fi
 
 exit "$fail"

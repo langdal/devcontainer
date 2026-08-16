@@ -27,9 +27,20 @@ DEV_FAKE_OS=Darwin run_check platform-supported; [ "$CHECK_STATE" = pass ] || fa
 DEV_FAKE_OS=SunOS  run_check platform-supported; [ "$CHECK_STATE" = fail ] || fail "SunOS should fail"
 
 # --- runtime-present ---
-DEV_FAKE_CMDS="docker" run_check runtime-present; [ "$CHECK_STATE" = pass ] || fail "docker present"
-DEV_FAKE_CMDS="podman" run_check runtime-present; [ "$CHECK_STATE" = pass ] || fail "podman present"
-DEV_FAKE_CMDS="git"    run_check runtime-present; [ "$CHECK_STATE" = fail ] || fail "no runtime should fail"
+# Pin the OS. This probe is platform-aware, so leaving it unpinned asserts the
+# TEST HOST's platform rather than the mapping -- these three cases encode
+# Linux semantics and failed on every Mac that ran them.
+DEV_FAKE_OS=Linux DEV_FAKE_CMDS="docker" run_check runtime-present; [ "$CHECK_STATE" = pass ] || fail "docker present"
+DEV_FAKE_OS=Linux DEV_FAKE_CMDS="podman" run_check runtime-present; [ "$CHECK_STATE" = pass ] || fail "podman present"
+DEV_FAKE_OS=Linux DEV_FAKE_CMDS="git"    run_check runtime-present; [ "$CHECK_STATE" = fail ] || fail "no runtime should fail"
+# Darwin takes podman ONLY -- Docker Desktop is unsupported. A Mac carrying
+# just docker has to fail here, where the report explains itself, rather than
+# at detect_runtime's refusal, which ends the report before it prints a reason.
+# This is the branch the unpinned cases above were shadowing.
+DEV_FAKE_OS=Darwin DEV_FAKE_CMDS="podman" run_check runtime-present
+[ "$CHECK_STATE" = pass ] || fail "podman on Darwin should pass"
+DEV_FAKE_OS=Darwin DEV_FAKE_CMDS="docker" run_check runtime-present
+[ "$CHECK_STATE" = fail ] || fail "docker-only Darwin must fail (Docker Desktop is unsupported)"
 
 # --- buildx: the 2026-08-15 false-green ---
 DEV_FAKE_CMDS="docker docker-buildx" run_check buildx

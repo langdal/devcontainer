@@ -27,7 +27,13 @@ export RUNTIME
 export SCENARIO_RESULT=""
 
 _scenario_name() {
-    basename "${BASH_SOURCE[2]:-${BASH_SOURCE[1]:-unknown}}" .sh
+    # The scenario file is the OUTERMOST frame, not one at a fixed depth.
+    # log_* is called both directly from a scenario (depth 2) and from helpers
+    # defined in THIS file -- require_platform, require_privilege -- where a
+    # fixed depth resolves to assert.sh itself and the run-all summary labels
+    # the row "assert" instead of the scenario that skipped.
+    local n=$(( ${#BASH_SOURCE[@]} - 1 ))
+    basename "${BASH_SOURCE[$n]:-unknown}" .sh
 }
 
 log_pass() {

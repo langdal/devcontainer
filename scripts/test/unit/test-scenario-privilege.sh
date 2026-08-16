@@ -50,4 +50,21 @@ mk g-any.sh '# privilege: user' 'require_privilege user; echo RAN'
 out=$(bash "$WORK/g-any.sh")
 echo "$out" | grep -q 'RAN' || fail "unset DEV_TEST_PRIVILEGE must run everything: $out"
 
+# A skip emitted from inside require_privilege must name the SCENARIO, not the
+# library. _scenario_name once read a fixed BASH_SOURCE depth, which resolves
+# to assert.sh whenever log_* is reached through a helper defined there --
+# every platform and privilege skip in the run-all summary was labelled
+# "assert", so a skipped cell could not be traced back to a scenario. Both
+# reachable depths are covered: through a helper, and called directly.
+out=$(DEV_TEST_PRIVILEGE=user bash "$WORK/g-root.sh")
+echo "$out" | grep -q '^\[SKIP\] *g-root' \
+    || fail "skip via require_privilege must name the scenario, got: $out"
+echo "$out" | grep -q 'assert' \
+    && fail "skip line named the library instead of the scenario: $out"
+
+mk g-direct.sh '# privilege: user' 'log_pass "direct"'
+out=$(bash "$WORK/g-direct.sh")
+echo "$out" | grep -q '^\[PASS\] *g-direct' \
+    || fail "direct log_pass must still name the scenario, got: $out"
+
 echo "PASS: scenario privilege tag and guard"

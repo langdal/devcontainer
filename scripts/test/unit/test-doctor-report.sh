@@ -78,11 +78,17 @@ echo "$out" | grep -qi 'no such container' && fail "doctor touched a container"
 #
 # A sandbox PATH with no podman, so detect_runtime's Darwin branch would refuse.
 SANDBOX="$WORK/bin"; mkdir -p "$SANDBOX"
+# Resolve each tool via PATH rather than assuming /usr/bin. macOS puts bash,
+# sh, cat, rm, df and date in /bin and sysctl in /usr/sbin, so the hardcoded
+# form built a sandbox with no shell in it: `dev` (#!/usr/bin/env bash) could
+# not start, the sandboxed doctor produced no output at all, and the three
+# assertions below failed for a reason that had nothing to do with doctor.
 for b in bash sh sed awk grep cat cut tr uname id basename dirname mktemp rm \
-         printf df sysctl head tail sort wc stat date curl; do
-    [ -e "/usr/bin/$b" ] && ln -sf "/usr/bin/$b" "$SANDBOX/$b"
+         printf df sysctl head tail sort wc stat date curl docker; do
+    p=$(command -v "$b" 2>/dev/null) || continue
+    [ "${p#/}" != "$p" ] || continue   # a shell builtin, not a file on disk
+    ln -sf "$p" "$SANDBOX/$b"
 done
-[ -e /usr/bin/docker ] && ln -sf /usr/bin/docker "$SANDBOX/docker"
 
 doctor_sandboxed() { (cd "$WORK" && PATH="$SANDBOX" "$ROOT/dev" doctor </dev/null 2>&1); }
 
