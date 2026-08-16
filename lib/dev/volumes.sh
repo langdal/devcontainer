@@ -67,6 +67,9 @@ append_volume_mounts() {
     if [[ "$DIND" == true ]]; then
       migrate_volume_for_keepid devcontainer-dind
     fi
+    if [[ "$PIND" == true ]]; then
+      migrate_volume_for_keepid devcontainer-pind
+    fi
   fi
 }
 
