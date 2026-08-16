@@ -20,8 +20,9 @@ remember_container "$D"
 ./dev exec --dind -- docker pull alpine:3.20 >/dev/null 2>&1 || true
 
 out=$(./dev exec --dind -- docker run --rm alpine:3.20 \
-    wget -T3 -q -O- https://example.com 2>&1 || echo BLOCKED)
-if expect_grep "$out" "BLOCKED"; then
+    sh -c 'wget -T3 -q -O- https://example.com 2>&1 || echo NESTED_BLOCKED') \
+    || { log_fail "outer exec failed (image/dind/dockerd?): $out"; exit 1; }
+if expect_grep "$out" "NESTED_BLOCKED"; then
     log_pass "nested container blocked from reaching example.com"
     exit 0
 fi
