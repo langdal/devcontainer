@@ -198,13 +198,6 @@ attach_existing_container() {
     fi
   fi
   if [[ "$attach" == true ]]; then
-    # FW_DISABLED_START only takes effect on the create path below, so --open
-    # cannot do anything to a container that already exists. Say so instead of
-    # attaching with the firewall silently still on.
-    if [[ "${FW_DISABLED_START:-false}" == true ]]; then
-      echo "Note: --open has no effect on an existing container; its firewall is" >&2
-      echo "      unchanged. Use 'dev fw off' to toggle it, or 'dev down' first." >&2
-    fi
     # `exec` bypasses the entrypoint, so the attached process inherits
     # neither the proxy env nor the nested-engine env that the container's
     # original process tree got (and /etc/profile.d only covers login
@@ -212,12 +205,24 @@ attach_existing_container() {
     # command in an attached session connects directly, the kernel silently
     # drops the packets, and the tool appears to hang. Mirror the
     # entrypoint's exports here; values must stay in sync with entrypoint.sh.
+    #
+    # Only inject the proxy trio when the running container is actually in
+    # closed mode: in open mode there is no tinyproxy listening (firewall-init
+    # only starts it under closed), so forcing HTTPS_PROXY/HTTP_PROXY here
+    # would point proxy-honouring clients at a dead socket and break them
+    # (connection refused) instead of leaving them to connect directly.
+    # Maintenance containers never set DEVCONTAINER_EGRESS, so cmode stays
+    # empty and they correctly get nothing either.
     EXEC_ENV=()
     if [[ "$CONTAINER_NAME" != "$MAINT_NAME" ]]; then
-      # shellcheck disable=SC2054  # commas are part of the NO_PROXY value, not element separators
-      EXEC_ENV+=(-e HTTPS_PROXY=http://127.0.0.1:8888
-                 -e HTTP_PROXY=http://127.0.0.1:8888
-                 -e NO_PROXY=localhost,127.0.0.1,host.docker.internal)
+      # shellcheck disable=SC2086  # intentional word-splitting of RUNTIME_ARGS
+      cmode=$($RUNTIME $RUNTIME_ARGS exec "$CONTAINER_NAME" printenv DEVCONTAINER_EGRESS 2>/dev/null || true)
+      if [[ "$cmode" == closed ]]; then
+        # shellcheck disable=SC2054  # commas are part of the NO_PROXY value, not element separators
+        EXEC_ENV+=(-e HTTPS_PROXY=http://127.0.0.1:8888
+                   -e HTTP_PROXY=http://127.0.0.1:8888
+                   -e NO_PROXY=localhost,127.0.0.1,host.docker.internal)
+      fi
     fi
     if [[ "$CONTAINER_NAME" == "$DIND_NAME" ]]; then
       EXEC_ENV+=(-e DOCKER_HOST=unix:///home/vscode/.dind-run/docker.sock
