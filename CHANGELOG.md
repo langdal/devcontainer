@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.0.1](https://github.com/langdal/devcontainer/compare/v2.0.0...v2.0.1) (2026-08-17)
+
+
+### Bug Fixes
+
+* tty lacked LC_LANG settings ([0f5213c](https://github.com/langdal/devcontainer/commit/0f5213c9af54df7e5ff47ffd3d78f99f4b2f9a26))
+* tty lacked LC_LANG settings ([2f34d59](https://github.com/langdal/devcontainer/commit/2f34d59eb3a33766047b53dafe8229c6ce26cb18))
+
 ## [2.0.0](https://github.com/langdal/devcontainer/compare/v1.7.0...v2.0.0) (2026-08-16)
 
 
