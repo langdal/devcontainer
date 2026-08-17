@@ -16,6 +16,18 @@ FROM mcr.microsoft.com/devcontainers/base:ubuntu@sha256:7ee7da33a68d997971660d91
 # default `sh -c` swallows.
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
+# The base image ships no LANG/LC_*, which leaves LC_CTYPE=POSIX and makes
+# every multi-byte character count as one single-width character per byte.
+# The oh-my-zsh `devcontainers` theme puts U+279C (➜, three UTF-8 bytes) in
+# PROMPT, so zsh measured the prompt two columns wider than the terminal drew
+# it and every cursor move after a redraw was off by two -- tab-completing and
+# then backspacing left characters painted on screen that no keystroke could
+# erase. C.UTF-8 is built into glibc (no locale-gen, no locale data to
+# install) and keeps C's codepoint collation, so `sort` ordering -- which
+# firewall-init.sh relies on when merging allowlists -- is unchanged. Only
+# LANG is set, so an individual LC_* category can still be overridden.
+ENV LANG=C.UTF-8
+
 # Allow UID/GID override so the image can be built for the invoking
 # host user. The dev script reads `id -u` / `id -g` and passes both
 # as build-args; the labels are what the dev script later inspects to
