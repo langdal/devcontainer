@@ -33,6 +33,13 @@ VERBS:
   down            Stop this workspace's container(s). Takes no options.
   status          Show what is running for this workspace, its mode, and
                   firewall state. Takes no options.
+  ls              List every dev container and devcontainer-* volume on
+                  this machine, not just this workspace's. Read-only;
+                  '*' marks rows belonging to the current directory.
+                  Also spelled 'dev list'.
+                  --sizes          Add a SIZE column for volumes, read
+                                   from 'system df -v' ('?' when the
+                                   engine does not report one).
   doctor          Check this host for everything dev needs and print a
                   report with fixes. Works before anything is set up.
                   Options: --dind / --pind (also require nested-mode
@@ -150,6 +157,8 @@ EXAMPLES:
   dev shell                       # Attach another shell to the running container
   dev down                        # Stop this workspace's container(s)
   dev status                      # Show what is running, its firewall state, and egress mode
+  dev ls                          # Inventory every dev container + volume on this machine
+  dev ls --sizes                  # ...with volume disk usage
   dev fw log                      # Tail egress log of the running container (mode-aware)
   dev fw drops                    # Stream iptables-dropped packets of running container
   dev fw open                     # Toggle egress open on the running container

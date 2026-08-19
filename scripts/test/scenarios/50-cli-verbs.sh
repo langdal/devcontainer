@@ -30,6 +30,13 @@ chk "usage lists up"        0 'dev up'      ./dev --help
 chk "usage lists exec"      0 'dev exec'    ./dev --help
 chk "usage lists status"    0 'dev status'  ./dev --help
 chk "usage lists fw open"   0 'fw open'     ./dev --help
+chk "usage lists ls"        0 'dev ls'      ./dev --help
+
+# ls/list: the argument-contract errors fire before any runtime work, so these
+# prove the verb and its alias route without starting anything.
+chk "ls rejects bad option"   2 'unknown option'     ./dev ls --bogus
+chk "list alias routes"       2 'unknown option'     ./dev list --bogus
+chk "ls rejects arguments"    2 'takes no arguments' ./dev ls extra
 
 # up: verb parses, --dry-run prints the run command without executing.
 chk "up --dry-run works"    0 'Would\|docker\|podman' ./dev up --dry-run
