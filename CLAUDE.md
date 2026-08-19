@@ -56,6 +56,14 @@ docker build -t generic-devcontainer .
 ./dev fw log     # closed mode: tail tinyproxy.log; open mode: DNS + connection log
 ./dev fw drops   # tcpdump on NFLOG group 1 (iptables drops; closed mode only)
 
+# Read-only inventory of EVERY dev container and devcontainer-* volume on the
+# machine, not just this workspace's (which is what every other verb is
+# scoped to). '*' marks rows belonging to the current directory; the
+# container-less per-workspace home volumes are named, never removed.
+# Also spelled `./dev list`. --sizes adds a SIZE column from `system df -v`.
+./dev ls
+./dev ls --sizes
+
 # Remove this workspace's dev container(s) and prompt per named volume.
 ./dev reset
 
@@ -118,7 +126,7 @@ filters on it:
 ```
 
 `DEV_TEST_PRIVILEGE=user` runs only the `user` subset and requires no sudo;
-unset means "run everything". 9 of the 41 scenarios are `root`.
+unset means "run everything". 9 of the 43 scenarios are `root`.
 
 Two cells on the dev host, both measured with `GITHUB_TOKEN` set — without it
 the numbers are not reproducible, for the reason below. Treat any tally as
@@ -214,7 +222,7 @@ Three components, each with a distinct role:
 
 `dev` itself is a thin subcommand router: it sources every file under
 `lib/dev/*.sh` and dispatches the first argument to a `cmd_*` function.
-Each verb (`up`/`exec`/`shell`, `down`/`status`, `fw`, `agent`, `dotfile`,
+Each verb (`up`/`exec`/`shell`, `down`/`status`, `ls`, `fw`, `agent`, `dotfile`,
 `reset`, `update`, `install`, `doctor`) gets roughly one module, plus a
 handful of shared-concern modules split out of the old monolith:
 `container.sh` and `volumes.sh` (container lifecycle and mount/volume
@@ -223,7 +231,10 @@ flow: reuse-vs-create, assembling the runtime's `run` command, exec or
 `--dry-run` print), `image.sh` (image build, UID/version label checks,
 rebuild cleanup), `inject.sh` (shared plumbing behind `agent`/`dotfile`),
 `runtime.sh` (docker/podman detection), `approval.sh` (the
-project-allowlist diff/approve flow), `usage.sh` (the `--help` text), and
+project-allowlist diff/approve flow), `usage.sh` (the `--help` text),
+`ls.sh` + `ls-render.sh` (the machine-wide inventory: discovery of the
+canonical rows, and the table/hint rendering that was split out of it when
+that file passed its line budget), and
 `checks.sh` + `checks-catalog.sh` + `checks-catalog-nested.sh` (the
 host-check registry shared by `dev doctor` and the blocking preflights in
 `dev up`). `scripts/lint.sh` enforces a line-budget gate over `dev` and

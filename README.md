@@ -107,6 +107,8 @@ dev up --default-ports    # forward 5173, 5174, 8080, 2345, 3000
 dev up --host-port 8080   # allow egress to host.docker.internal:8080
 dev doctor                # check this host for everything dev needs
 dev doctor --dind         # also check nested-engine prerequisites
+dev ls                    # every dev container + volume on this machine
+dev ls --sizes            # ...with volume disk usage
 ```
 
 Multiple terminals: run `dev shell` to attach another shell to the running container (`dev up` also attaches when one is already running).
@@ -351,6 +353,42 @@ Named volumes preserve state across container restarts and rebuilds:
 docker volume rm devcontainer-mise devcontainer-home-myproject
 ```
 
+`dev ls` is the read-only inventory of what a machine actually holds: every
+dev container and `devcontainer-*` volume, not just the current workspace's.
+It marks the rows belonging to the directory you run it from, resolves each
+container's real workspace path from its bind mount, and calls out the
+per-workspace home volumes no container is using — the ones left behind by a
+project directory you deleted. It never removes anything; it prints the
+command. Add `--sizes` for a SIZE column read from `system df -v` (cells show
+`?` when the engine does not report one).
+
+A volume that is listed with no container cannot be traced back to a
+filesystem path — the name only records the directory's basename, which is
+also why two projects with the same basename share one home volume.
+
+```console
+$ dev ls
+CONTAINERS
+     MODE    NAME             STATE         WORKSPACE
+  *  normal  dev-myproj       Up 2 hours    /home/u/code/myproj
+     dind    dev-api-dind     Up 5 minutes  /home/u/code/api
+
+VOLUMES
+     NAME                      SCOPE      IN USE
+     devcontainer-mise         shared     yes
+  *  devcontainer-home-myproj  workspace  yes
+     devcontainer-home-api     workspace  yes
+     devcontainer-home-old     workspace  no
+     devcontainer-dind         shared     yes
+
+* belongs to this directory's workspace (myproj)
+
+No container is using these per-workspace home volumes:
+  devcontainer-home-old
+Remove one from its own project directory with 'dev reset', or directly:
+  docker volume rm <name>
+```
+
 ### Pushing from inside a container
 
 Git identity (`user.name` / `user.email`) is seeded automatically from the
@@ -526,7 +564,8 @@ from the implementation:
 dev --help
 ```
 
-Highlights not covered above: `dev reset` removes this workspace's containers
+Highlights not covered above: `dev ls` inventories every dev container and
+volume on the machine; `dev reset` removes this workspace's containers
 and prompts per named volume; `dev update` updates a git-checkout install
 to the latest tag.
 
