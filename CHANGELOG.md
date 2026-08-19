@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.1.0](https://github.com/langdal/devcontainer/compare/v2.0.1...v2.1.0) (2026-08-19)
+
+
+### Features
+
+* **dev:** add  machine-wide container and volume inventory ([b13f691](https://github.com/langdal/devcontainer/commit/b13f691bed6e5e77ad83d51b626efb8ba04e9402))
+* **dev:** add  machine-wide container and volume inventory ([47d8b84](https://github.com/langdal/devcontainer/commit/47d8b847a8a33d3c2b7162271c27a37c22d3c0e4))
+
+
+### Bug Fixes
+
+* **test:** match workspace marker in 54-ls --sizes assertion ([9195354](https://github.com/langdal/devcontainer/commit/919535435e86ab528e3daf476b70df2607ca1d8b))
+
 ## [2.0.1](https://github.com/langdal/devcontainer/compare/v2.0.0...v2.0.1) (2026-08-17)
 
 
