@@ -114,7 +114,7 @@ if ! out=$("$DEV" ls --sizes 2>&1); then
 fi
 expect_grep "$out" 'SIZE' \
     || { log_fail "--sizes did not add the SIZE column: $out"; exit 1; }
-expect_grep "$out" "^ +devcontainer-home-lsproj +workspace +yes +\S+" \
+expect_grep "$out" "^ +\* +devcontainer-home-lsproj +workspace +yes +\S+" \
     || { log_fail "--sizes left the volume row without a size cell: $out"; exit 1; }
 
 # ---------- read-only + argument contract ----------
