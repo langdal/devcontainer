@@ -115,6 +115,18 @@ bash scripts/test/run-rootless.sh
 bash scripts/test/scenarios/22-cold-start-budget.sh
 ```
 
+**Never hardcode `id -u`/`id -g`, or a `--userns=keep-id` form, in a scenario.**
+Under rootless podman 4.3+ `dev` deliberately bakes uid 1000 into the image and
+maps the host user onto it with `keep-id:uid=1000,gid=1000` (`lib/dev/ids.sh`),
+so the image labels and the in-container `vscode` uid are NOT the invoking
+user's. Read them with `expected_image_ids` from `scripts/test/lib/runtime.sh`,
+which derives all three values (uid, gid, keep-id flag) from `ids.sh` itself.
+This is a trap that hides on a dev laptop: a hardcoded `id -u` is *correct* when
+the host uid happens to be 1000, and seven scenarios went red only on CI, whose
+runner is uid 1001. `scripts/test/unit/test-expected-image-ids.sh` pins the
+reader against stub CLIs on every host, including the branches a given host
+cannot reach.
+
 Scenarios declare what they need in front-matter, and the orchestrator
 filters on it:
 

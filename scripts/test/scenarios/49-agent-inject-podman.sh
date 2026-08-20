@@ -31,6 +31,8 @@ set -u
 LIB="$(dirname "$0")/../lib"
 # shellcheck source=scripts/test/lib/assert.sh
 . "$LIB/assert.sh"
+# shellcheck source=scripts/test/lib/runtime.sh
+. "$LIB/runtime.sh"
 # shellcheck source=scripts/test/lib/restore.sh
 . "$LIB/restore.sh"
 require_platform linux
@@ -82,13 +84,25 @@ printf '{}\n'        > "$PI_DIR/trust.json"
 # path (the podman idempotency bug: it must not abort when present).
 podman volume create "$VOL" >/dev/null
 
-# Probe the volume the same way the real helpers do: as vscode under keep-id.
+# Probe the volume the same way the real helpers do: as vscode under the exact
+# keep-id form dev uses. Read, not hardcoded — dev passes
+# keep-id:uid=1000,gid=1000 on podman 4.3+ and the bare flag below that
+# (lib/dev/ids.sh). The bare flag was equivalent only on a uid-1000 host, so on
+# CI (runner uid 1001) every probe here reported the copied files missing.
+read -r _ _ KEEPID_FLAG <<< "$(expected_image_ids)"
+# This scenario already skipped unless the host is rootless podman, so both
+# ids.sh branches must yield a flag; an empty one would silently pass an empty
+# argument to podman and is itself the regression worth catching.
+if [ -z "$KEEPID_FLAG" ]; then
+    log_fail "expected_image_ids reported no keep-id flag on a rootless-podman host"
+    exit 1
+fi
 vol_has() {
-    podman run --rm --userns=keep-id -u vscode -v "$VOL":/home/vscode \
+    podman run --rm "$KEEPID_FLAG" -u vscode -v "$VOL":/home/vscode \
         --entrypoint sh generic-devcontainer -c "test -e /home/vscode/$1"
 }
 vol_mode() {
-    podman run --rm --userns=keep-id -u vscode -v "$VOL":/home/vscode \
+    podman run --rm "$KEEPID_FLAG" -u vscode -v "$VOL":/home/vscode \
         --entrypoint sh generic-devcontainer -c "stat -c %a /home/vscode/$1"
 }
 
