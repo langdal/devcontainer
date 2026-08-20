@@ -245,7 +245,7 @@ _agent_copy_into_volume() {
   # so the login prompt reappears in every fresh workspace. Set the one flag.
   if [[ "$rc" -eq 0 && "$name" == claude ]]; then
     local -a keepid_args=()
-    [[ "$(_agent_keepid)" == true ]] && keepid_args=(--userns=keep-id)
+    keepid_active && keepid_args=("$KEEPID_FLAG")
     # shellcheck disable=SC2086  # forward keepid_args verbatim (empty -> no arg)
     _agent_mark_claude_onboarded ${keepid_args[@]+"${keepid_args[@]}"} || rc=$?
   fi
@@ -313,7 +313,7 @@ _agent_volume_present_dests() {
   # cannot even traverse the keep-id-owned /home/vscode mount, so `cd` fails
   # ("can't cd to /home/vscode") and every dest reads as absent.
   local -a keepid_args=()
-  [[ "$(_agent_keepid)" == true ]] && keepid_args=(--userns=keep-id)
+  keepid_active && keepid_args=("$KEEPID_FLAG")
   # shellcheck disable=SC2086  # intentional word-splitting of RUNTIME_ARGS
   # shellcheck disable=SC2016  # single-quoted: runs in the helper container's shell, not the host
   # Trailing ": true" ensures the helper's own exit status stays 0 regardless
@@ -398,7 +398,7 @@ _agent_rm() {
   # Match the volume's --userns=keep-id ownership (rootless podman) so the
   # removal helper's vscode can traverse and delete under /home/vscode.
   local -a keepid_args=()
-  [[ "$(_agent_keepid)" == true ]] && keepid_args=(--userns=keep-id)
+  keepid_active && keepid_args=("$KEEPID_FLAG")
 
   local name dest reply
   local -a dests

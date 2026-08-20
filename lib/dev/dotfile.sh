@@ -6,7 +6,8 @@
 # routing as `dev agent`: never a host mount, never baked into an image.
 #
 # Reuses inject.sh's _stage_and_extract + volume helpers (_agent_require_image,
-# _agent_keepid, _agent_volume_exists) and volumes.sh's migrate_volume_for_keepid.
+# _agent_volume_exists), ids.sh's keepid_active, and volumes.sh's
+# migrate_volume_for_keepid.
 # The dispatch in `dev` has already set IMAGE_TAG / RUNTIME_ARGS / HOST_UID for
 # the target storage via resolve_agent_storage. Sourced by dev; not executed
 # directly.
@@ -220,7 +221,7 @@ _dotfile_rm() {
   # Match the volume's --userns=keep-id ownership (rootless podman) so the
   # removal helper's vscode can traverse and delete under /home/vscode.
   local -a keepid_args=()
-  [[ "$(_agent_keepid)" == true ]] && keepid_args=(--userns=keep-id)
+  keepid_active && keepid_args=("$KEEPID_FLAG")
 
   local remote='cd /home/vscode && rm -rf'
   local d

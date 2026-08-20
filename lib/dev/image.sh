@@ -12,7 +12,12 @@ runtime_build() {
   if [[ -n "$target" ]]; then
     extra+=(--target "$target")
   fi
-  extra+=(--build-arg "USER_UID=$HOST_UID" --build-arg "USER_GID=$HOST_GID")
+  # IMAGE_UID/IMAGE_GID, not the host ids directly: under rootless podman the
+  # image keeps vscode at 1000 and keep-id maps the host user onto it (see
+  # lib/dev/ids.sh). Memoized, so calling it here costs nothing when the start
+  # path already resolved it.
+  resolve_image_ids
+  extra+=(--build-arg "USER_UID=$IMAGE_UID" --build-arg "USER_GID=$IMAGE_GID")
   extra+=(--build-arg "DEV_VERSION=$VERSION")
   # Pass GITHUB_TOKEN as a BuildKit secret so `mise install` can hit the
   # GitHub API authenticated. Secrets are not persisted in image layers.
@@ -72,6 +77,7 @@ cleanup_for_rebuild() {
 check_image_uid_match() {
   local tag="$1"
   local labels img_uid img_gid
+  resolve_image_ids
   # Single inspect retrieves all three labels we care about; IMAGE_VERSION
   # is stashed for check_image_version_match so it doesn't re-inspect.
   # shellcheck disable=SC2086  # intentional word-splitting of RUNTIME_ARGS
@@ -85,31 +91,31 @@ check_image_uid_match() {
   IMAGE_EXISTS=true
   read -r img_uid img_gid IMAGE_VERSION <<< "$labels"
   if [[ -n "$img_uid" && -n "$img_gid" \
-        && "$img_uid" == "$HOST_UID" && "$img_gid" == "$HOST_GID" ]]; then
+        && "$img_uid" == "$IMAGE_UID" && "$img_gid" == "$IMAGE_GID" ]]; then
     return 0
   fi
   local img_id="${img_uid:-?}:${img_gid:-?}"
   if [[ "$FORCE_BUILD" == true ]]; then
-    echo "Note: image $tag built for UID:GID $img_id; rebuilding for $HOST_UID:$HOST_GID." >&2
+    echo "Note: image $tag built for UID:GID $img_id; rebuilding for $IMAGE_UID:$IMAGE_GID." >&2
     cleanup_for_rebuild "$CONTAINER_NAME" "$DIND"
     return 0
   fi
   if [[ "$DRY_RUN" == true ]]; then
-    echo "Would rebuild $tag for UID:GID $HOST_UID:$HOST_GID (current labels: $img_id)" >&2
+    echo "Would rebuild $tag for UID:GID $IMAGE_UID:$IMAGE_GID (current labels: $img_id)" >&2
     return 0
   fi
   if [[ "${DEV_ASSUME_YES:-0}" == "1" ]]; then
-    echo "Note: image $tag built for UID:GID $img_id; DEV_ASSUME_YES set, rebuilding for $HOST_UID:$HOST_GID." >&2
+    echo "Note: image $tag built for UID:GID $img_id; DEV_ASSUME_YES set, rebuilding for $IMAGE_UID:$IMAGE_GID." >&2
     cleanup_for_rebuild "$CONTAINER_NAME" "$DIND"
     FORCE_BUILD=true
     return 0
   fi
   if [[ ! -t 0 ]]; then
-    echo "Error: image $tag was built for UID:GID $img_id, but you are $HOST_UID:$HOST_GID." >&2
-    echo "       Run 'dev up --build' to rebuild for UID:GID $HOST_UID:$HOST_GID." >&2
+    echo "Error: image $tag was built for UID:GID $img_id; this runtime needs $IMAGE_UID:$IMAGE_GID." >&2
+    echo "       Run 'dev up --build' to rebuild for UID:GID $IMAGE_UID:$IMAGE_GID." >&2
     exit 1
   fi
-  echo "Image $tag was built for UID:GID $img_id, but you are $HOST_UID:$HOST_GID." >&2
+  echo "Image $tag was built for UID:GID $img_id; this runtime needs $IMAGE_UID:$IMAGE_GID." >&2
   local vol_list="devcontainer-mise, $HOME_VOLUME"
   if [[ "$DIND" == true ]]; then
     vol_list="${vol_list}, devcontainer-dind"
