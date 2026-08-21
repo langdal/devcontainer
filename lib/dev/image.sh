@@ -53,14 +53,17 @@ runtime_build() {
 # volumes for the current invocation's image variant. Used after the
 # user accepts the rebuild prompt; the rebuild path that follows
 # replaces the image and the next container start re-populates the
-# volumes from the freshly-built image.
+# volumes from the freshly-built image. The nested engine's cache volume
+# comes from nested_engine_volume() (lib/dev/volumes.sh) rather than a
+# caller-supplied flag, so it can never disagree with what the start flow
+# mounted — the ids the volume's content is owned by are exactly what a
+# UID/GID-mismatch rebuild is discarding.
 cleanup_for_rebuild() {
-  local container="$1" with_dind="$2"
+  local container="$1"
   remove_container_if_exists "$container" "$RUNTIME_ARGS"
-  local vols=(devcontainer-mise "$HOME_VOLUME")
-  if [[ "$with_dind" == true ]]; then
-    vols+=(devcontainer-dind)
-  fi
+  local vols=(devcontainer-mise "$HOME_VOLUME") nested
+  nested=$(nested_engine_volume)
+  [[ -n "$nested" ]] && vols+=("$nested")
   local v
   for v in "${vols[@]}"; do
     remove_volume_if_exists "$v" "$RUNTIME_ARGS"
@@ -97,7 +100,7 @@ check_image_uid_match() {
   local img_id="${img_uid:-?}:${img_gid:-?}"
   if [[ "$FORCE_BUILD" == true ]]; then
     echo "Note: image $tag built for UID:GID $img_id; rebuilding for $IMAGE_UID:$IMAGE_GID." >&2
-    cleanup_for_rebuild "$CONTAINER_NAME" "$DIND"
+    cleanup_for_rebuild "$CONTAINER_NAME"
     return 0
   fi
   if [[ "$DRY_RUN" == true ]]; then
@@ -106,7 +109,7 @@ check_image_uid_match() {
   fi
   if [[ "${DEV_ASSUME_YES:-0}" == "1" ]]; then
     echo "Note: image $tag built for UID:GID $img_id; DEV_ASSUME_YES set, rebuilding for $IMAGE_UID:$IMAGE_GID." >&2
-    cleanup_for_rebuild "$CONTAINER_NAME" "$DIND"
+    cleanup_for_rebuild "$CONTAINER_NAME"
     FORCE_BUILD=true
     return 0
   fi
@@ -117,14 +120,16 @@ check_image_uid_match() {
   fi
   echo "Image $tag was built for UID:GID $img_id; this runtime needs $IMAGE_UID:$IMAGE_GID." >&2
   local vol_list="devcontainer-mise, $HOME_VOLUME"
-  if [[ "$DIND" == true ]]; then
-    vol_list="${vol_list}, devcontainer-dind"
-  fi
+  # Same source as the wipe itself, so the prompt names every volume that is
+  # about to go (devcontainer-pind included under --pind).
+  local nested
+  nested=$(nested_engine_volume)
+  [[ -n "$nested" ]] && vol_list="${vol_list}, $nested"
   local reply
   read -r -p "Rebuild image and remove volumes (${vol_list})? [y/N] " reply
   case "$reply" in
     y|Y|yes|YES)
-      cleanup_for_rebuild "$CONTAINER_NAME" "$DIND"
+      cleanup_for_rebuild "$CONTAINER_NAME"
       FORCE_BUILD=true
       ;;
     *)

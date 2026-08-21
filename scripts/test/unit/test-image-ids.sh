@@ -40,8 +40,10 @@ STUB
 # shellcheck source=lib/dev/ids.sh
 . "$ROOT/lib/dev/ids.sh"
 RUNTIME_ARGS=""
-# Deterministic grant: the pre-4.3 fallback warning keys off this.
-subid_total() { echo 65536; }
+# Deterministic grant: the pre-4.3 fallback warning keys off this. Per-case
+# overrides let the tests below sit on both sides of the threshold.
+SUBID_GRANT=65536
+subid_total() { echo "$SUBID_GRANT"; }
 
 fail() { echo "FAIL: $1"; exit 1; }
 
@@ -98,6 +100,49 @@ case "$warn" in
   *"add-subuids"*) ;;
   *) fail "podman34: warning must name the remediation, got: $warn" ;;
 esac
+
+# The remediation the note prints must allocate exactly as many ids as the note
+# says are missing: `usermod --add-subuids FIRST-LAST` is INCLUSIVE, so a LAST
+# of FIRST+want over-grants by one — and, worse, a note that asks for a
+# different number than the check tested for leaves a band of grants that pass
+# the check silently and still fail the build.
+check_grant_span() { # $1=label $2=want_ids $3=warning text
+    local range first last span
+    range=$(printf '%s\n' "$3" | sed -n 's/.*--add-subuids \([0-9]*-[0-9]*\).*/\1/p')
+    [ -n "$range" ] || fail "$1: no --add-subuids range in: $3"
+    first=${range%-*}; last=${range#*-}
+    span=$((last - first + 1))
+    [ "$span" = "$2" ] || fail "$1: --add-subuids $range spans $span ids, want $2"
+    case "$3" in
+      *"--add-subgids $range"*) ;;
+      *) fail "$1: subgid range differs from subuid range $range: $3" ;;
+    esac
+}
+check_grant_span podman34 1198401 "$warn"
+
+# 4b. Same pre-4.3 fallback, but the grant already covers the baked uid: no note
+#     at all. Threshold and remediation are one number, so a grant that clears
+#     what the note would have asked for has to be silent.
+reset; SUBID_GRANT=1198401
+RUNTIME="$WORK/podman34"
+resolve_image_ids 2>"$WORK/warn34b"
+check podman34-ample-grant 1198401 true '--userns=keep-id'
+[ -s "$WORK/warn34b" ] && fail "podman34: warned on a sufficient grant: $(cat "$WORK/warn34b")"
+
+# 4c. A low baked uid with a grant below a normal range still warns: the image's
+#     own ids (up to nobody, 65534) have to be mappable too, so the requirement
+#     floors at 65536 instead of tracking the uid alone.
+reset; SUBID_GRANT=1500; HOST_UID=1000; HOST_GID=1000
+RUNTIME="$WORK/podman34"
+resolve_image_ids 2>"$WORK/warn34c"
+warn=$(cat "$WORK/warn34c")
+check podman34-small-grant 1000 true '--userns=keep-id'
+case "$warn" in
+  *"older than 4.3"*) ;;
+  *) fail "podman34-small-grant: expected a warning, got: $warn" ;;
+esac
+check_grant_span podman34-small-grant 65536 "$warn"
+HOST_UID=1198401; HOST_GID=1198401; SUBID_GRANT=65536
 
 # 5. Rootless podman 4.3 exactly: the boundary is inclusive.
 reset; make_stub podman43 'podman version 4.3.0' true '4.3.0'

@@ -35,17 +35,34 @@ _podman_keepid_ids_supported() {
   [[ "$major" -eq 4 && "$minor" -ge 3 ]]
 }
 
+# How many subuids/subgids the bare-keep-id fallback needs. Rootless podman can
+# only map ids inside the invoking user's /etc/subuid grant, and with the host
+# uid baked into the image every id the image uses has to fit: the baked uid
+# itself, plus the image's own ids up to `nobody` (65534) when the baked uid
+# sits below them — so max(IMAGE_UID, 65536). Deliberately ONE number, used
+# both to decide whether to warn and to size the remediation it prints, so the
+# two cannot drift apart: a threshold looser than its own fix would stay quiet
+# on grants that then fail the build.
+_baked_uid_subid_requirement() {
+  [[ "$IMAGE_UID" -gt 65536 ]] && { echo "$IMAGE_UID"; return 0; }
+  echo 65536
+}
+
 _warn_baked_uid_needs_subids() {
-  local granted room
+  local granted required first last
   granted=$(subid_total /etc/subuid 2>/dev/null || echo 0)
-  [[ "$granted" -gt "$IMAGE_UID" ]] && return 0
-  room=$((IMAGE_UID + 65536))
-  echo "Note: podman is older than 4.3, so dev must bake your host uid into the" >&2
-  echo "      image, but /etc/subuid grants only $granted ids to $(id -un) —" >&2
-  echo "      too few to map uid $IMAGE_UID. The build fails in usermod (exit 12)." >&2
+  required=$(_baked_uid_subid_requirement)
+  [[ "$granted" -ge "$required" ]] && return 0
+  # --add-subuids FIRST-LAST is inclusive: LAST is FIRST + required - 1.
+  first=10000000
+  last=$((first + required - 1))
+  echo "Note: podman is older than 4.3, so dev must bake your host uid" >&2
+  echo "      ($IMAGE_UID) into the image, but /etc/subuid grants only" >&2
+  echo "      $granted ids to $(id -un) — fewer than the $required needed to map" >&2
+  echo "      every id the image uses. The build fails in usermod (exit 12)." >&2
   echo "      Either upgrade podman to 4.3+, or grant more ids:" >&2
-  echo "        sudo usermod --add-subuids 10000000-$((10000000 + room)) \\" >&2
-  echo "                     --add-subgids 10000000-$((10000000 + room)) $(id -un)" >&2
+  echo "        sudo usermod --add-subuids $first-$last \\" >&2
+  echo "                     --add-subgids $first-$last $(id -un)" >&2
   echo "        podman system migrate" >&2
 }
 

@@ -80,12 +80,12 @@ VERBS:
   dotfile rm PATH   Remove a previously copied path from the home volume
                   (confirms; DEV_ASSUME_YES=1 skips the prompt).
   reset           Remove the dev container(s) for the current workspace
-                  (normal, dind, and maintenance variants if present)
+                  (normal, dind, pind, and maintenance variants if present)
                   and prompt individually for each existing named
                   volume (devcontainer-mise, the workspace home volume
                   [devcontainer-home-<dir>, or devcontainer-home under
-                  DEV_SHARED_HOME=1], devcontainer-dind). Does not
-                  rebuild the image. Takes no options.
+                  DEV_SHARED_HOME=1], devcontainer-dind, devcontainer-pind).
+                  Does not rebuild the image. Takes no options.
   update          Update the dev script's git checkout to the latest
                   released tag (the same source used by install.sh).
                   Requires SCRIPT_DIR to be a clean git checkout. The
