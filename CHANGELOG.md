@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.1.1](https://github.com/langdal/devcontainer/compare/v2.1.0...v2.1.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* **ids:** keep vscode at 1000 under rootless podman with keep-id:uid= ([bf397e3](https://github.com/langdal/devcontainer/commit/bf397e3b5650f9170f941fc5f7ce0afb62062c62))
+* **ids:** keep vscode at 1000 under rootless podman with keep-id:uid= ([c9a0227](https://github.com/langdal/devcontainer/commit/c9a0227cae62db7f962e6118a294cb689e19e681))
+* **ids:** size the subuid warning and its remediation from one number ([ac0c066](https://github.com/langdal/devcontainer/commit/ac0c066a9669439f50450782c41d31a8d9f0ac37))
+* **image:** wipe the pind cache volume on a UID-mismatch rebuild ([ac0c066](https://github.com/langdal/devcontainer/commit/ac0c066a9669439f50450782c41d31a8d9f0ac37))
+* **test:** derive image ids from ids.sh instead of hardcoding id -u ([8558bd4](https://github.com/langdal/devcontainer/commit/8558bd4e0e619a105e6c1d2de382ccbb250ab7fd))
+* **test:** record cleanup calls in arrays to satisfy shellcheck SC2116 ([6bbfe82](https://github.com/langdal/devcontainer/commit/6bbfe82a7bea50077595d4f0a388ac9789317941))
+
 ## [2.1.0](https://github.com/langdal/devcontainer/compare/v2.0.1...v2.1.0) (2026-08-19)
 
 
