@@ -23,23 +23,24 @@ fail() { echo "FAIL: $1"; exit 1; }
 RUNTIME_ARGS=""
 HOME_VOLUME="devcontainer-home-proj"
 
-REMOVED=""
-CONTAINERS=""
-remove_volume_if_exists() { REMOVED="$REMOVED $1"; }
-remove_container_if_exists() { CONTAINERS="$CONTAINERS $1"; }
+# Recorded calls, not real removals: arrays (compared with "${a[*]}") rather
+# than a string built with " $1", which needed an $(echo …) to shed its leading
+# space and tripped SC2116.
+REMOVED=()
+CONTAINERS=()
+remove_volume_if_exists() { REMOVED+=("$1"); }
+remove_container_if_exists() { CONTAINERS+=("$1"); }
 
 # $1=label $2=DIND $3=PIND $4=expected wiped volumes (space-separated, in order)
 check_wipe() {
     local label=$1 want=$4
     DIND=$2 PIND=$3
-    REMOVED=""; CONTAINERS=""
+    REMOVED=(); CONTAINERS=()
     cleanup_for_rebuild "dev-proj"
-    # shellcheck disable=SC2086  # re-splitting to normalise whitespace
-    [ "$(echo $REMOVED)" = "$want" ] \
-        || fail "$label: wiped '$(echo $REMOVED)', want '$want'"
-    # shellcheck disable=SC2086
-    [ "$(echo $CONTAINERS)" = "dev-proj" ] \
-        || fail "$label: removed containers '$(echo $CONTAINERS)', want 'dev-proj'"
+    [ "${REMOVED[*]}" = "$want" ] \
+        || fail "$label: wiped '${REMOVED[*]}', want '$want'"
+    [ "${CONTAINERS[*]}" = "dev-proj" ] \
+        || fail "$label: removed containers '${CONTAINERS[*]}', want 'dev-proj'"
 }
 
 # $1=label $2=DIND $3=PIND $4=expected -v argument
