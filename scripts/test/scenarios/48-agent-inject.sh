@@ -10,6 +10,8 @@ set -u
 LIB="$(dirname "$0")/../lib"
 # shellcheck source=scripts/test/lib/assert.sh
 . "$LIB/assert.sh"
+# shellcheck source=scripts/test/lib/runtime.sh
+. "$LIB/runtime.sh"
 # shellcheck source=scripts/test/lib/restore.sh
 . "$LIB/restore.sh"
 require_platform linux
@@ -207,17 +209,20 @@ ln -s /nonexistent/nope "$FAKE_HOME/.claude/commands/broken.md"
 ( cd "$WORK" && HOME="$FAKE_HOME" XDG_DATA_HOME="$REAL_XDG_DATA_HOME" "$DEV" agent add claude ) \
     || { log_fail "dev agent add claude (real) exited non-zero"; }
 
-# Probe the volume under the same --userns=keep-id mapping the real copy
-# used (rootless podman only). Without it, `-u vscode` maps to a subuid
-# that can't even traverse the keep-id-owned /home/vscode mount, so every
-# probe below would report files "missing" that the copy actually wrote —
-# the same failure mode scenario 49's own comment documents for its
-# keep-id-aware helpers.
+# Probe the volume under the exact --userns=keep-id mapping the real copy used
+# (rootless podman only; empty elsewhere). Without it, `-u vscode` maps to a
+# subuid that can't even traverse the keep-id-owned /home/vscode mount, so every
+# probe below would report files "missing" that the copy actually wrote — the
+# same failure mode scenario 49's own comment documents for its keep-id-aware
+# helpers.
+#
+# Read from expected_image_ids, not hardcoded: dev uses keep-id:uid=1000,gid=1000
+# on podman 4.3+ and the bare form below that (lib/dev/ids.sh). Hardcoding the
+# bare form was equivalent only on a uid-1000 host, so on CI (runner uid 1001)
+# every probe here reported the copied files missing.
 KEEPID_ARGS=()
-if "$RUNTIME" --version 2>/dev/null | grep -qi podman \
-   && [ "$("$RUNTIME" info --format '{{.Host.Security.Rootless}}' 2>/dev/null)" = "true" ]; then
-    KEEPID_ARGS=(--userns=keep-id)
-fi
+read -r _ _ KEEPID_FLAG <<< "$(expected_image_ids)"
+[ -n "$KEEPID_FLAG" ] && KEEPID_ARGS=("$KEEPID_FLAG")
 
 # Helper: test a path inside the volume as vscode.
 vol_has() {

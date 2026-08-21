@@ -24,8 +24,12 @@ cd "$(dirname "$0")/../../.." || exit 1
 WS=$(basename "$(pwd)")
 remember_container "dev-${WS}"
 
-HOST_UID=$(id -u)
-HOST_GID=$(id -g)
+# The ids dev will expect, NOT `id -u`/`id -g`: under rootless podman it bakes
+# 1000 and maps the host user onto it (lib/dev/ids.sh). Building the fixture for
+# the invoking uid instead made the UID check fire first and short-circuit the
+# version check this scenario exists to exercise — on any host whose uid is not
+# 1000, which is why it went red on CI (runner uid 1001) and green locally.
+read -r EXP_UID EXP_GID _ <<< "$(expected_image_ids)"
 
 # Read the $VERSION literal the dev script bakes into image labels and
 # names in the version-mismatch prompt. NOT `dev --version`: that prefers
@@ -44,12 +48,12 @@ OLD_VERSION="0.0.0-stale"
 
 "$RUNTIME" rm -f "dev-${WS}" >/dev/null 2>&1
 
-# Bake a matching UID/GID image with an intentionally-stale dev.version
-# label. UID matches so the UID check passes and the version check is
-# what we actually exercise.
+# Bake an image whose UID/GID labels MATCH what dev expects, with an
+# intentionally-stale dev.version label, so the UID check passes and the version
+# check is what we actually exercise.
 build_scenario_image "could not build image with stale dev.version label" \
-    --build-arg "USER_UID=${HOST_UID}" \
-    --build-arg "USER_GID=${HOST_GID}" \
+    --build-arg "USER_UID=${EXP_UID}" \
+    --build-arg "USER_GID=${EXP_GID}" \
     --build-arg "DEV_VERSION=${OLD_VERSION}" \
     -t generic-devcontainer || exit 1
 

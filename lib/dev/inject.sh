@@ -52,17 +52,6 @@ resolve_agent_storage() {
   HOST_UID=$(id -u)
 }
 
-# _agent_keepid: prints "true" when this runtime would create the workspace
-# container with --userns=keep-id (rootless podman only), matching the logic
-# in start_container. Otherwise "false".
-_agent_keepid() {
-  if engine_is_podman && runtime_is_rootless; then
-    echo true
-  else
-    echo false
-  fi
-}
-
 # _agent_require_image: fail clearly if the helper image is not built yet.
 # The agent helpers (copy/probe/rm) all run this image; the dev agent path
 # never builds it (unlike the start path), so check before any helper run.
@@ -124,7 +113,8 @@ _stage_and_extract() {
   # `podman volume create` errors ("volume already exists") on an existing
   # volume, which under set -e would abort before the copy ever runs.
   local keepid
-  keepid="$(_agent_keepid)"
+  keepid=false
+  keepid_active && keepid=true
   if ! _agent_volume_exists; then
     # shellcheck disable=SC2086  # intentional word-splitting of RUNTIME_ARGS
     $RUNTIME $RUNTIME_ARGS volume create "$HOME_VOLUME" >/dev/null
@@ -142,7 +132,7 @@ _stage_and_extract() {
   fi
 
   local -a keepid_args=()
-  [[ "$keepid" == true ]] && keepid_args=(--userns=keep-id)
+  [[ "$keepid" == true ]] && keepid_args=("$KEEPID_FLAG")
 
   # On macOS the host tar is bsdtar, which stores each file's macOS xattrs
   # (notably com.apple.provenance) as LIBARCHIVE.xattr.* extended headers plus

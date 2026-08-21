@@ -26,7 +26,10 @@ cd "$(dirname "$0")/../../.." || exit 1
 WS=$(basename "$(pwd)")
 remember_container "dev-${WS}"
 
-HOST_UID=$(id -u)
+# NOT `id -u`: under rootless podman dev bakes 1000 and maps the host user
+# onto it (lib/dev/ids.sh), so the label only equals the invoking uid on a
+# uid-1000 host. See expected_image_ids in lib/runtime.sh.
+read -r EXP_UID _ _ <<< "$(expected_image_ids)"
 export DEV_SHARED_HOME=1
 
 "$RUNTIME" rm -f "dev-${WS}" >/dev/null 2>&1
@@ -43,7 +46,7 @@ fi
 
 img_uid=$("$RUNTIME" image inspect generic-devcontainer \
     --format '{{ index .Config.Labels "dev.uid" }}' 2>/dev/null)
-if [ "$img_uid" != "$HOST_UID" ]; then
+if [ "$img_uid" != "$EXP_UID" ]; then
     log_fail "labels not updated after rebuild: $img_uid"
     ./dev exec --build -- true >/dev/null 2>&1 || true
     exit 1

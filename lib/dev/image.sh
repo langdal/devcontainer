@@ -12,7 +12,12 @@ runtime_build() {
   if [[ -n "$target" ]]; then
     extra+=(--target "$target")
   fi
-  extra+=(--build-arg "USER_UID=$HOST_UID" --build-arg "USER_GID=$HOST_GID")
+  # IMAGE_UID/IMAGE_GID, not the host ids directly: under rootless podman the
+  # image keeps vscode at 1000 and keep-id maps the host user onto it (see
+  # lib/dev/ids.sh). Memoized, so calling it here costs nothing when the start
+  # path already resolved it.
+  resolve_image_ids
+  extra+=(--build-arg "USER_UID=$IMAGE_UID" --build-arg "USER_GID=$IMAGE_GID")
   extra+=(--build-arg "DEV_VERSION=$VERSION")
   # Pass GITHUB_TOKEN as a BuildKit secret so `mise install` can hit the
   # GitHub API authenticated. Secrets are not persisted in image layers.
@@ -48,14 +53,17 @@ runtime_build() {
 # volumes for the current invocation's image variant. Used after the
 # user accepts the rebuild prompt; the rebuild path that follows
 # replaces the image and the next container start re-populates the
-# volumes from the freshly-built image.
+# volumes from the freshly-built image. The nested engine's cache volume
+# comes from nested_engine_volume() (lib/dev/volumes.sh) rather than a
+# caller-supplied flag, so it can never disagree with what the start flow
+# mounted — the ids the volume's content is owned by are exactly what a
+# UID/GID-mismatch rebuild is discarding.
 cleanup_for_rebuild() {
-  local container="$1" with_dind="$2"
+  local container="$1"
   remove_container_if_exists "$container" "$RUNTIME_ARGS"
-  local vols=(devcontainer-mise "$HOME_VOLUME")
-  if [[ "$with_dind" == true ]]; then
-    vols+=(devcontainer-dind)
-  fi
+  local vols=(devcontainer-mise "$HOME_VOLUME") nested
+  nested=$(nested_engine_volume)
+  [[ -n "$nested" ]] && vols+=("$nested")
   local v
   for v in "${vols[@]}"; do
     remove_volume_if_exists "$v" "$RUNTIME_ARGS"
@@ -72,6 +80,7 @@ cleanup_for_rebuild() {
 check_image_uid_match() {
   local tag="$1"
   local labels img_uid img_gid
+  resolve_image_ids
   # Single inspect retrieves all three labels we care about; IMAGE_VERSION
   # is stashed for check_image_version_match so it doesn't re-inspect.
   # shellcheck disable=SC2086  # intentional word-splitting of RUNTIME_ARGS
@@ -85,40 +94,42 @@ check_image_uid_match() {
   IMAGE_EXISTS=true
   read -r img_uid img_gid IMAGE_VERSION <<< "$labels"
   if [[ -n "$img_uid" && -n "$img_gid" \
-        && "$img_uid" == "$HOST_UID" && "$img_gid" == "$HOST_GID" ]]; then
+        && "$img_uid" == "$IMAGE_UID" && "$img_gid" == "$IMAGE_GID" ]]; then
     return 0
   fi
   local img_id="${img_uid:-?}:${img_gid:-?}"
   if [[ "$FORCE_BUILD" == true ]]; then
-    echo "Note: image $tag built for UID:GID $img_id; rebuilding for $HOST_UID:$HOST_GID." >&2
-    cleanup_for_rebuild "$CONTAINER_NAME" "$DIND"
+    echo "Note: image $tag built for UID:GID $img_id; rebuilding for $IMAGE_UID:$IMAGE_GID." >&2
+    cleanup_for_rebuild "$CONTAINER_NAME"
     return 0
   fi
   if [[ "$DRY_RUN" == true ]]; then
-    echo "Would rebuild $tag for UID:GID $HOST_UID:$HOST_GID (current labels: $img_id)" >&2
+    echo "Would rebuild $tag for UID:GID $IMAGE_UID:$IMAGE_GID (current labels: $img_id)" >&2
     return 0
   fi
   if [[ "${DEV_ASSUME_YES:-0}" == "1" ]]; then
-    echo "Note: image $tag built for UID:GID $img_id; DEV_ASSUME_YES set, rebuilding for $HOST_UID:$HOST_GID." >&2
-    cleanup_for_rebuild "$CONTAINER_NAME" "$DIND"
+    echo "Note: image $tag built for UID:GID $img_id; DEV_ASSUME_YES set, rebuilding for $IMAGE_UID:$IMAGE_GID." >&2
+    cleanup_for_rebuild "$CONTAINER_NAME"
     FORCE_BUILD=true
     return 0
   fi
   if [[ ! -t 0 ]]; then
-    echo "Error: image $tag was built for UID:GID $img_id, but you are $HOST_UID:$HOST_GID." >&2
-    echo "       Run 'dev up --build' to rebuild for UID:GID $HOST_UID:$HOST_GID." >&2
+    echo "Error: image $tag was built for UID:GID $img_id; this runtime needs $IMAGE_UID:$IMAGE_GID." >&2
+    echo "       Run 'dev up --build' to rebuild for UID:GID $IMAGE_UID:$IMAGE_GID." >&2
     exit 1
   fi
-  echo "Image $tag was built for UID:GID $img_id, but you are $HOST_UID:$HOST_GID." >&2
+  echo "Image $tag was built for UID:GID $img_id; this runtime needs $IMAGE_UID:$IMAGE_GID." >&2
   local vol_list="devcontainer-mise, $HOME_VOLUME"
-  if [[ "$DIND" == true ]]; then
-    vol_list="${vol_list}, devcontainer-dind"
-  fi
+  # Same source as the wipe itself, so the prompt names every volume that is
+  # about to go (devcontainer-pind included under --pind).
+  local nested
+  nested=$(nested_engine_volume)
+  [[ -n "$nested" ]] && vol_list="${vol_list}, $nested"
   local reply
   read -r -p "Rebuild image and remove volumes (${vol_list})? [y/N] " reply
   case "$reply" in
     y|Y|yes|YES)
-      cleanup_for_rebuild "$CONTAINER_NAME" "$DIND"
+      cleanup_for_rebuild "$CONTAINER_NAME"
       FORCE_BUILD=true
       ;;
     *)

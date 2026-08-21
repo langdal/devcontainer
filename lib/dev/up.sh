@@ -218,12 +218,13 @@ cmd_start() {
   DIND_MIN_SUBIDS=165535 # ids beyond id 0; namespace size = subids + 1
   run_blocking_checks 1
 
-  # Host identity. Used to (a) bake correct UID/GID into the image at
-  # build time, and (b) detect when an existing image was built for a
-  # different user.
-  # shellcheck disable=SC2034  # consumed by image.sh's runtime_build/check_image_uid_match and migrate_volume_for_keepid in lib/dev/volumes.sh
+  # Host identity. Feeds resolve_image_ids (lib/dev/ids.sh), which decides the
+  # uid/gid the image is built for and the --userns=keep-id form, and
+  # migrate_volume_for_keepid, which compares a volume's on-disk owner against
+  # the real host user.
+  # shellcheck disable=SC2034  # consumed by resolve_image_ids in lib/dev/ids.sh and migrate_volume_for_keepid in lib/dev/volumes.sh
   HOST_UID=$(id -u)
-  # shellcheck disable=SC2034  # consumed by runtime_build/check_image_uid_match in lib/dev/image.sh
+  # shellcheck disable=SC2034  # consumed by resolve_image_ids in lib/dev/ids.sh
   HOST_GID=$(id -g)
 
   # Read the host's git identity so a fresh per-workspace home volume gets a

@@ -64,23 +64,37 @@ append_volume_mounts() {
   if [[ "$KEEPID_MIGRATE" == true && "$DRY_RUN" == false ]]; then
     migrate_volume_for_keepid devcontainer-mise
     migrate_volume_for_keepid "$HOME_VOLUME"
-    if [[ "$DIND" == true ]]; then
-      migrate_volume_for_keepid devcontainer-dind
-    fi
-    if [[ "$PIND" == true ]]; then
-      migrate_volume_for_keepid devcontainer-pind
+    if [[ -n "$(nested_engine_volume)" ]]; then
+      migrate_volume_for_keepid "$(nested_engine_volume)"
     fi
   fi
 }
 
-# Append the nested engine's image-cache volume (dind and pind keep their
-# stores in different paths, and only one of the two is ever mounted).
-append_nested_engine_volume() {
+# The nested engine's image-cache volume for THIS invocation, empty when the
+# container is not nested. Only one of the two is ever mounted (--dind and
+# --pind are mutually exclusive), and every consumer has to agree on which:
+# the start flow mounts it, the keep-id migration re-chowns it, and the
+# rebuild wipe in lib/dev/image.sh removes it. That last one is why this is a
+# function and not three literals — it was passed a bare $DIND and so left
+# devcontainer-pind (stale, owned under the old id mapping) in place after a
+# --pind rebuild.
+nested_engine_volume() {
   if [[ "$DIND" == true ]]; then
-    DOCKER_CMD+=(-v devcontainer-dind:/home/vscode/.local/share/docker)
-  else
-    DOCKER_CMD+=(-v devcontainer-pind:/home/vscode/.local/share/containers)
+    echo devcontainer-dind
+  elif [[ "$PIND" == true ]]; then
+    echo devcontainer-pind
   fi
+}
+
+# Append the nested engine's image-cache volume (dind and pind keep their
+# stores in different paths, so the name comes from nested_engine_volume and
+# only the mount point is decided here).
+append_nested_engine_volume() {
+  local path=/home/vscode/.local/share/containers
+  if [[ "$DIND" == true ]]; then
+    path=/home/vscode/.local/share/docker
+  fi
+  DOCKER_CMD+=(-v "$(nested_engine_volume):$path")
 }
 
 # Destructive helper shared by the rebuild path and `dev reset` (its container

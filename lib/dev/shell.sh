@@ -46,15 +46,11 @@ cmd_shell() {
     TTY_FLAGS=(-it)
   fi
   # The container already exists, so the keep-id mapping is whatever it was
-  # created with; attach_existing_container only compares this to the label to
-  # decide whether reuse is safe, and under SHELL_ONLY it errors rather than
-  # recreating. Ask the runtime instead of assuming.
-  # shellcheck disable=SC2034  # consumed by attach_existing_container
-  EXPECT_KEEPID=false
-  if engine_is_podman && runtime_is_rootless; then
-    # shellcheck disable=SC2034  # consumed by attach_existing_container
-    EXPECT_KEEPID=true
-  fi
+  # created with; attach_existing_container only compares EXPECT_KEEPID to the
+  # label to decide whether reuse is safe, and under SHELL_ONLY it errors rather
+  # than recreating. Ask the runtime instead of assuming — via resolve_image_ids
+  # (lib/dev/ids.sh), so the answer cannot drift from the start path's.
+  resolve_image_ids
   attach_existing_container
   # attach_existing_container execs when it attaches, so reaching here means
   # the container vanished between the running check and the attach.

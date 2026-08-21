@@ -20,14 +20,13 @@ start_container() {
     TTY_FLAGS=(-it)
   fi
 
-  # Whether this invocation would create the container with --userns=keep-id
-  # (rootless podman only; see the create path below). Computed up front so the
-  # reuse guard and the create path agree, and recorded as the dev.keepid label
-  # so a later run can tell how an existing container was created.
-  EXPECT_KEEPID=false
-  if engine_is_podman && runtime_is_rootless; then
-    EXPECT_KEEPID=true
-  fi
+  # Resolve IMAGE_UID/IMAGE_GID, EXPECT_KEEPID and KEEPID_FLAG (lib/dev/ids.sh):
+  # whether this invocation would create the container with --userns=keep-id
+  # (rootless podman only; see the create path below) and in which form.
+  # Computed up front so the reuse guard and the create path agree, and recorded
+  # as the dev.keepid label so a later run can tell how an existing container
+  # was created.
+  resolve_image_ids
 
   # Reuse an existing container when there is one (never returns if it
   # attaches); no-op under --dry-run.
@@ -47,13 +46,16 @@ start_container() {
   # above: the bind-mounted /workspace (owned by the real host user) shows up
   # as root-owned to vscode, who can't write to it, and named-volume content
   # written by vscode ends up owned by a subuid instead of the host user.
-  # --userns=keep-id fixes this by mapping the invoking host user 1:1 onto the
-  # matching container id instead, so vscode's baked uid lines up with the real
-  # host uid again. Rootful podman and Docker don't remap ids at all, so the
-  # baked uid already matches there — this only applies to rootless podman.
+  # --userns=keep-id fixes this by mapping the invoking host user 1:1 onto a
+  # container id instead. Which id, and so which flag form, is resolved by
+  # resolve_image_ids: keep-id:uid=1000,gid=1000 where podman supports it (the
+  # image keeps vscode at 1000, so no subuid grant larger than the image's own
+  # id range is needed), else bare keep-id onto the image's baked host uid.
+  # Rootful podman and Docker don't remap ids at all, so the baked uid already
+  # matches there — this only applies to rootless podman.
   KEEPID_MIGRATE=false
   if [[ "$EXPECT_KEEPID" == true ]]; then
-    DOCKER_CMD+=(--userns=keep-id)
+    DOCKER_CMD+=("$KEEPID_FLAG")
     # shellcheck disable=SC2034  # consumed by append_volume_mounts in lib/dev/volumes.sh
     KEEPID_MIGRATE=true
   fi
