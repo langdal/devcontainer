@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.2.0](https://github.com/langdal/devcontainer/compare/v2.1.1...v2.2.0) (2026-08-22)
+
+
+### Features
+
+* **image:** bake Playwright/Chromium runtime deps into the base image ([c42270e](https://github.com/langdal/devcontainer/commit/c42270ef2cf77e3134aeb09fe5816ad9dccdb484))
+* **image:** bake Playwright/Chromium runtime deps into the base image ([f01eebb](https://github.com/langdal/devcontainer/commit/f01eebb0b62db82335e68e74d6ab91190a6b82ec))
+
 ## [2.1.1](https://github.com/langdal/devcontainer/compare/v2.1.0...v2.1.1) (2026-08-21)
 
 
