@@ -71,6 +71,47 @@ RUN apt-get update && \
         tcpdump && \
     rm -rf /var/lib/apt/lists/*
 
+# Playwright/Chromium runtime libraries + fonts for stable text rendering.
+# The browser binaries themselves are NOT baked (each project fetches its own
+# pinned build via `npx playwright install chromium` into ~/.cache/ms-playwright
+# on the home volume; cdn.playwright.dev is allowlisted for closed mode).
+# This is the chromium-only set — Firefox/WebKit would add GTK3/GTK4 + the
+# GStreamer stack (~400 MB more). xvfb is only needed for headed mode.
+# hadolint ignore=DL3008
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        libasound2t64 \
+        libatk-bridge2.0-0t64 \
+        libatk1.0-0t64 \
+        libatspi2.0-0t64 \
+        libcairo2 \
+        libcups2t64 \
+        libdrm2 \
+        libgbm1 \
+        libglib2.0-0t64 \
+        libnspr4 \
+        libnss3 \
+        libpango-1.0-0 \
+        libx11-6 \
+        libxcb1 \
+        libxcomposite1 \
+        libxdamage1 \
+        libxext6 \
+        libxfixes3 \
+        libxkbcommon0 \
+        libxrandr2 \
+        fonts-liberation \
+        fonts-noto-color-emoji \
+        fonts-unifont \
+        fonts-freefont-ttf \
+        fonts-ipafont-gothic \
+        fonts-wqy-zenhei \
+        fonts-tlwg-loma-otf \
+        xfonts-cyrillic \
+        xfonts-scalable \
+        xvfb && \
+    rm -rf /var/lib/apt/lists/*
+
 # Run tinyproxy from a copied path. AppArmor attaches profiles by binary path
 # and that attachment crosses the container boundary under rootless runtimes
 # (container processes run unconfined, so a host /etc/apparmor.d/tinyproxy
