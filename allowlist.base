@@ -62,6 +62,10 @@ builds.dotnet.microsoft.com
 dotnetcli.azureedge.net
 api.nuget.org
 
+# Playwright browser downloads (`npx playwright install`); the runtime
+# libraries are baked into the image, the browser builds come from here.
+cdn.playwright.dev
+
 # mise / language runtimes
 mise.jdx.dev
 mise.run
