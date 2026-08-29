@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.2.1](https://github.com/langdal/devcontainer/compare/v2.2.0...v2.2.1) (2026-08-29)
+
+
+### Bug Fixes
+
+* **firewall:** punch --host-port holes before the link-local DROP ([3732b13](https://github.com/langdal/devcontainer/commit/3732b13f21821bd36829e617cd19a4e34f435515))
+* **firewall:** punch --host-port holes before the link-local DROP ([95cf914](https://github.com/langdal/devcontainer/commit/95cf914cea349e6c7e98a687cd21b29dcf88b1c5))
+
 ## [2.2.0](https://github.com/langdal/devcontainer/compare/v2.1.1...v2.2.0) (2026-08-22)
 
 
