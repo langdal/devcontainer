@@ -26,7 +26,7 @@ command -v python3 >/dev/null 2>&1 \
     || { log_skip "python3 not on host PATH (needed for the host-side listener)"; exit 0; }
 
 SRV_PID=""
-# shellcheck disable=SC2329  # invoked via the EXIT trap below
+# shellcheck disable=SC2317,SC2329  # invoked via the EXIT trap below
 cleanup() {
     [ -n "$SRV_PID" ] && kill "$SRV_PID" 2>/dev/null
     restore_host
