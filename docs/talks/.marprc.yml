@@ -1,0 +1,3 @@
+# The deck uses raw HTML: <div class="cols"> layouts and inline <svg> figures.
+# Marp CLI escapes raw HTML unless this is on.
+html: true
