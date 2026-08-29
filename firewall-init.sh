@@ -64,7 +64,51 @@ install_baseline_blocks() {
                      iptables  -A OUTPUT -d "$ns" -p tcp --dport 53 -j ACCEPT ;;
         esac
     done < <(grep '^nameserver ' /etc/resolv.conf 2>/dev/null)
+    install_host_port_holes
     iptables -A OUTPUT -d 169.254.0.0/16 -j DROP
+}
+
+# Punch the `dev up --host-port PORT` holes BEFORE the link-local DROP above
+# appends, and in BOTH egress modes: podman >=5's pasta backend maps the
+# host-gateway sentinel to a LINK-LOCAL address (169.254.1.2 by default), so
+# an ACCEPT appended after the DROP can never match — and open mode's ACCEPT
+# policy doesn't help either, because the DROP precedes it. Scoped to the
+# resolved gateway IP plus the declared ports only, so every other
+# link-local destination (the metadata endpoint included) stays dropped.
+# `dev` sets DEVCONTAINER_HOST_PORTS at container creation and pairs it with
+# --add-host=host.docker.internal:host-gateway. Fail-closed: an unresolvable
+# gateway or an invalid port refuses container start.
+#
+# Loopback resolutions are skipped when picking the gateway: rootless podman
+# seeds the container's /etc/hosts from the HOST's /etc/hosts, so a host-side
+# "127.0.0.1 ... host.docker.internal" line would otherwise shadow the
+# --add-host entry and punch the hole for the container's own loopback. The
+# cloud metadata IP itself is refused outright — no host mapping may weaken
+# the block above.
+install_host_port_holes() {
+    [ -n "${DEVCONTAINER_HOST_PORTS:-}" ] || return 0
+    local gw port
+    gw="$(getent ahostsv4 host.docker.internal 2>/dev/null \
+          | awk '$1 !~ /^127\./ {print $1; exit}')" || true
+    if [ -z "$gw" ]; then
+        echo "firewall-init: DEVCONTAINER_HOST_PORTS set but host.docker.internal does not resolve to a non-loopback address" >&2
+        exit 1
+    fi
+    if [ "$gw" = "169.254.169.254" ]; then
+        echo "firewall-init: refusing host-port hole to the cloud metadata IP" >&2
+        exit 1
+    fi
+    IFS=',' read -ra _HOST_PORTS <<< "$DEVCONTAINER_HOST_PORTS"
+    for port in "${_HOST_PORTS[@]}"; do
+        port="${port//[[:space:]]/}"
+        [ -z "$port" ] && continue
+        if ! [[ "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+            echo "firewall-init: invalid host port '$port' in DEVCONTAINER_HOST_PORTS" >&2
+            exit 1
+        fi
+        iptables -A OUTPUT -p tcp -d "$gw" --dport "$port" -j ACCEPT
+    done
+    echo "firewall-init: opened host gateway $gw for ports: $DEVCONTAINER_HOST_PORTS" >&2
 }
 
 # Open-mode egress is unfiltered at the IP layer but must stay observable:
@@ -206,29 +250,9 @@ EOF
                       -p tcp -m multiport --dports 80,443 -j ACCEPT
     iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
 
-    # Optional: punch a hole to specific ports on the host gateway. Set by
-    # `dev up --host-port PORT`, which also adds --add-host=host.docker.internal:host-gateway
-    # at run time. Scoped to the gateway IP only so the firewall still default-drops
-    # every other destination. Fail-closed: if the hostname doesn't resolve or any
-    # port is invalid, the firewall does not come up.
-    if [ -n "${DEVCONTAINER_HOST_PORTS:-}" ]; then
-        HOST_GW="$(getent ahostsv4 host.docker.internal 2>/dev/null | awk 'NR==1 {print $1}')" || true
-        if [ -z "$HOST_GW" ]; then
-            echo "firewall-init: DEVCONTAINER_HOST_PORTS set but host.docker.internal does not resolve" >&2
-            exit 1
-        fi
-        IFS=',' read -ra _HOST_PORTS <<< "$DEVCONTAINER_HOST_PORTS"
-        for port in "${_HOST_PORTS[@]}"; do
-            port="${port//[[:space:]]/}"
-            [ -z "$port" ] && continue
-            if ! [[ "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
-                echo "firewall-init: invalid host port '$port' in DEVCONTAINER_HOST_PORTS" >&2
-                exit 1
-            fi
-            iptables -A OUTPUT -p tcp -d "$HOST_GW" --dport "$port" -j ACCEPT
-        done
-        echo "firewall-init: opened host gateway $HOST_GW for ports: $DEVCONTAINER_HOST_PORTS" >&2
-    fi
+    # (--host-port holes are installed by install_host_port_holes above,
+    # before the link-local DROP — see that function for why the placement
+    # matters.)
 
     # Log packets that fell through every ACCEPT above — i.e. exactly what the
     # default-DROP policy is about to discard. Rate-limited so a noisy app cannot
