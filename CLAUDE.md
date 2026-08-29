@@ -138,7 +138,7 @@ filters on it:
 ```
 
 `DEV_TEST_PRIVILEGE=user` runs only the `user` subset and requires no sudo;
-unset means "run everything". 9 of the 43 scenarios are `root`.
+unset means "run everything". 9 of the 44 scenarios are `root`.
 
 Two cells on the dev host, both measured with `GITHUB_TOKEN` set — without it
 the numbers are not reproducible, for the reason below. Treat any tally as
@@ -406,9 +406,18 @@ For reaching a service on the Docker host (local LLM server, metrics
 endpoint, etc.) prefer `--host-port PORT` (repeatable) over `--maint` or
 `--network host`. It adds `--add-host=host.docker.internal:host-gateway`
 plus a single iptables `ACCEPT` rule for that port against the host gateway
-IP only. In closed mode the rest of the firewall posture is unchanged; in
-open mode the gateway is already reachable like any other host, so
-`--host-port` is mainly useful there for a stable `host.docker.internal`
-hostname, or for `--closed` runs. Inside the container, reach the service at
-`host.docker.internal:PORT`. The env contract is
-`DEVCONTAINER_HOST_PORTS=p1,p2,...`, consumed by `firewall-init.sh`.
+IP only. The ACCEPT is installed in BOTH egress modes, and it must precede
+the always-on link-local DROP (`install_host_port_holes`, called from
+`install_baseline_blocks` in `firewall-init.sh`): podman ≥ 5's pasta
+backend maps the host-gateway sentinel to a link-local address
+(`169.254.1.2` by default), so an ACCEPT appended after the DROP never
+matches, and open mode's ACCEPT policy doesn't help either — this exact
+ordering bug once broke `--host-port` on every pasta host in both modes
+(scenario 55 guards it). The gateway pick skips loopback resolutions (a
+host-side `/etc/hosts` line mapping `host.docker.internal` to `127.0.0.1`
+gets copied into the container's `/etc/hosts` by podman and would otherwise
+shadow the `--add-host` entry) and refuses the cloud metadata IP outright.
+In closed mode the rest of the firewall posture is unchanged. Inside the
+container, reach the service at `host.docker.internal:PORT`. The env
+contract is `DEVCONTAINER_HOST_PORTS=p1,p2,...`, consumed by
+`firewall-init.sh`.

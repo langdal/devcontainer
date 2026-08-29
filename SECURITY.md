@@ -245,8 +245,11 @@ already done.
      scoped to the nested-engine modes and documented inline with the
      specific kernel error each relaxation avoids
      (`lifecycle.sh:67-97`). `--host-port` adds a single per-port iptables
-     ACCEPT against the host gateway only (`lifecycle.sh:120-129`,
-     `firewall-init.sh:185-207`). See §6 for `DEV_EXTRA_RUN_ARGS`, the one
+     ACCEPT against the host gateway only, installed before the link-local
+     DROP because pasta's gateway is itself link-local; loopback
+     resolutions are skipped and the cloud metadata IP is refused, so the
+     hole can never widen the metadata block (`lifecycle.sh:120-129`,
+     `install_host_port_holes` in `firewall-init.sh`). See §6 for `DEV_EXTRA_RUN_ARGS`, the one
      knob in this file that can inject flags well beyond any of the above.
    - **Injection** (`lib/dev/inject.sh`, used by `dev agent add` /
      `dev dotfile add`): a curated, allowlisted set of host files (agent

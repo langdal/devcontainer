@@ -179,9 +179,20 @@ caveats:
 ### Reaching a host service (e.g. local LLM)
 
 `dev up --host-port 8080` (repeatable) makes `host.docker.internal:8080`
-resolve and, in closed mode, adds an iptables ACCEPT for only that port to
-the host gateway — everything else stays default-deny. Prefer it over
-`--network host` or opening egress when an agent needs one host-side service.
+resolve and adds an iptables ACCEPT for only that port to the host gateway —
+in closed mode everything else stays default-deny. The ACCEPT is installed
+in *both* egress modes, before the always-on link-local block: podman ≥ 5's
+pasta backend maps the gateway to a link-local address (`169.254.1.2`), so
+without it the block would swallow the traffic even under open egress.
+Prefer it over `--network host` or opening egress when an agent needs one
+host-side service.
+
+Don't map `host.docker.internal` in the **host's** `/etc/hosts` (e.g. to
+`127.0.0.1`): podman seeds the container's `/etc/hosts` from the host's, and
+the copied loopback entry shadows the real gateway mapping inside the
+container — clients then talk to the container's own loopback instead of the
+host. `dev` ignores loopback entries when punching the firewall hole, but it
+cannot fix what address a client in the container picks first.
 
 ## Nested Docker / Podman
 
