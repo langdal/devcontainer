@@ -7,3 +7,4 @@ scripts/test/last-run-*.log
 scripts/test/last-summary-*.log
 scripts/test/serial-*.log
 scripts/test/cloud-init-output-*.log
+/docs/talks/ai-agent-sandbox.html
