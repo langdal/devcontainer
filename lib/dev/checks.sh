@@ -18,12 +18,15 @@
 # Each id has a `_chk_<id>` probe returning 0 pass / 1 fail / 2 not-applicable,
 # and a `_chk_<id>_fix` printing remediation. Probes MUST reach the outside
 # world only through the indirections in lib/dev/runtime.sh (_host_os,
-# _have_cmd, _runtime_version, _read_sysfs) so they stay unit-testable from
-# any platform.
+# _have_cmd, _runtime_version, _read_sysfs, _default_route_mtu) so they stay
+# unit-testable from any platform. The pairs live in checks-catalog.sh, with
+# the nested-engine subset in checks-catalog-nested.sh and the host-network
+# subset in checks-catalog-network.sh.
 CHECKS=(
   "platform-supported|0|*:*|block|supported platform (linux/darwin)"
   "runtime-present|0|*:*|block|a container runtime is installed"
   "dev-runtime-valid|0|*:*|block|DEV_RUNTIME names an installed runtime"
+  "uplink-mtu|0|linux:*|advise|uplink MTU not shrunk below 1500 (VPN)"
   "buildx|1|linux,darwin:docker|block-in-doctor|docker buildx present"
   "not-docker-desktop|1|darwin:*|block|not Docker Desktop"
   "podman-machine|1|darwin:podman|block-in-doctor|podman machine running"

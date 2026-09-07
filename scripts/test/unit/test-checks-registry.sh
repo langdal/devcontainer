@@ -41,6 +41,13 @@ tmp=$(mktemp); echo 1 > "$tmp"
 [ "$(DEV_FAKE_SYSFS_VALUE=0 _read_sysfs "$tmp")" = "0" ] || fail "_read_sysfs ignored override"
 rm -f "$tmp"
 
+# _default_route_mtu is overridable so the VPN-shrunk-uplink advisory can be
+# exercised on any host, and prints a bare number (or nothing) when real.
+command -v _default_route_mtu >/dev/null 2>&1 || fail "_default_route_mtu not defined"
+[ "$(DEV_FAKE_MTU=1280 _default_route_mtu)" = "1280" ] || fail "_default_route_mtu ignored DEV_FAKE_MTU"
+real=$(_default_route_mtu)
+case "$real" in ''|*[!0-9]*) [ -z "$real" ] || fail "_default_route_mtu printed non-numeric '$real'" ;; esac
+
 # --- registry -------------------------------------------------------------
 # shellcheck source=lib/dev/checks.sh
 . "$ROOT/lib/dev/checks.sh"

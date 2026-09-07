@@ -14,6 +14,8 @@ fail() { echo "FAIL: $1"; exit 1; }
 . "$ROOT/lib/dev/checks-catalog.sh"
 # shellcheck source=lib/dev/checks-catalog-nested.sh
 . "$ROOT/lib/dev/checks-catalog-nested.sh"
+# shellcheck source=lib/dev/checks-catalog-network.sh
+. "$ROOT/lib/dev/checks-catalog-network.sh"
 RUNTIME=docker; RUNTIME_ARGS=""
 
 # Registry ids use hyphens; shell functions use underscores. Pin the probe's
@@ -172,6 +174,37 @@ pat_state=$(bash -c '
   echo "$CHECK_STATE"')
 [ "$pat_state" = na ] \
     || fail "fine-grained PAT needs no probe — expected na, got $pat_state"
+
+# --- uplink-mtu: the 2026-09-07 FortiClient blackhole ---
+# A VPN client that shrinks the host's default-route MTU below 1500 leaves the
+# container bridge at 1500, and forwarded packets above the tunnel's real limit
+# vanish with no ICMP back. Host sockets are unaffected, so it only shows
+# inside the container (mise's large TLS ClientHello hung; curl's small one
+# passed). Advisory only: the probe cannot know the tunnel's true overhead.
+unset DEV_MTU   # an ambient DEV_MTU on the tester's host would silence the check
+DEV_FAKE_MTU=1500 run_check uplink-mtu; [ "$CHECK_STATE" = pass ] || fail "1500 is the normal case"
+DEV_FAKE_MTU=9000 run_check uplink-mtu; [ "$CHECK_STATE" = pass ] || fail "jumbo frames are fine"
+DEV_FAKE_MTU=1280 run_check uplink-mtu; [ "$CHECK_STATE" = fail ] || fail "1280 must be flagged"
+# Already mitigated: DEV_MTU set means the user acted on the advice; do not nag.
+DEV_FAKE_MTU=1280 DEV_MTU=1180 run_check uplink-mtu
+[ "$CHECK_STATE" = pass ] || fail "DEV_MTU set should silence the advisory"
+# Stub the indirection for the undeterminable cases, then put the REAL one
+# back (unset -f would remove it outright and the fix assertions below would
+# print an empty MTU).
+_real_default_route_mtu=$(declare -f _default_route_mtu)
+# shellcheck disable=SC2317,SC2329  # invoked indirectly via run_check -> _chk_uplink_mtu
+_default_route_mtu() { echo ""; }; run_check uplink-mtu; [ "$CHECK_STATE" = na ] || fail "undeterminable MTU must be na, not fail"
+_default_route_mtu() { echo garbage; }; run_check uplink-mtu; [ "$CHECK_STATE" = na ] || fail "garbage MTU must be na, not fail"
+eval "$_real_default_route_mtu"
+# The fix prints the exact command, with a conservative value: the host MTU
+# itself is NOT safe for forwarded traffic (1280 failed on the FortiClient
+# host; the working limit was ~1180), so subtract a generous 200.
+out=$(DEV_FAKE_MTU=1280 _chk_uplink_mtu_fix)
+echo "$out" | grep -q 'DEV_MTU=1080' || fail "fix must print DEV_MTU=1080 for a 1280 uplink, got: $out"
+echo "$out" | grep -q 'dev down' || fail "fix must remind that a running container has to be recreated"
+# Never recommend something below the IPv4 minimum, however small the uplink.
+out=$(DEV_FAKE_MTU=600 _chk_uplink_mtu_fix)
+echo "$out" | grep -q 'DEV_MTU=576' || fail "fix must floor at 576, got: $out"
 
 # --- selinux ---
 # shellcheck disable=SC2317,SC2329  # invoked indirectly via run_check -> _chk_selinux_enforcing

@@ -54,10 +54,12 @@ echo "$out" | grep -qi 'no such container' && fail "doctor touched a container"
   . "$ROOT/lib/dev/checks-catalog.sh"
   # shellcheck source=lib/dev/doctor.sh
   . "$ROOT/lib/dev/doctor.sh"
+  # shellcheck disable=SC2030  # each mocked block is deliberately its own subshell
   detect_runtime()        { RUNTIME=docker; RUNTIME_ARGS=""; }
   # shellcheck disable=SC2317,SC2329  # invoked indirectly via run_check's dynamic dispatch
   _chk_runtime_present()  { return 0; }
   _doc_header()           { :; }   # avoid shelling out to a real runtime
+  # shellcheck disable=SC2030  # each mocked block is deliberately its own subshell
   export DEV_FAKE_OS=Linux DEV_FAKE_CMDS=docker
   # shellcheck disable=SC2119  # deliberately no flags: the bare `dev doctor` path
   bout=$(cmd_doctor 2>&1); brc=$?
@@ -66,6 +68,46 @@ echo "$out" | grep -qi 'no such container' && fail "doctor touched a container"
   [ "$brc" -eq 1 ] \
     || { echo "FAIL: missing buildx must exit 1 (block-in-doctor), got $brc: $bout"; exit 1; }
 ) || fail "doctor block-in-doctor coverage failed"
+
+# uplink-mtu is advisory: a VPN-shrunk uplink must show up as a warning that
+# prints the exact mitigation, and must NOT make the host read as blocked.
+# Fully mocked (DEV_FAKE_MTU) so this does not depend on the tester's network.
+(
+  set -u
+  # shellcheck source=lib/dev/runtime.sh
+  . "$ROOT/lib/dev/runtime.sh"
+  # shellcheck source=lib/dev/checks.sh
+  . "$ROOT/lib/dev/checks.sh"
+  # shellcheck source=lib/dev/checks-catalog.sh
+  . "$ROOT/lib/dev/checks-catalog.sh"
+  # shellcheck source=lib/dev/checks-catalog-network.sh
+  . "$ROOT/lib/dev/checks-catalog-network.sh"
+  # shellcheck source=lib/dev/doctor.sh
+  . "$ROOT/lib/dev/doctor.sh"
+  detect_runtime()        { RUNTIME=docker; RUNTIME_ARGS=""; }
+  # shellcheck disable=SC2317,SC2329  # invoked indirectly via run_check's dynamic dispatch
+  _chk_runtime_present()  { return 0; }
+  # shellcheck disable=SC2317,SC2329  # invoked indirectly via run_check's dynamic dispatch
+  _chk_buildx()           { return 0; }
+  _doc_header()           { :; }
+  # shellcheck disable=SC2031  # each mocked block is deliberately its own subshell
+  export DEV_FAKE_OS=Linux DEV_FAKE_CMDS=docker DEV_FAKE_MTU=1280
+  unset DEV_MTU
+  # shellcheck disable=SC2119  # deliberately no flags: the bare `dev doctor` path
+  mout=$(cmd_doctor 2>&1); mrc=$?
+  echo "$mout" | grep -q 'DEV_MTU=1080' \
+    || { echo "FAIL: shrunk uplink did not print the DEV_MTU mitigation: $mout"; exit 1; }
+  echo "$mout" | grep -qE '^warn .*MTU|^  warn .*MTU' \
+    || { echo "FAIL: uplink-mtu row is not rendered as an advisory: $mout"; exit 1; }
+  [ "$mrc" -eq 0 ] \
+    || { echo "FAIL: an advisory must not block doctor, got exit $mrc: $mout"; exit 1; }
+  export DEV_FAKE_MTU=1500
+  # shellcheck disable=SC2119  # deliberately no flags: the bare `dev doctor` path
+  mout=$(cmd_doctor 2>&1)
+  echo "$mout" | grep -q 'DEV_MTU=' \
+    && { echo "FAIL: 1500 uplink must not print a mitigation: $mout"; exit 1; }
+  exit 0
+) || fail "doctor uplink-mtu advisory coverage failed"
 
 
 # --- doctor must survive hosts where detect_runtime would refuse -----------

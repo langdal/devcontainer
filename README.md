@@ -339,6 +339,21 @@ fix for anything missing, before any image or container exists.
   podman system migrate   # podman only
   ```
 
+- **Behind a VPN that lowers the uplink MTU** (FortiClient and similar set
+  the host interface to 1280 or less): the container bridge stays at 1500,
+  and forwarded packets above the tunnel's real limit are silently dropped
+  with no ICMP back. Symptom, only inside the container: `curl` of a small
+  page works, but `mise install`, uploads and any TLS client with a large
+  ClientHello (rustls with a post-quantum key share) hang until timeout.
+  `dev doctor` flags the shrunk uplink and prints the fix; the host's own MTU
+  is **not** a safe value (the tunnel adds overhead on top of it), so doctor
+  subtracts a generous margin:
+
+  ```bash
+  export DEV_MTU=1080     # doctor's suggestion for a 1280 uplink; add to your shell profile
+  dev down && dev up      # MTU is applied at container creation, every time
+  ```
+
 `dev` bakes your `id -u`/`id -g` into the image so `vscode` owns the
 bind-mounted workspace; if the host UID/GID later changes, the next run
 detects the mismatch and prompts to rebuild and wipe volumes. On rootless
@@ -361,6 +376,10 @@ unwritable inside, `dev down && dev up` re-triggers the migration.
 - `DEV_SKIP_APPARMOR_CHECK=1` / `DEV_SKIP_SUBID_CHECK=1` — bypass the
   `--dind`/`--pind` preflights.
 - `DEV_EXTRA_RUN_ARGS=...` — extra args appended to `docker run`.
+- `DEV_MTU=N` — MTU for the container's interface, applied at every container
+  creation in every mode. For hosts behind a VPN that shrank the uplink below
+  1500 (see [Host requirements](#host-requirements)); `dev doctor` prints the
+  value to use. `dev down` first if a container is already running.
 - `GITHUB_TOKEN` — injected into the container and forwarded to image builds,
   purely to avoid GitHub's anonymous rate limit (60 req/h per IP, easily
   exhausted by `mise install`). Use a **fine-grained PAT with no repository

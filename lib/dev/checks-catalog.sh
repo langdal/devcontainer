@@ -7,7 +7,8 @@
 # these functions by name. The block-if-nested checks (userns-sysctl,
 # subid-grant, fuse-device, cgroup2) live in the sibling
 # lib/dev/checks-catalog-nested.sh, split out for the same reason once this
-# file hit the budget again.
+# file hit the budget again; the host-network checks (uplink-mtu) live in
+# lib/dev/checks-catalog-network.sh for the same reason.
 # Sourced by dev; not executed directly.
 
 # --- phase 0 --------------------------------------------------------------

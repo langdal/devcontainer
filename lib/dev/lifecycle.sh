@@ -131,6 +131,14 @@ start_container() {
     DOCKER_CMD+=(-e "DEVCONTAINER_HOST_PORTS=$_hp_csv")
   fi
 
+  # Container interface MTU (DEV_MTU, validated in cmd_start). Forwarded in
+  # EVERY mode, --maint included: it works around a host VPN that shrank the
+  # uplink, and a maintenance container sits on the same bridge behind the
+  # same tunnel. entrypoint.sh applies it as root before anything talks out.
+  if [[ -n "${DEV_MTU:-}" ]]; then
+    DOCKER_CMD+=(-e "DEVCONTAINER_MTU=$DEV_MTU")
+  fi
+
   # GITHUB_TOKEN resolution (Method 1 scope-guard / Method 2 DEV_GITHUB_TOKEN)
   # happens in resolve_github_token (lib/dev/approval.sh); it exports the chosen
   # value into dev's env and sets GH_TOKEN_INJECT. The value-less -e form keeps

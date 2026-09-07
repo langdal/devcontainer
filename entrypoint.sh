@@ -1,9 +1,10 @@
 #!/bin/bash
 # --- Threat model (see SECURITY.md) ---
 # May: run firewall-init.sh as root before anything else and fail closed
-# (abort container startup) if it errors; seed rc files/git identity/JVM
-# proxy config only when absent, never overwriting a value already in the
-# home volume.
+# (abort container startup) if it errors; lower the container interface MTU
+# when dev asks (DEVCONTAINER_MTU, a connectivity aid, not a boundary); seed
+# rc files/git identity/JVM proxy config only when absent, never overwriting
+# a value already in the home volume.
 # Must never: start the payload command (gosu vscode "$@") if
 # firewall-init.sh/firewall-disable.sh/dind-init.sh/pind-init.sh reported
 # failure, or fall through to an unfirewalled shell on any error.
@@ -55,6 +56,33 @@ warn_stale_jvm_proxy_seed() {
     done
     unset _jvm_cfg _jvm_mode_label
 }
+
+# --- Container MTU (DEVCONTAINER_MTU, set by dev from the host's DEV_MTU) ---
+# A VPN client on the host can shrink the uplink MTU below the 1500 the bridge
+# hands this container. Forwarded packets above the tunnel's real limit are
+# then dropped with no ICMP back (a PMTUD blackhole): small requests work,
+# anything with a large first packet -- a rustls ClientHello, an upload --
+# hangs until timeout. Nothing in the image can carry the fix (the interface
+# is created per `run`), so lower the default-route interface here, as root,
+# before anything talks out. Runs in every mode, maintenance included. Best
+# effort: a failure loses a connectivity aid, not a security boundary, so
+# warn and continue rather than refuse to start. Same for a malformed value:
+# dev validated it host-side, so anything odd here is not a user typo.
+if [ -n "${DEVCONTAINER_MTU:-}" ]; then
+    if [[ "$DEVCONTAINER_MTU" =~ ^[0-9]+$ ]] \
+       && [ "$DEVCONTAINER_MTU" -ge 576 ] && [ "$DEVCONTAINER_MTU" -le 65535 ]; then
+        _mtu_dev=$(ip -o route show default 2>/dev/null \
+                   | awk '{for(i=1;i<=NF;i++) if($i=="dev") {print $(i+1); exit}}')
+        if [ -n "$_mtu_dev" ] && ip link set dev "$_mtu_dev" mtu "$DEVCONTAINER_MTU" 2>/dev/null; then
+            echo "entrypoint: set $_mtu_dev mtu $DEVCONTAINER_MTU (DEVCONTAINER_MTU)" >&2
+        else
+            echo "WARNING: could not set mtu $DEVCONTAINER_MTU on default-route interface '${_mtu_dev:-?}'; continuing" >&2
+        fi
+        unset _mtu_dev
+    else
+        echo "WARNING: ignoring malformed DEVCONTAINER_MTU='$DEVCONTAINER_MTU'" >&2
+    fi
+fi
 
 # --- Firewall (skipped in maintenance mode; self-branches on egress mode) ---
 if [ -z "${DEVCONTAINER_MAINTENANCE:-}" ]; then

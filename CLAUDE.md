@@ -95,6 +95,7 @@ Useful environment variables for `./dev`:
 - `DEV_SKIP_APPARMOR_CHECK=1` — bypass the `--dind`/`--pind` AppArmor preflight (only safe with a custom profile that grants `userns,`).
 - `DEV_SKIP_SUBID_CHECK=1` — bypass the `--dind`/`--pind` preflight that requires a rootless-runtime host to grant ≥165535 subuids/subgids (rootless dockerd/podman must map the image's `vscode:100000:65536` range inside the container's user namespace; the typical 65536-id grant is too small).
 - `DEV_EXTRA_RUN_ARGS=...` — extra args passed to `docker run` (the test orchestrator uses this to inject `--dns=...` when in-container DNS is broken).
+- `DEV_MTU=N` — MTU applied to the container's default-route interface by `entrypoint.sh` (as root, every mode incl. `--maint`) at each container creation; `dev` validates it (576..65535, exit 2 otherwise) and forwards it as `DEVCONTAINER_MTU`. For hosts where a VPN client shrank the uplink below 1500: the bridge stays at 1500 and forwarded packets above the tunnel's real limit are blackholed (small requests work, large TLS ClientHellos/uploads hang, only inside the container). The `uplink-mtu` advisory in `dev doctor` (`lib/dev/checks-catalog-network.sh`) detects a sub-1500 default-route interface and prints `export DEV_MTU=<mtu-200>`; the host MTU itself is not safe (measured 2026-09-07 on a FortiClient host: uplink 1280, container limit ~1180). Scenario 56 guards the end-to-end path.
 - `DEV_SHARED_HOME=1` — use the legacy shared `devcontainer-home` volume for every workspace instead of the per-workspace default (`devcontainer-home-<dir>`).
 
 ## Tests
@@ -243,14 +244,16 @@ flow: reuse-vs-create, assembling the runtime's `run` command, exec or
 `--dry-run` print), `image.sh` (image build, UID/version label checks,
 rebuild cleanup), `inject.sh` (shared plumbing behind `agent`/`dotfile`),
 `runtime.sh` (docker/podman detection), `ids.sh` (the image's baked
-uid/gid and the matching `--userns=keep-id` form), `approval.sh` (the
+uid/gid and the matching `--userns=keep-id` form), `knobs.sh` (validation
+of the `DEV_EGRESS`/`DEV_MTU` env knobs, split out of `up.sh` when it hit
+its line budget), `approval.sh` (the
 project-allowlist diff/approve flow), `usage.sh` (the `--help` text),
 `ls.sh` + `ls-render.sh` (the machine-wide inventory: discovery of the
 canonical rows, and the table/hint rendering that was split out of it when
 that file passed its line budget), and
-`checks.sh` + `checks-catalog.sh` + `checks-catalog-nested.sh` (the
-host-check registry shared by `dev doctor` and the blocking preflights in
-`dev up`). `scripts/lint.sh` enforces a line-budget gate over `dev` and
+`checks.sh` + `checks-catalog.sh` + `checks-catalog-nested.sh` +
+`checks-catalog-network.sh` (the host-check registry shared by `dev doctor`
+and the blocking preflights in `dev up`). `scripts/lint.sh` enforces a line-budget gate over `dev` and
 `lib/dev/*.sh` so this stays split rather than regrowing into one large
 file.
 

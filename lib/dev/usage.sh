@@ -126,6 +126,14 @@ ENVIRONMENT:
                      Extra args appended to the runtime 'run' invocation
                      (e.g. --dns=8.8.8.8 on a host with broken IPv6
                      resolvers).
+  DEV_MTU=N          Set the container interface's MTU at creation (every
+                     mode, --maint included). For hosts where a VPN client
+                     shrank the uplink below 1500: the bridge stays at
+                     1500 and large outbound packets are silently dropped
+                     inside the container (TLS handshakes hang, curl of a
+                     small page works). 'dev doctor' flags this and prints
+                     the value to use. Takes effect on the next container
+                     creation: 'dev down' first if one is running.
   DEV_SHARED_HOME=1  Use the legacy shared home volume (devcontainer-home) for
                      every workspace instead of the per-workspace default
                      (devcontainer-home-<dir>).

@@ -75,6 +75,30 @@ _read_sysfs() {
   cat "$1" 2>/dev/null || true
 }
 
+# MTU of the interface carrying the host's default route, or empty when it
+# cannot be determined. Feeds the uplink-mtu advisory: a VPN client that
+# shrinks this below 1500 blackholes large forwarded packets from the
+# container bridge, which still assumes 1500. Overridable so that check is
+# exercisable on any host. Takes the FIRST default route when there are
+# several (a VPN typically adds its own above the LAN's).
+_default_route_mtu() {
+  if [[ -n "${DEV_FAKE_MTU:-}" ]]; then
+    echo "$DEV_FAKE_MTU"
+    return 0
+  fi
+  local dev=""
+  if [[ "$(_host_os)" == "Darwin" ]]; then
+    dev="$(route -n get default 2>/dev/null | awk '/interface:/{print $2; exit}')"
+    [[ -n "$dev" ]] || return 0
+    ifconfig "$dev" 2>/dev/null | awk 'NR==1{for(i=1;i<=NF;i++) if($i=="mtu") {print $(i+1); exit}}'
+  else
+    dev="$(ip -o route show default 2>/dev/null \
+          | awk '{for(i=1;i<=NF;i++) if($i=="dev") {print $(i+1); exit}}')"
+    [[ -n "$dev" && -r "/sys/class/net/$dev/mtu" ]] || return 0
+    cat "/sys/class/net/$dev/mtu" 2>/dev/null || true
+  fi
+}
+
 # A real Docker CLI can be pointed at a podman socket (DOCKER_HOST=.../
 # podman.sock). It talks to podman fine, but it cannot express
 # --userns=keep-id: that flag is podman-only and the Docker CLI rejects it

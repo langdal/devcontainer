@@ -62,11 +62,9 @@ cmd_exec() {
 # Assignments here are deliberately global (consumed by start_container and
 # the lib/dev/* helpers); do not make them local.
 cmd_start() {
-  # Precedence: explicit --open/--closed (below) > DEV_EGRESS > default open.
-  case "${DEV_EGRESS:-open}" in
-    open|closed) EGRESS_MODE="${DEV_EGRESS:-open}" ;;
-    *) echo "Error: DEV_EGRESS must be 'open' or 'closed', got '$DEV_EGRESS'" >&2; exit 2 ;;
-  esac
+  # Env knobs first (lib/dev/knobs.sh): DEV_EGRESS sets the EGRESS_MODE default
+  # that --open/--closed below override; DEV_MTU is validated so a typo exits 2.
+  resolve_env_knobs
 
   _EGRESS_MODE_EXPLICIT=false
   while [[ $# -gt 0 ]]; do
