@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.4.0](https://github.com/langdal/devcontainer/compare/v2.3.0...v2.4.0) (2026-10-26)
+
+
+### Features
+
+* mount a host-side global mise config into every container ([bb7a62a](https://github.com/langdal/devcontainer/commit/bb7a62a6da19b342ff478f67c7c363677770f3bf))
+* mount a host-side global mise config into every container ([34a547d](https://github.com/langdal/devcontainer/commit/34a547d6c67c982db7a4bfc1951b4a87abf226d7))
+
+
+### Bug Fixes
+
+* document the global mise config as add-only ([01e2c8a](https://github.com/langdal/devcontainer/commit/01e2c8af77d802933d63dad4c4be81fe02f9d3e5))
+
 ## [2.3.0](https://github.com/langdal/devcontainer/compare/v2.2.1...v2.3.0) (2026-10-26)
 
 
