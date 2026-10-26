@@ -12,6 +12,10 @@
 # EXTRA_PORTS, HOST_PORTS, CMD_ARGS, EGRESS_MODE, DRY_RUN, GITHUB_TOKEN,
 # GH_TOKEN_INJECT, …).
 start_container() {
+  # Last output before the exec into the container, so the notice is not
+  # scrolled away by build or approval output (lib/dev/update-check.sh).
+  notify_update_available
+
   # Allocate a TTY only when stdin AND stdout are real terminals; otherwise
   # docker rejects -it with "the input device is not a TTY" and scripted
   # invocations (CI, test runners, piped usage) fail.

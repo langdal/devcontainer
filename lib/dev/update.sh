@@ -17,6 +17,22 @@ cmd_update() {
   exit 0
 }
 
+# latest_stable_tag: print the highest stable release tag advertised by the
+# checkout's origin, or nothing if none is reachable. Shared by self_update and
+# the update notifier (lib/dev/update-check.sh) so both agree on the target.
+#
+# Same sort AND prerelease filter as install.sh: version:refname picks the
+# highest semver tag, but without a versionsort.suffix hint it ranks
+# v1.0.0-rc.1 after v1.0.0 (longer string wins on tie) — so filter to
+# strict vMAJOR.MINOR.PATCH tags first, keeping prereleases (-rc, -beta,
+# ...) from ever becoming the update target.
+latest_stable_tag() {
+  git -C "$SCRIPT_DIR" ls-remote --tags --refs --sort='version:refname' origin 2>/dev/null \
+    | awk -F/ '{print $NF}' \
+    | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' \
+    | tail -1
+}
+
 # --self-update: pull the latest tag in the script's git checkout in place.
 # Detection model: we treat "installed via install.sh OR manual git clone" as
 # the same case — both produce a git checkout at SCRIPT_DIR. The git checkout
@@ -56,16 +72,8 @@ self_update() {
     git -C "$SCRIPT_DIR" fetch --tags --prune origin
   fi
 
-  # Same sort AND prerelease filter as install.sh: version:refname picks the
-  # highest semver tag, but without a versionsort.suffix hint it ranks
-  # v1.0.0-rc.1 after v1.0.0 (longer string wins on tie) — so filter to
-  # strict vMAJOR.MINOR.PATCH tags first, keeping prereleases (-rc, -beta,
-  # ...) from ever becoming the update target.
   local latest
-  latest="$(git -C "$SCRIPT_DIR" ls-remote --tags --refs --sort='version:refname' origin 2>/dev/null \
-    | awk -F/ '{print $NF}' \
-    | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' \
-    | tail -1)"
+  latest="$(latest_stable_tag)"
   if [[ -z "$latest" ]]; then
     echo "Error: no tags advertised by origin ($origin_url)." >&2
     exit 1

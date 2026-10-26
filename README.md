@@ -36,7 +36,8 @@ git clone https://github.com/langdal/devcontainer.git ~/devcontainer
 
 Upgrade later with `dev update` (`--dry-run` to preview). It works for both
 install methods, requires a clean git checkout, and the next `dev` run
-prompts to rebuild the image if the script version changed.
+prompts to rebuild the image if the script version changed. `dev up` and
+`dev exec` tell you when a newer release exists. Set `DEV_NO_UPDATE_CHECK=1` to turn that off.
 
 ## Getting started
 
@@ -361,6 +362,8 @@ unwritable inside, `dev down && dev up` re-triggers the migration.
 - `DEV_SKIP_APPARMOR_CHECK=1` / `DEV_SKIP_SUBID_CHECK=1` — bypass the
   `--dind`/`--pind` preflights.
 - `DEV_EXTRA_RUN_ARGS=...` — extra args appended to `docker run`.
+- `DEV_NO_UPDATE_CHECK=1` — no "update available" notice and no daily
+  background check against origin (also off in CI and non-terminal runs).
 - `GITHUB_TOKEN` — injected into the container and forwarded to image builds,
   purely to avoid GitHub's anonymous rate limit (60 req/h per IP, easily
   exhausted by `mise install`). Use a **fine-grained PAT with no repository
