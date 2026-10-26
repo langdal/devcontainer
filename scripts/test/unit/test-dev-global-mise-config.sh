@@ -2,7 +2,9 @@
 # Unit: the host-side global mise config is bind-mounted read-only into
 # /mise/conf.d/ in the dry-run run command, resolved from DEV_MISE_CONFIG or
 # the XDG default. A stub runtime stands in for docker, so this needs neither
-# docker nor podman.
+# docker nor podman. DEV_FAKE_OS=Linux pins the docker path: on a macOS
+# host (the macos-checks CI job) dev only accepts podman and would refuse
+# the stub before reaching the mount logic.
 set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
@@ -18,6 +20,7 @@ TARGET=/mise/conf.d/user.toml
 dev() {
     (cd "$WORK/myproj" && env -u DEV_RUNTIME -u DEV_MISE_CONFIG \
         PATH="$WORK/bin:$PATH" DEV_NO_UPDATE_CHECK=1 XDG_CONFIG_HOME="$WORK/xdg" \
+        DEV_FAKE_OS=Linux \
         "$@" "$ROOT/dev" exec --dry-run -- echo hi </dev/null 2>&1)
 }
 fail() { echo "$1: $out"; exit 1; }
