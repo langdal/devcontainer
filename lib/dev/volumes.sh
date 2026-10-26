@@ -58,6 +58,8 @@ append_volume_mounts() {
     DOCKER_CMD+=(-e DEVCONTAINER_PROJECT_ALLOWLIST=applied)
   fi
 
+  append_global_mise_config
+
   # `if` rather than the original `[[ … ]] && migrate…` one-liner: as the last
   # statement of a function that idiom would return 1 whenever DIND is false
   # and abort the caller under `set -e`. Same effect, no trailing-status trap.
@@ -68,6 +70,35 @@ append_volume_mounts() {
       migrate_volume_for_keepid "$(nested_engine_volume)"
     fi
   fi
+}
+
+# Host-side global mise config: DEV_MISE_CONFIG when set (set but empty
+# disables the feature), else the XDG default on every platform, matching the
+# ~/.cache and ~/.local/state paths dev already uses on macOS too.
+global_mise_config() {
+  if [[ -n "${DEV_MISE_CONFIG+set}" ]]; then
+    echo "$DEV_MISE_CONFIG"
+  else
+    echo "${XDG_CONFIG_HOME:-$HOME/.config}/devcontainer/mise.toml"
+  fi
+}
+
+# Mount the global mise config read-only as a mise global conf.d file, which
+# mise layers over (and lets override) the baked /mise/config.toml. Read-only
+# because the agent must not be able to change what every workspace installs;
+# the user edits it on the host and it applies from the next container start.
+# Made absolute first: `-v relative:...` would be taken as a volume name.
+append_global_mise_config() {
+  local cfg; cfg=$(global_mise_config)
+  [[ -n "$cfg" ]] || return 0
+  if [[ ! -f "$cfg" ]]; then
+    if [[ -n "${DEV_MISE_CONFIG:-}" ]]; then
+      echo "Warning: DEV_MISE_CONFIG=$DEV_MISE_CONFIG is not a file; starting without a global mise config." >&2
+    fi
+    return 0
+  fi
+  cfg="$(cd "$(dirname "$cfg")" && pwd)/$(basename "$cfg")"
+  DOCKER_CMD+=(-v "$cfg:/mise/conf.d/user.toml:ro")
 }
 
 # The nested engine's image-cache volume for THIS invocation, empty when the

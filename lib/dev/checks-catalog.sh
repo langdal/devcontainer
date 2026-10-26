@@ -282,3 +282,17 @@ _chk_github_token_scopes_fix() {
   echo "here is rate-limit identification: use a fine-grained PAT with no"
   echo "repository access and no permissions."
 }
+
+# Not configured (no file at the default path, or DEV_MISE_CONFIG="") is na;
+# a configured path dev cannot read would be silently skipped by dev up.
+_chk_global_mise_config() {
+  local cfg; cfg="$(global_mise_config)"
+  [[ -z "$cfg" ]] && return 2
+  [[ -z "${DEV_MISE_CONFIG:-}" && ! -e "$cfg" ]] && return 2
+  [[ -f "$cfg" && -r "$cfg" ]] && return 0
+  return 1
+}
+_chk_global_mise_config_fix() {
+  echo "$(global_mise_config) is not a readable file, so dev up starts without"
+  echo "a global mise config. Fix the path, or unset DEV_MISE_CONFIG."
+}

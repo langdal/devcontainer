@@ -37,6 +37,7 @@ CHECKS=(
   "disk-space|1|*:*|advise|at least 3 GB free"
   "memory|1|*:*|advise|at least 6 GB RAM for nested engines"
   "github-token-scopes|1|*:*|advise|GITHUB_TOKEN carries no scopes"
+  "global-mise-config|0|*:*|advise|global mise config is a readable file"
 )
 
 # Field n (1-indexed) of a registry entry.

@@ -14,6 +14,8 @@ fail() { echo "FAIL: $1"; exit 1; }
 . "$ROOT/lib/dev/checks-catalog.sh"
 # shellcheck source=lib/dev/checks-catalog-nested.sh
 . "$ROOT/lib/dev/checks-catalog-nested.sh"
+# shellcheck source=lib/dev/volumes.sh
+. "$ROOT/lib/dev/volumes.sh"
 RUNTIME=docker; RUNTIME_ARGS=""
 
 # Registry ids use hyphens; shell functions use underscores. Pin the probe's
@@ -172,6 +174,21 @@ pat_state=$(bash -c '
   echo "$CHECK_STATE"')
 [ "$pat_state" = na ] \
     || fail "fine-grained PAT needs no probe — expected na, got $pat_state"
+
+# --- global-mise-config: na unless configured, fail if configured but unusable ---
+MT=$(mktemp -d); echo '[tools]' > "$MT/mise.toml"
+( unset DEV_MISE_CONFIG; XDG_CONFIG_HOME="$MT/none" run_check global-mise-config
+  [ "$CHECK_STATE" = na ] ) || fail "no global mise config must be na"
+( unset DEV_MISE_CONFIG; mkdir -p "$MT/xdg/devcontainer"; cp "$MT/mise.toml" "$MT/xdg/devcontainer/"
+  XDG_CONFIG_HOME="$MT/xdg" run_check global-mise-config
+  [ "$CHECK_STATE" = pass ] ) || fail "XDG default global mise config must pass"
+DEV_MISE_CONFIG="$MT/mise.toml" run_check global-mise-config
+[ "$CHECK_STATE" = pass ] || fail "readable DEV_MISE_CONFIG must pass"
+DEV_MISE_CONFIG="$MT/missing.toml" run_check global-mise-config
+[ "$CHECK_STATE" = fail ] || fail "DEV_MISE_CONFIG naming a missing file must warn"
+DEV_MISE_CONFIG="" XDG_CONFIG_HOME="$MT/xdg" run_check global-mise-config
+[ "$CHECK_STATE" = na ] || fail "empty DEV_MISE_CONFIG disables the check"
+rm -rf "$MT"
 
 # --- selinux ---
 # shellcheck disable=SC2317,SC2329  # invoked indirectly via run_check -> _chk_selinux_enforcing

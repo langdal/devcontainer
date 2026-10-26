@@ -98,6 +98,7 @@ Useful environment variables for `./dev`:
 - `DEV_NO_UPDATE_CHECK=1` — disable the "update available" notice.
 - `DEV_UPDATE_CHECK_INTERVAL` - seconds (default 86400) between a update check. 
 - `DEV_SHARED_HOME=1` — use the legacy shared `devcontainer-home` volume for every workspace instead of the per-workspace default (`devcontainer-home-<dir>`).
+- `DEV_MISE_CONFIG=<path>` — host-side global mise config mounted into every container (default `${XDG_CONFIG_HOME:-~/.config}/devcontainer/mise.toml`, same on macOS); set but empty disables it.
 
 ## Tests
 
@@ -140,7 +141,7 @@ filters on it:
 ```
 
 `DEV_TEST_PRIVILEGE=user` runs only the `user` subset and requires no sudo;
-unset means "run everything". 9 of the 44 scenarios are `root`.
+unset means "run everything". 9 of the 45 scenarios are `root`.
 
 Two cells on the dev host, both measured with `GITHUB_TOKEN` set — without it
 the numbers are not reproducible, for the reason below. Treat any tally as
@@ -283,6 +284,7 @@ testable from Linux.
 - **On rootless podman, `dev` adds `--userns=keep-id`.** Under Docker and rootful podman, which don't remap ids, the image bakes the host UID/GID into `vscode` so it matches the bind-mounted workspace. Rootless podman remaps by default (container root → invoking host user, every other id including `vscode`'s → the subuid/subgid range), so without `keep-id` the workspace shows up root-owned to `vscode`. `keep-id` maps the invoking host user 1:1 onto `vscode`'s uid instead. `lib/dev/ids.sh` (`resolve_image_ids`, `keepid_active`) owns that decision as a single unit — the baked ids and the flag form must agree — and it is the only place either is computed: on podman 4.3+ the image keeps `vscode` at 1000 and the flag is `--userns=keep-id:uid=1000,gid=1000`, so no id outside the image's own range needs mapping (baking a domain account's million-range uid broke the *build*, since rootless podman can only map ids inside the user's `/etc/subuid` grant and `usermod` could not chown `/home/vscode`); on older podman it falls back to baking the host uid with bare `keep-id` and warns when the grant is too small. `IMAGE_UID`/`IMAGE_GID` are what the image is built and label-checked against; `HOST_UID` remains the real host identity used for the volume-ownership migration. Named volumes written before this fix are owned by the old mapping's subuid; `dev` detects that (raw owner ≠ `$HOST_UID`) and re-chowns each volume once via `podman unshare chown -R 0:0` (0:0 inside `podman unshare`'s own default mapping *is* the invoking host user).
 - **Containers are `--rm`** (ephemeral) but the `dev` script reuses a running/stopped container named `dev-<dirname>` before creating a new one.
 - **Base tools** (node LTS, ripgrep, eza, lazygit, neovim) are defined in `mise.base.toml` and baked into the image at build time. The name is deliberate: mise auto-discovers `mise.toml` / `.mise.toml`, so the baked-tools list lives under a non-discoverable name to keep it separable from the project-level `mise.toml` that consumers (and this repo itself) place at the workspace root.
+- **Global mise config** (`DEV_MISE_CONFIG`, default `~/.config/devcontainer/mise.toml`) is bind-mounted **read-only** at `/mise/conf.d/user.toml` (`append_global_mise_config` in `lib/dev/volumes.sh`). mise treats `$MISE_CONFIG_DIR/conf.d/*.toml` as global config with precedence over `/mise/config.toml`, so it adds to and can override the baked base tools without replacing them. Read-only because the agent must not change what every workspace installs; no approval flow, since only the host user can write it. Its presence alone also triggers the entrypoint's `mise install`. Docker creates the `conf.d` mountpoint as root inside the shared `devcontainer-mise` volume; it stays empty and harmless.
 - **Developer tools** for working on *this* repo (shellcheck, hadolint, actionlint, jq) live in a workspace-root `mise.toml`. Running `mise install` from the repo root installs them; `entrypoint.sh` also runs `mise install` automatically when the container starts with `/workspace/mise.toml` present. Per-project tools in *consuming* projects come from their own `mise.toml`.
 - **Opt-in Docker-in-Docker** via `./dev up --dind`. Builds a separate
   `generic-devcontainer:dind` image (the `dind` target in the multi-stage
