@@ -83,7 +83,7 @@ notify_update_available() {
     [[ "$checked" =~ ^[0-9]+$ ]] || checked=0
   fi
 
-  if [[ -n "$latest" ]] && _version_gt "$latest" "$VERSION"; then
+  if [[ "$latest" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]] && _version_gt "$latest" "$VERSION"; then
     echo "Update available: dev $latest (you have v${VERSION#v}). Run 'dev update' to upgrade." >&2
     echo "  (silence with DEV_NO_UPDATE_CHECK=1)" >&2
   fi
