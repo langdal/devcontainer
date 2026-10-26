@@ -95,6 +95,8 @@ Useful environment variables for `./dev`:
 - `DEV_SKIP_APPARMOR_CHECK=1` — bypass the `--dind`/`--pind` AppArmor preflight (only safe with a custom profile that grants `userns,`).
 - `DEV_SKIP_SUBID_CHECK=1` — bypass the `--dind`/`--pind` preflight that requires a rootless-runtime host to grant ≥165535 subuids/subgids (rootless dockerd/podman must map the image's `vscode:100000:65536` range inside the container's user namespace; the typical 65536-id grant is too small).
 - `DEV_EXTRA_RUN_ARGS=...` — extra args passed to `docker run` (the test orchestrator uses this to inject `--dns=...` when in-container DNS is broken).
+- `DEV_NO_UPDATE_CHECK=1` — disable the "update available" notice.
+- `DEV_UPDATE_CHECK_INTERVAL` - seconds (default 86400) between a update check. 
 - `DEV_SHARED_HOME=1` — use the legacy shared `devcontainer-home` volume for every workspace instead of the per-workspace default (`devcontainer-home-<dir>`).
 
 ## Tests
@@ -242,7 +244,7 @@ logic), `lifecycle.sh` (`start_container`, the terminal step of the start
 flow: reuse-vs-create, assembling the runtime's `run` command, exec or
 `--dry-run` print), `image.sh` (image build, UID/version label checks,
 rebuild cleanup), `inject.sh` (shared plumbing behind `agent`/`dotfile`),
-`runtime.sh` (docker/podman detection), `ids.sh` (the image's baked
+`runtime.sh` (docker/podman detection), `update-check.sh` shares `latest_stable_tag` with `update.sh`, `ids.sh` (the image's baked
 uid/gid and the matching `--userns=keep-id` form), `approval.sh` (the
 project-allowlist diff/approve flow), `usage.sh` (the `--help` text),
 `ls.sh` + `ls-render.sh` (the machine-wide inventory: discovery of the

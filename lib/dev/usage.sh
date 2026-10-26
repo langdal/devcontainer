@@ -90,7 +90,9 @@ VERBS:
                   released tag (the same source used by install.sh).
                   Requires SCRIPT_DIR to be a clean git checkout. The
                   image will prompt for a rebuild on the next 'dev' run
-                  via the existing version-mismatch check.
+                  via the existing version-mismatch check. 'dev up' and
+                  'dev exec' print a one-line notice when a newer release
+                  exists (checked in the background at most once a day).
                   --dry-run        Show what update would do.
   install         Symlink this script into a writable directory on PATH
 
@@ -126,6 +128,11 @@ ENVIRONMENT:
                      Extra args appended to the runtime 'run' invocation
                      (e.g. --dns=8.8.8.8 on a host with broken IPv6
                      resolvers).
+  DEV_NO_UPDATE_CHECK=1
+                     Disable the "update available" notice and its daily
+                     background 'git ls-remote' against the checkout's
+                     origin. Also off automatically when CI is set, under
+                     --dry-run, and when stderr is not a terminal.
   DEV_SHARED_HOME=1  Use the legacy shared home volume (devcontainer-home) for
                      every workspace instead of the per-workspace default
                      (devcontainer-home-<dir>).
