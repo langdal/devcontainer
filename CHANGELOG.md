@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.3.0](https://github.com/langdal/devcontainer/compare/v2.2.1...v2.3.0) (2026-10-26)
+
+
+### Features
+
+* notify when a newer dev release is available ([3a57ded](https://github.com/langdal/devcontainer/commit/3a57dedb8287723fd60d9ea37c49eda3c0c7887c))
+* notify when a newer dev release is available ([95145a6](https://github.com/langdal/devcontainer/commit/95145a655dc95a29bc84b4df9ebe85962a930104))
+* notify when a newer dev release is available ([ac39f1a](https://github.com/langdal/devcontainer/commit/ac39f1a05b0337f32a24798ccdc4e43d8b01910e))
+
 ## [2.2.1](https://github.com/langdal/devcontainer/compare/v2.2.0...v2.2.1) (2026-08-29)
 
 
