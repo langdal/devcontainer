@@ -57,6 +57,16 @@ go = "1.22"
 python = "3.12"
 ```
 
+Tools you want in *every* workspace go in a global mise config on the host,
+`~/.config/devcontainer/mise.toml` (honours `XDG_CONFIG_HOME`, same path on
+macOS). It is mounted read-only into each container as a mise global config
+and installed on start. It adds tools and `[env]` on top of the baked base
+tools but cannot change their versions: the baked config outranks it, so pin a
+base tool in `mise.base.toml` or a project `mise.toml` instead. Edit it on the
+host; it applies from the next container
+start. `DEV_MISE_CONFIG=<path>` points elsewhere, `DEV_MISE_CONFIG=` turns it
+off. In `--closed` mode its tools' download hosts must be allowlisted.
+
 If an agent should run inside, seed its login:
 
 ```bash
@@ -357,6 +367,9 @@ unwritable inside, `dev down && dev up` re-triggers the migration.
 - `DEV_RUNTIME=docker|podman` — force a runtime when both are installed.
 - `DEV_SHARED_HOME=1` — one shared home volume for every workspace instead of
   per-workspace homes.
+- `DEV_MISE_CONFIG=<path>` — global mise config mounted into every container
+  (default `${XDG_CONFIG_HOME:-~/.config}/devcontainer/mise.toml`); set it
+  empty to disable.
 - `DEV_ASSUME_YES=1` — accept rebuild prompts non-interactively; also
   auto-approves `.devcontainer-allowlist` changes, waiving that review.
 - `DEV_SKIP_APPARMOR_CHECK=1` / `DEV_SKIP_SUBID_CHECK=1` — bypass the
@@ -407,7 +420,7 @@ the tinyproxy/`HTTPS_PROXY` plumbing and leaves the kernel gate at ACCEPT:
   |                          HTTPS_PROXY exported; [open] OUTPUT->ACCEPT, no proxy -- |
   |                          link-local/metadata block installed either way           |
   |         |  [fails closed -- no firewall, no container]                            |
-  |    2. mise install       installs tools from /workspace/mise.toml                 |
+  |    2. mise install       installs tools from /workspace/mise.toml + global config |
   |         |                                                                         |
   |    3. git config         marks /workspace safe; seeds git identity if unset       |
   |         |                                                                         |

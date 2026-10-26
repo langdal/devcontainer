@@ -136,6 +136,11 @@ ENVIRONMENT:
   DEV_SHARED_HOME=1  Use the legacy shared home volume (devcontainer-home) for
                      every workspace instead of the per-workspace default
                      (devcontainer-home-<dir>).
+  DEV_MISE_CONFIG=<path>
+                     Global mise config mounted read-only into every
+                     container and installed on start (default:
+                     \${XDG_CONFIG_HOME:-~/.config}/devcontainer/mise.toml).
+                     Set it empty to disable.
   GITHUB_TOKEN       If set on the host, injected into the container as an env
                      var (and forwarded to image builds as a BuildKit secret)
                      so 'mise install' can hit the GitHub API authenticated,
