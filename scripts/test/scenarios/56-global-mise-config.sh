@@ -7,7 +7,8 @@
 # is mounted read-only at /mise/conf.d/user.toml and applies to every
 # workspace. Verify, in a workspace with NO project mise.toml (so only the
 # global config can trigger the entrypoint's mise install), that:
-#   - its tools are installed at startup and override the baked base version,
+#   - its tools are installed at startup (it is add-only: the baked
+#     /mise/config.toml outranks conf.d, so it can't re-pin a base tool),
 #   - its [env] is exported, i.e. mise loads it as global config,
 #   - the agent cannot modify it.
 set -u
@@ -36,12 +37,12 @@ cleanup_extra() {
 }
 trap 'cleanup_extra; restore_host' EXIT
 
-# ripgrep is a baked base tool, so pinning another version also proves the
-# global config takes precedence over /mise/config.toml.
+# jq is not a base tool. Ubuntu may also ship a jq on PATH, so the check below
+# asks mise where it resolved jq from rather than trusting `jq --version`.
 mkdir -p "$XDG/devcontainer"
 cat > "$XDG/devcontainer/mise.toml" <<'EOF'
 [tools]
-ripgrep = "14.1.1"
+jq = "1.7.1"
 
 [env]
 DEV_GLOBAL_MISE_PROBE = "loaded"
@@ -50,14 +51,14 @@ EOF
 # shellcheck disable=SC2016  # runs in the container shell, not the host
 out=$(cd "$WS_DIR" && XDG_CONFIG_HOME="$XDG" "$DEV" exec -- bash -ic '
     echo "PROBE:$DEV_GLOBAL_MISE_PROBE"
-    rg --version | head -1
+    echo "WHERE:$(mise where jq 2>&1)"
     touch /mise/conf.d/user.toml 2>/dev/null && echo WRITABLE || echo READONLY
 ' </dev/null 2>&1)
 
 echo "$out" | grep -q 'PROBE:loaded' \
     || { log_fail "global mise config [env] not loaded"; echo "$out" | tail -20 >&2; exit 1; }
-echo "$out" | grep -q 'ripgrep 14.1.1' \
-    || { log_fail "global mise config tool not installed or not overriding base"; echo "$out" | tail -20 >&2; exit 1; }
+echo "$out" | grep -q 'WHERE:/mise/installs/jq/1.7.1' \
+    || { log_fail "global mise config tool not installed at startup"; echo "$out" | tail -20 >&2; exit 1; }
 echo "$out" | grep -q 'READONLY' \
     || { log_fail "global mise config is writable from inside the container"; echo "$out" | tail -20 >&2; exit 1; }
 

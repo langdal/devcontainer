@@ -83,8 +83,10 @@ global_mise_config() {
   fi
 }
 
-# Mount the global mise config read-only as a mise global conf.d file, which
-# mise layers over (and lets override) the baked /mise/config.toml. Read-only
+# Mount the global mise config read-only as a mise global conf.d file, added
+# alongside the baked /mise/config.toml. Add-only: /mise/config.toml is mise's
+# global config file and outranks conf.d, so a base tool's version pinned here
+# is ignored (change mise.base.toml or a project mise.toml instead). Read-only
 # because the agent must not be able to change what every workspace installs;
 # the user edits it on the host and it applies from the next container start.
 # Made absolute first: `-v relative:...` would be taken as a volume name.
