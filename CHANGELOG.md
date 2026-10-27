@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.4.1](https://github.com/langdal/devcontainer/compare/v2.4.0...v2.4.1) (2026-10-27)
+
+
+### Bug Fixes
+
+* **mise:** mount global mise config outside the shared /mise volume ([f6d2645](https://github.com/langdal/devcontainer/commit/f6d2645f5a887910c242e1a16500904409ab031f))
+* **mise:** mount global mise config outside the shared /mise volume ([35defa4](https://github.com/langdal/devcontainer/commit/35defa4dd18d3cd54b5e2e6b1cba1cd729990e28))
+
 ## [2.4.0](https://github.com/langdal/devcontainer/compare/v2.3.0...v2.4.0) (2026-10-26)
 
 
