@@ -83,10 +83,13 @@ global_mise_config() {
   fi
 }
 
-# Mount the global mise config read-only as a mise global conf.d file, added
-# alongside the baked /mise/config.toml. Add-only: /mise/config.toml is mise's
-# global config file and outranks conf.d, so a base tool's version pinned here
-# is ignored (change mise.base.toml or a project mise.toml instead). Read-only
+# Mount the global mise config read-only as a mise system conf.d file, under
+# the baked /mise/config.toml. Add-only: /mise/config.toml is mise's global
+# config file and outranks system config, so a base tool's version pinned here
+# is ignored (change mise.base.toml or a project mise.toml instead). Never
+# mount it under /mise: that is the shared devcontainer-mise volume, where the
+# runtime's root-owned 0700 mountpoint stub would persist and break every mise
+# call in any container started without this mount. Read-only
 # because the agent must not be able to change what every workspace installs;
 # the user edits it on the host and it applies from the next container start.
 # Made absolute first: `-v relative:...` would be taken as a volume name.
@@ -100,7 +103,7 @@ append_global_mise_config() {
     return 0
   fi
   cfg="$(cd "$(dirname "$cfg")" && pwd)/$(basename "$cfg")"
-  DOCKER_CMD+=(-v "$cfg:/mise/conf.d/user.toml:ro")
+  DOCKER_CMD+=(-v "$cfg:/etc/mise/conf.d/user.toml:ro")
 }
 
 # The nested engine's image-cache volume for THIS invocation, empty when the

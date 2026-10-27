@@ -168,7 +168,7 @@ ensure_mise_activate .bashrc bash
 # Try to install mise-managed tools if a project mise.toml exists, or the
 # host's global mise config was mounted in (dev's append_global_mise_config).
 if [[ -f /workspace/mise.toml ]] || [[ -f /workspace/.mise.toml ]] \
-   || [[ -f /mise/conf.d/user.toml ]]; then
+   || [[ -f /etc/mise/conf.d/user.toml ]]; then
     if ! mise install; then
         echo "WARNING: mise install failed, but continuing with container startup" >&2
         # A common, easy-to-miss cause: a project tool downloads from a host
@@ -186,7 +186,7 @@ if [[ -f /workspace/mise.toml ]] || [[ -f /workspace/.mise.toml ]] \
         fi
         # Same trap for the global config: it applies to every workspace, but
         # in closed mode its tools' download hosts still need allowlisting.
-        if [[ -f /mise/conf.d/user.toml ]] \
+        if [[ -f /etc/mise/conf.d/user.toml ]] \
            && [[ "${DEVCONTAINER_EGRESS:-closed}" == closed ]] \
            && [[ -z "${DEVCONTAINER_MAINTENANCE:-}" ]]; then
             echo "         NOTE: tools from your global mise config are installed too; in" >&2

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Unit: the host-side global mise config is bind-mounted read-only into
-# /mise/conf.d/ in the dry-run run command, resolved from DEV_MISE_CONFIG or
+# /etc/mise/conf.d/ in the dry-run run command, resolved from DEV_MISE_CONFIG or
 # the XDG default. A stub runtime stands in for docker, so this needs neither
 # docker nor podman. DEV_FAKE_OS=Linux pins the docker path: on a macOS
 # host (the macos-checks CI job) dev only accepts podman and would refuse
@@ -15,7 +15,7 @@ cat > "$WORK/bin/docker" <<'EOF'
 exit 0
 EOF
 chmod +x "$WORK/bin/docker"
-TARGET=/mise/conf.d/user.toml
+TARGET=/etc/mise/conf.d/user.toml
 
 dev() {
     (cd "$WORK/myproj" && env -u DEV_RUNTIME -u DEV_MISE_CONFIG \
@@ -35,6 +35,11 @@ echo '[tools]' > "$WORK/xdg/devcontainer/mise.toml"
 out=$(dev)
 echo "$out" | grep -qF -- "-v $WORK/xdg/devcontainer/mise.toml:$TARGET:ro" \
     || fail "XDG default config not mounted read-only"
+# Regression: a target under /mise lands in the shared devcontainer-mise
+# volume, where the runtime's root-owned mountpoint stub outlives the
+# container and makes mise fail in every container started without the mount.
+echo "$out" | grep -qF -- "mise.toml:/mise/" \
+    && fail "global mise config mounted inside the shared /mise volume"
 
 # 3. DEV_MISE_CONFIG overrides the default, relative paths resolve against
 # the cwd, and a path with a space survives the dry-run quoting.

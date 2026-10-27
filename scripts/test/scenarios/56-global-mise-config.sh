@@ -4,11 +4,11 @@
 # privilege: user
 #
 # A host-side global mise config (${XDG_CONFIG_HOME}/devcontainer/mise.toml)
-# is mounted read-only at /mise/conf.d/user.toml and applies to every
+# is mounted read-only at /etc/mise/conf.d/user.toml and applies to every
 # workspace. Verify, in a workspace with NO project mise.toml (so only the
 # global config can trigger the entrypoint's mise install), that:
 #   - its tools are installed at startup (it is add-only: the baked
-#     /mise/config.toml outranks conf.d, so it can't re-pin a base tool),
+#     /mise/config.toml outranks system config, so it can't re-pin a base tool),
 #   - its [env] is exported, i.e. mise loads it as global config,
 #   - the agent cannot modify it.
 set -u
@@ -52,7 +52,7 @@ EOF
 out=$(cd "$WS_DIR" && XDG_CONFIG_HOME="$XDG" "$DEV" exec -- bash -ic '
     echo "PROBE:$DEV_GLOBAL_MISE_PROBE"
     echo "WHERE:$(mise where jq 2>&1)"
-    touch /mise/conf.d/user.toml 2>/dev/null && echo WRITABLE || echo READONLY
+    touch /etc/mise/conf.d/user.toml 2>/dev/null && echo WRITABLE || echo READONLY
 ' </dev/null 2>&1)
 
 echo "$out" | grep -q 'PROBE:loaded' \
