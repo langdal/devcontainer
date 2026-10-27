@@ -59,7 +59,7 @@ python = "3.12"
 
 Tools you want in *every* workspace go in a global mise config on the host,
 `~/.config/devcontainer/mise.toml` (honours `XDG_CONFIG_HOME`, same path on
-macOS). It is mounted read-only into each container as a mise global config
+macOS). It is mounted read-only into each container as a mise system config
 and installed on start. It adds tools and `[env]` on top of the baked base
 tools but cannot change their versions: the baked config outranks it, so pin a
 base tool in `mise.base.toml` or a project `mise.toml` instead. Edit it on the
