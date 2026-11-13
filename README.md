@@ -325,6 +325,35 @@ dev dotfile add ~/.config/gh --secret   # chmod 600 the copied paths
 dev dotfile rm  ~/.config/nvim          # remove again (confirms)
 ```
 
+## Feature workspaces (`dev ft`)
+
+Run several coding agents in parallel inside one workspace container, one
+feature each: `dev ft new NAME` cuts `feat/NAME` from `origin/main` (set
+`FT_BASE` to change), checks it out as a worktree at `.worktrees/NAME` —
+inside the repo, so the same files are visible on the host for `ftcd`,
+host-run dev servers and host-only `.env` resolution (run
+`git config worktree.useRelativePaths true` once, git ≥ 2.48, so the
+worktree's `.git` pointer resolves on both sides of the bind mount) — opens
+a herdr tab for it, runs `mise install` + `mise run setup` to completion,
+and only then starts the agent. `dev ft rm NAME` tears it down and deletes
+the branch only when merged. Requires herdr inside the container:
+`dev ft sync` installs the exact version of your host client (mise ubi from
+GitHub releases, allowlisted in closed mode).
+
+Shell helpers (`ft`, `ftcd`, `ftls`, `ftrm`, `ftsync` + completion) come
+from `eval "$(dev ft shell-init)"` in your rc file; zsh needs
+`autoload -Uz bashcompinit && bashcompinit` first.
+
+To aggregate several such containers in one host herdr window
+(`herdr machine add`), opt in per repo with `dev ft enable`: it generates a
+host key + `sshd_config` in the home volume, authorizes your public key, and
+prints a `ProxyCommand` stanza for `~/.ssh/config` (`--write` appends it).
+Nothing listens and no port is published — each connection spawns a
+per-session `sshd -i` as `vscode` over the runtime's exec, so the sandbox
+gains no network surface and no root daemon. `dev ft disable` removes the
+material again. The `openssh-server` package this relies on is baked into
+the image but inert until `enable`.
+
 ## Host requirements
 
 Run `dev doctor` — it checks everything below on your machine and prints the

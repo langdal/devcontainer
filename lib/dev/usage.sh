@@ -79,6 +79,24 @@ VERBS:
                                    (auto-detected from a running container).
   dotfile rm PATH   Remove a previously copied path from the home volume
                   (confirms; DEV_ASSUME_YES=1 skips the prompt).
+  ft new NAME     Feature workspace inside the running container: branch
+                  feat/NAME off origin/main (FT_BASE overrides), worktree at
+                  .worktrees/NAME, a herdr tab, 'mise run setup' to
+                  completion, then the coding agent. Args after '--' go to
+                  the agent. Needs herdr inside: 'dev ft sync' once.
+  ft rm [-f] NAME Remove a feature: stop its daemons, remove worktree + tab,
+                  delete the branch only if merged. -f discards work.
+  ft ls           herdr's worktree listing for this container.
+  ft sync         Mirror the HOST herdr client's exact version into the
+                  container (mise ubi; FT_HERDR_REPO overrides the repo).
+  ft enable       Opt-in toggle for host aggregation: generate the
+                  container's ssh host key + sshd_config, authorize your
+                  key, and print the ~/.ssh/config ProxyCommand stanza for
+                  'herdr machine add' (--write appends it). No listener, no
+                  published port — a per-connection 'sshd -i' as vscode.
+  ft disable      Remove that ssh material again.
+  ft shell-init   Print ft/ftcd/ftls/ftrm/ftsync shell helpers +
+                  completion:  eval "\$(dev ft shell-init)"
   reset           Remove the dev container(s) for the current workspace
                   (normal, dind, pind, and maintenance variants if present)
                   and prompt individually for each existing named
