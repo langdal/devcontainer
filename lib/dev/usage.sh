@@ -80,7 +80,8 @@ VERBS:
   dotfile rm PATH   Remove a previously copied path from the home volume
                   (confirms; DEV_ASSUME_YES=1 skips the prompt).
   ft new NAME     Feature workspace inside the running container: branch
-                  feat/NAME off origin/main (FT_BASE overrides), worktree at
+                  feat/NAME off origin/main (FT_BASE or 'git config
+                  ft.base' overrides), worktree at
                   .worktrees/NAME, a herdr tab, 'mise run setup' to
                   completion, then the coding agent. Args after '--' go to
                   the agent. Needs herdr inside: 'dev ft sync' once.

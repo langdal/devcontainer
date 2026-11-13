@@ -47,7 +47,9 @@ Feature workspaces: one worktree + herdr tab + agent per feature, inside
 this workspace's running dev container.
 
   new NAME [-- AGENT_ARGS...]  Branch feat/NAME off origin/main (FT_BASE
-                               overrides), worktree at .worktrees/NAME,
+                               or 'git config ft.base' overrides, e.g.
+                               'main' for a repo with no remote), worktree
+                               at .worktrees/NAME,
                                herdr tab, 'mise run setup', then the agent.
   rm [-f] NAME                 Stop daemons, remove worktree + tab; delete
                                the branch only if merged. -f discards work.
@@ -94,15 +96,21 @@ _ft_require_container() {
 # Run one container-side script from scripts/ft/ with stdin as the transport:
 # no file ever needs copying into the image or a home volume, and the script
 # version always matches this checkout of dev. Args after the script name are
-# passed through to it.
+# passed through to it. FT_BASE crosses the boundary explicitly — exec starts
+# a fresh environment, so the host's value (or the repo's `git config
+# ft.base`, for a per-repo default) is forwarded as --env; otherwise the
+# container-side default (origin/main) applies.
 _ft_exec_script() {
   _ft_script="$SCRIPT_DIR/scripts/ft/$1"; shift
   if [[ ! -f "$_ft_script" ]]; then
     echo "Error: dev ft: missing $_ft_script — partial checkout?" >&2
     exit 1
   fi
+  _ft_base="${FT_BASE:-$(git config ft.base 2>/dev/null || true)}"
+  _ft_env=()
+  [[ -n "$_ft_base" ]] && _ft_env=(--env "FT_BASE=$_ft_base")
   # shellcheck disable=SC2086  # intentional word-splitting of $MANAGED_RUNTIME_ARGS
-  $RUNTIME $MANAGED_RUNTIME_ARGS exec -i --user vscode "$MANAGED_NAME" \
+  $RUNTIME $MANAGED_RUNTIME_ARGS exec -i --user vscode ${_ft_env[@]+"${_ft_env[@]}"} "$MANAGED_NAME" \
     bash -s -- "$@" < "$_ft_script"
 }
 
