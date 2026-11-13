@@ -328,7 +328,9 @@ dev dotfile rm  ~/.config/nvim          # remove again (confirms)
 ## Feature workspaces (`dev ft`)
 
 Run several coding agents in parallel inside one workspace container, one
-feature each: `dev ft new NAME` cuts `feat/NAME` from `origin/main` (set
+feature each — the container is auto-started headless when none is running
+(`dev shell` attaches to it, `dev down` stops it): `dev ft new NAME` cuts
+`feat/NAME` from `origin/main` (set
 `FT_BASE` to change), checks it out as a worktree at `.worktrees/NAME` —
 inside the repo, so the same files are visible on the host for `ftcd`,
 host-run dev servers and host-only `.env` resolution (run

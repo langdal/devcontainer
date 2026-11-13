@@ -67,15 +67,42 @@ this workspace's running dev container.
                                ftsync + completion) for your rc file:
                                eval "$(dev ft shell-init)"
 
-Requires a running container ('dev up' first) and herdr inside it
-('dev ft sync' once). 'enable' is the only step that touches SSH; without
-it nothing listens and nothing is reachable.
+Starts this workspace's container headless when none is running ('dev
+shell' attaches to it; 'dev down' stops it). Needs herdr inside the
+container: 'dev ft sync' once. 'enable' is the only step that touches SSH;
+without it nothing listens and nothing is reachable.
 EOF
 }
 
-# Shared preamble: resolve the running container for this workspace. ft works
-# against normal/dind/pind (they all mount /workspace); maintenance is refused
-# — it has sudo and no firewall, the wrong place for an agent.
+# No container? Start one headless and keep going — parity with `dev exec`,
+# which also cold-starts. The keep-alive is dev's own start flow with
+# `sleep infinity` as the command, backgrounded: the container outlives this
+# dev invocation (and any attached shell), `dev shell` attaches to it later,
+# and `dev down` stops it. stdin is /dev/null so a cold start cannot block on
+# a prompt; the cases that need one (first image build, a project-allowlist
+# approval, a rebuild offer) need a real terminal — the timeout message
+# points there.
+_ft_autostart() {
+  echo "ft: no container running for this workspace — starting one in the background" >&2
+  echo "ft: ('dev shell' attaches to it; 'dev down' stops it)" >&2
+  nohup "$SCRIPT_DIR/dev" exec -- sleep infinity </dev/null >/dev/null 2>&1 &
+  _ft_waited=0
+  while [[ "$_ft_waited" -lt 60 ]]; do
+    resolve_managed_container
+    [[ -n "$MANAGED_TARGET" ]] && return 0
+    sleep 1
+    _ft_waited=$((_ft_waited + 1))
+  done
+  echo "Error: the container did not come up within 60s. A first image build, an" >&2
+  echo "       allowlist approval, or a rebuild offer needs a terminal: run" >&2
+  echo "       'dev up' once interactively, then retry." >&2
+  exit 1
+}
+
+# Shared preamble: resolve this workspace's container, auto-starting a
+# headless one when nothing runs. ft works against normal/dind/pind (they all
+# mount /workspace); maintenance is refused — it has sudo and no firewall,
+# the wrong place for an agent.
 _ft_require_container() {
   detect_runtime
   # shellcheck disable=SC2034  # consumed by ensure_runtime_ready
@@ -84,8 +111,7 @@ _ft_require_container() {
   _resolve_workspace_names
   resolve_managed_container
   if [[ -z "$MANAGED_TARGET" ]]; then
-    echo "Error: no dev container is running for this workspace — 'dev up' starts one." >&2
-    exit 1
+    _ft_autostart
   fi
   if [[ "$MANAGED_TARGET" == "maint" ]]; then
     echo "Error: ${MAINT_NAME} is a maintenance container (sudo, no firewall) — not a place to run agents. Start the normal container with 'dev up'." >&2
