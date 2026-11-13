@@ -136,8 +136,9 @@ _ft_exec_script() {
   _ft_env=()
   [[ -n "$_ft_base" ]] && _ft_env=(--env "FT_BASE=$_ft_base")
   # shellcheck disable=SC2086  # intentional word-splitting of $MANAGED_RUNTIME_ARGS
-  $RUNTIME $MANAGED_RUNTIME_ARGS exec -i --user vscode ${_ft_env[@]+"${_ft_env[@]}"} "$MANAGED_NAME" \
-    bash -s -- "$@" < "$_ft_script"
+  cat "$SCRIPT_DIR/scripts/ft/prelude.sh" "$_ft_script" \
+    | $RUNTIME $MANAGED_RUNTIME_ARGS exec -i --user vscode ${_ft_env[@]+"${_ft_env[@]}"} "$MANAGED_NAME" \
+        bash -s -- "$@"
 }
 
 # Feature names become branch suffixes, directory names and (inside) agent
@@ -169,8 +170,7 @@ _ft_rm() {
 
 _ft_ls() {
   _ft_require_container
-  # shellcheck disable=SC2086  # intentional word-splitting of $MANAGED_RUNTIME_ARGS
-  exec $RUNTIME $MANAGED_RUNTIME_ARGS exec --user vscode "$MANAGED_NAME" herdr worktree list
+  _ft_exec_script inner-ls.sh
 }
 
 _ft_sync() {
@@ -225,7 +225,8 @@ _ft_enable() {
   fi
   echo
   echo "Then, once:  ssh ${_ft_host} herdr --version     # accepts the host key"
-  echo "             herdr machine add ${_ft_host} --label ${WORKSPACE_BASENAME}"
+  echo "             herdr machine add ${_ft_host} --label ${WORKSPACE_BASENAME}   # herdr >= 0.9"
+  echo "             (on herdr 0.8: attach per repo with 'herdr --remote ${_ft_host}')"
 }
 
 _ft_disable() {

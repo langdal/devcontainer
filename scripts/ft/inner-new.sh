@@ -11,8 +11,7 @@ base=${FT_BASE:-origin/main}
 branch="feat/$name"
 wt="/workspace/.worktrees/$name"
 
-command -v herdr >/dev/null 2>&1 || {
-  echo "ft: herdr is not in this container — run 'dev ft sync' on the host first." >&2; exit 1; }
+ft_ensure_server
 command -v jq >/dev/null 2>&1 || {
   echo "ft: jq is missing from the image — rebuild with 'dev up --build'." >&2; exit 1; }
 command -v mise >/dev/null 2>&1 || {
@@ -54,8 +53,9 @@ if [ -z "$pane" ]; then
   exit 1
 fi
 
-# Agent names: unique among live agents, <= 32 chars, flat charset.
-slug=$(printf '%s' "feat_$name" | tr -c 'A-Za-z0-9_-' '-')
+# Agent names: documented as [a-z][a-z0-9_-]{0,31} — lowercase, 32 chars max,
+# unique among live agents. "feat_" guarantees the leading [a-z].
+slug=$(printf '%s' "feat_$name" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9_-' '-')
 agent=$(printf '%s' "$slug" | cut -c1-32)
 n=2
 while herdr agent list 2>/dev/null \

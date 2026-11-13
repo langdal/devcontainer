@@ -18,6 +18,7 @@ fi
 
 ws=""
 if command -v herdr >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
+  ft_ensure_server || exit 1
   ws=$(herdr worktree list 2>/dev/null \
        | jq -r --arg b "$branch" '.result.worktrees[]?
            | select(.branch == $b)
