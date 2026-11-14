@@ -133,7 +133,7 @@ RUN rm -f /etc/sudoers.d/vscode /etc/sudoers.d/nopasswd && \
 # Install mise to /usr/local/bin/mise. Version is pinned so the same mise
 # binary is fetched on every build; the installer script itself is fetched
 # from https://mise.run and is small / vendor-published, so we trust TLS.
-ARG MISE_VERSION=v2026.5.10
+ARG MISE_VERSION=v2026.10.24
 RUN curl -fsSL https://mise.run \
     | MISE_INSTALL_PATH=/usr/local/bin/mise MISE_VERSION="${MISE_VERSION}" sh
 

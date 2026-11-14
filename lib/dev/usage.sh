@@ -79,6 +79,28 @@ VERBS:
                                    (auto-detected from a running container).
   dotfile rm PATH   Remove a previously copied path from the home volume
                   (confirms; DEV_ASSUME_YES=1 skips the prompt).
+  ft NAME         Feature worktree + host herdr tab: branch feat/NAME off
+                  origin/main (FT_BASE or 'git config ft.base' overrides),
+                  worktree at .worktrees/NAME (reused if it exists), and a
+                  tab cd'd into it. Needs a running host herdr session for
+                  the tab; the worktree is prepared either way.
+  fta [-cl|-op|-pi] [--open|--closed] NAME
+                  Same, then auto-start this workspace's container
+                  (headless; 'dev down' stops it), BUILD the worktree to
+                  completion (mise install + the 'setup' task), attach
+                  the tab into it, and start the agent found there
+                  (claude/opencode/pi; plain shell when none). FT_AGENT or
+                  'git config ft.agent' set a default kind.
+  ft -l           List the repo's worktrees and branches.
+  ft -r NAME      Remove worktree + tab; delete the branch only if merged.
+                  Checks run BEFORE tabs close; daemons are guarded on
+                  host and container. -rf stops both sides first.
+  ft -rf NAME     Force: stop daemons, discard everything.
+                  ft/fta work from anywhere inside the repo (worktrees
+                  included) and always target the repo's ONE container,
+                  named after the main checkout's directory.
+                  Tab completion of names/flags: add to ~/.zshrc, below
+                  the compdef line:  eval "\$(dev ft --completions)"
   reset           Remove the dev container(s) for the current workspace
                   (normal, dind, pind, and maintenance variants if present)
                   and prompt individually for each existing named

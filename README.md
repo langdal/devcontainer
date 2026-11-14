@@ -325,6 +325,22 @@ dev dotfile add ~/.config/gh --secret   # chmod 600 the copied paths
 dev dotfile rm  ~/.config/nvim          # remove again (confirms)
 ```
 
+## Feature worktrees (`dev ft` / `dev fta`)
+
+One worktree per feature, one host herdr tab per worktree, agents in the
+repo's single sandbox container. See [docs/ft.md](docs/ft.md) for the user
+and setup guide (mise config, per-worktree ports, autocomplete).
+
+```
+dev ft NAME                 worktree feat/NAME + herdr tab (build-free)
+dev fta [-cl|-op|-pi] [--open|--closed] NAME
+                            + container up, build, attach tab, start agent
+dev ft -l                   list worktrees
+dev ft -r NAME              remove (refuses unpushed work / running daemons)
+dev ft -rf NAME             force remove
+dev ft --completions        shell completion (eval in ~/.zshrc)
+```
+
 ## Host requirements
 
 Run `dev doctor` — it checks everything below on your machine and prints the
