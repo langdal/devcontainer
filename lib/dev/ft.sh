@@ -15,6 +15,7 @@ cmd_ft() {
     -r)  shift; _ft_remove 0 "${1:-}" ;;
     -rf) shift; _ft_remove 1 "${1:-}" ;;
     ''|-h|--help|help) _ft_usage ;;
+    --completions) _ft_completions ;;
     -*)
       echo "Error: dev ft: unknown flag '${1}' (-l, -r NAME, -rf NAME, or NAME)" >&2
       exit 1
@@ -57,8 +58,7 @@ Usage: dev ft NAME | dev ft -l | dev ft -r NAME | dev ft -rf NAME
                only when merged into the base.
   ft -rf NAME  Force: stop daemons, discard everything.
 
-Tabs need a running host herdr session; without one, ft still prepares
-the worktree and says so.
+Tabs need a running host herdr session; worktrees are prepared either way.
 EOF
 }
 
@@ -66,6 +66,25 @@ EOF
 # --show-toplevel would return the worktree) or a subdirectory. Everything
 # hangs off this: the .worktrees/ layout, and the one-container-per-repository
 # invariant below.
+# ft/fta completion (names + flags), bash-compatible (zsh: bashcompinit).
+# Eval BELOW dev install's compdef line:  eval "$(dev ft --completions)"
+_ft_completions() {
+  cat <<'EOF'
+_dev_ft_complete() {
+  local cur root
+  [ "${COMP_WORDS[1]}" = ft ] || [ "${COMP_WORDS[1]}" = fta ] || return 0
+  cur=${COMP_WORDS[COMP_CWORD]}
+  case "$cur" in
+    -*) COMPREPLY=($(compgen -W "-l -r -rf -cl -op -pi" -- "$cur")); return 0 ;;
+  esac
+  root=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || return 0
+  root=${root%/.git}
+  COMPREPLY=($(compgen -W "$(ls "$root/.worktrees" 2>/dev/null)" -- "$cur"))
+}
+complete -F _dev_ft_complete dev
+EOF
+}
+
 _ft_repo_root() {
   _ft_g=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
   if [[ -z "$_ft_g" || ! -d "$_ft_g" ]]; then
@@ -89,8 +108,7 @@ _ft_check_name() {
   fi
 }
 
-# Create the branch + worktree with plain host git when missing; reuse
-# otherwise. Sets FT_ROOT, FT_BRANCH, FT_WT.
+# Create branch + worktree with host git, or reuse. Sets FT_ROOT/BRANCH/WT.
 _ft_ensure_worktree() {
   FT_ROOT=$(_ft_repo_root)
   FT_BRANCH="feat/$1"
@@ -112,8 +130,7 @@ _ft_ensure_worktree() {
   fi
 }
 
-# Open a host herdr tab at the worktree; prints the pane id, or nothing when
-# no herdr session is reachable (the worktree is still ready).
+# Host herdr tab at the worktree; prints pane id, or nothing without a session.
 _ft_tab() {
   command -v jq >/dev/null 2>&1 \
     || { echo "Error: dev ft: jq is required on the host." >&2; exit 1; }
@@ -135,8 +152,7 @@ _ft_open() {
   _ft_pane=$(_ft_tab "$1")
   if [[ -n "$_ft_pane" ]]; then
     echo "ft: $FT_BRANCH — tab open at $FT_WT"
-    echo "ft: (build-free by design — 'mise run setup' there before host dev servers;"
-    echo "ft:  'dev fta $1' builds the container side)"
+    echo "ft: (build-free: 'mise run setup' there before host dev servers; 'dev fta $1' builds the container side)"
   fi
 }
 
@@ -155,18 +171,15 @@ _ft_autostart() {
     sleep 1
     _ft_waited=$((_ft_waited + 1))
   done
-  echo "Error: the container did not come up within 60s. A first image build, an" >&2
-  echo "       allowlist approval, or a rebuild offer needs a terminal: run" >&2
-  echo "       'dev up' once interactively, then retry." >&2
+  echo "Error: container not up within 60s — a first build/approval needs a" >&2
+  echo "       terminal: run 'dev up' once interactively, then retry." >&2
   exit 1
 }
 
 _ft_require_container() {
-  # One container per repository: dev derives the container name from the
-  # basename of $PWD, so resolve from the repo's main checkout regardless of
-  # where ft was invoked (a worktree, a subdirectory). This cwd also carries
-  # into the backgrounded autostart, which mounts it as /workspace — the main
-  # checkout, never a worktree.
+  # One container per repository: names derive from $PWD's basename, so
+  # resolve from the main checkout wherever ft was invoked; the cwd also
+  # scopes the autostart's /workspace mount to the main checkout.
   cd "${FT_ROOT:-$(_ft_repo_root)}" || exit 1
   detect_runtime
   # shellcheck disable=SC2034  # consumed by ensure_runtime_ready
@@ -187,9 +200,8 @@ _ft_open_attach() {
   _ft_ensure_worktree "$2"
   _ft_require_container
   _ft_cwt="/workspace/.worktrees/$2"
-  # Build to completion BEFORE the agent sees the tree — the classic ft
-  # guarantee: tools, the committed 'setup' task when one exists, daemon
-  # registration. Fatal on failure; the worktree survives for fixing.
+  # Build BEFORE the agent sees the tree: tools, 'setup' task if present,
+  # daemon registration. Fatal on failure; the worktree survives.
   # shellcheck disable=SC2016  # $-expansion happens container-side, by design
   _ft_build='export PATH="$HOME/.local/bin:$PATH"; mise trust >/dev/null 2>&1 || mise trust; mise install; if mise tasks ls 2>/dev/null | grep -qE "^setup([[:space:]]|$)"; then mise run setup; else echo "ft: no setup task in mise.toml — skipping the build step." >&2; fi; mise daemons register >/dev/null 2>&1 || true'
   echo "ft: building $FT_BRANCH before the agent (mise install + setup; first run can take a while)" >&2
@@ -206,9 +218,8 @@ _ft_open_attach() {
     _ft_kind=$($RUNTIME $MANAGED_RUNTIME_ARGS exec --user vscode "$MANAGED_NAME" \
       sh -c 'PATH="$HOME/.local/bin:$PATH"; for a in claude opencode pi; do command -v "$a" >/dev/null 2>&1 && { echo "$a"; exit 0; }; done; exit 0')
   fi
-  # Do not exec the agent: when it exits (double Ctrl+C is claude's exit
-  # chord), fall through to an interactive shell IN the container at the
-  # worktree, instead of tearing the whole attach down to the host prompt.
+  # No exec: when the agent exits (double Ctrl+C is claude's exit chord),
+  # fall through to a container shell instead of the host prompt.
   if [[ -n "$_ft_kind" ]]; then
     _ft_inner="export PATH=\"\$HOME/.local/bin:\$PATH\"; cd $_ft_cwt 2>/dev/null; $_ft_kind; exec zsh"
   else
@@ -216,10 +227,9 @@ _ft_open_attach() {
   fi
   _ft_cmd=$(printf '%s %s exec -it --user vscode -w %s %s sh -c %q' \
             "$RUNTIME" "$MANAGED_RUNTIME_ARGS" "$_ft_cwt" "$MANAGED_NAME" "$_ft_inner")
-  # herdr identifies a pane's agent from its HOST foreground process — here
-  # the container runtime, not the agent. HERDR_AGENT on that wrapper process
-  # is herdr's documented sandbox/VM hint: it names the agent for the panel,
-  # and state classification reads the pane's screen, which IS the agent's UI.
+  # herdr IDs agents by the HOST foreground process (here: the runtime);
+  # HERDR_AGENT on that wrapper is herdr's documented sandbox hint — names
+  # the agent for the panel, state reads the pane's screen (the agent's UI).
   [[ -n "$_ft_kind" ]] && _ft_cmd="HERDR_AGENT=$_ft_kind $_ft_cmd"
   _ft_pane=$(_ft_tab "$2")
   if [[ -z "$_ft_pane" ]]; then
@@ -230,8 +240,7 @@ _ft_open_attach() {
   if [[ -n "$_ft_kind" ]]; then
     echo "ft: $FT_BRANCH — tab attached to the container, agent: $_ft_kind"
   else
-    echo "ft: $FT_BRANCH — tab attached to the container; no agent binary found"
-    echo "ft: (claude/opencode/pi) — plain shell. Install one and 'dev agent add KIND'."
+    echo "ft: $FT_BRANCH — attached; no agent binary (claude/opencode/pi): plain shell. Install one + 'dev agent add KIND'."
   fi
 }
 

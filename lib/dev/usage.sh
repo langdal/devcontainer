@@ -98,6 +98,8 @@ VERBS:
                   ft/fta work from anywhere inside the repo (worktrees
                   included) and always target the repo's ONE container,
                   named after the main checkout's directory.
+                  Tab completion of names/flags: add to ~/.zshrc, below
+                  the compdef line:  eval "\$(dev ft --completions)"
   reset           Remove the dev container(s) for the current workspace
                   (normal, dind, pind, and maintenance variants if present)
                   and prompt individually for each existing named
