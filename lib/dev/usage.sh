@@ -84,7 +84,7 @@ VERBS:
                   worktree at .worktrees/NAME (reused if it exists), and a
                   tab cd'd into it. Needs a running host herdr session for
                   the tab; the worktree is prepared either way.
-  fta [-cl|-op|-pi] NAME
+  fta [-cl|-op|-pi] [--open|--closed] NAME
                   Same, then auto-start this workspace's container
                   (headless; 'dev down' stops it), BUILD the worktree to
                   completion (mise install + the 'setup' task), attach
@@ -93,7 +93,8 @@ VERBS:
                   'git config ft.agent' set a default kind.
   ft -l           List the repo's worktrees and branches.
   ft -r NAME      Remove worktree + tab; delete the branch only if merged.
-                  Refuses uncommitted/unpushed work and running daemons.
+                  Checks run BEFORE tabs close; daemons are guarded on
+                  host and container. -rf stops both sides first.
   ft -rf NAME     Force: stop daemons, discard everything.
                   ft/fta work from anywhere inside the repo (worktrees
                   included) and always target the repo's ONE container,

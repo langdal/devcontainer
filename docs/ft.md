@@ -18,7 +18,7 @@ agent. Removing a feature cleans up tab, worktree and (when merged) branch.
 | Command | Does |
 | --- | --- |
 | `dev ft NAME` | Branch `feat/NAME` off `origin/main` + worktree at `.worktrees/NAME` (reused if it exists), and a host herdr tab cd'd into it. Build-free and container-free. |
-| `dev fta [-cl\|-op\|-pi] NAME` | Same, then: auto-start the container (headless; `dev down` stops it), build the worktree (`mise install` + the `setup` task), attach the tab into the container, start the agent found there — `claude`, `opencode` or `pi`; a plain shell when none. |
+| `dev fta [-cl\|-op\|-pi] [--open\|--closed] NAME` | Same, then: auto-start the container (headless; `dev down` stops it), build the worktree (`mise install` + the `setup` task), attach the tab into the container, start the agent found there — `claude`, `opencode` or `pi`; a plain shell when none. |
 | `dev ft -l` | `git worktree list` for the repo. |
 | `dev ft -r NAME` | Close the feature's tabs, remove the worktree, delete the branch only when merged. Refuses uncommitted/unpushed work and running mise daemons. |
 | `dev ft -rf NAME` | Force: stop daemons, discard everything. |
@@ -60,9 +60,12 @@ talks to *its* backend, in parallel with every other feature's. Don't run
 the foreground pair while the same worktree's daemons hold the ports —
 `strictPort` will tell you.
 
-Finish a feature: merge it, then `dev ft -r payments`. The remove refuses
-surprises (uncommitted changes, unpushed commits, running daemons) and keeps
-an unmerged branch; `-rf` discards everything.
+Finish a feature: merge it, then `dev ft -r payments`. All refusal checks
+(uncommitted changes, unpushed commits, running mise daemons on the host
+AND in the container) run before any tab is closed, and only the tabs ft
+itself opened are closed — a removal run from inside the feature's own tab
+closes that tab last. An unmerged branch is kept; `-rf` stops daemons on
+both sides and discards everything.
 
 Two platforms, one worktree: the directory serves macOS (host) and Linux
 (container), so each side installs its own native dependencies — `fta`'s
@@ -72,6 +75,14 @@ Python venvs don't — key them per OS (see setup). Go needs nothing: its
 caches live outside the worktree.
 
 ## Setup
+
+Closed egress: the firewall mode is fixed when the container is CREATED.
+`dev fta --closed NAME` applies it when fta's autostart creates the
+container (ignored for an already-running one); `DEV_EGRESS=closed` in the
+environment does the same and makes a good per-repo default via the host
+mise config. fta mirrors the proxy and nested-engine variables into its
+build, probe and agent execs, and waits for the entrypoint (firewall
+included) before running anything.
 
 ### Per machine (host)
 
@@ -89,7 +100,8 @@ eval "$(dev ft --completions)"
 
 ### Per repository
 
-Git, once:
+Git, once (ft also sets the first one automatically and warns when the
+created pointer still came out absolute — i.e. git < 2.48):
 
 ```bash
 git config worktree.useRelativePaths true   # worktree pointers resolve on host AND in container

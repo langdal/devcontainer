@@ -333,7 +333,8 @@ and setup guide (mise config, per-worktree ports, autocomplete).
 
 ```
 dev ft NAME                 worktree feat/NAME + herdr tab (build-free)
-dev fta [-cl|-op|-pi] NAME  + container up, build, attach tab, start agent
+dev fta [-cl|-op|-pi] [--open|--closed] NAME
+                            + container up, build, attach tab, start agent
 dev ft -l                   list worktrees
 dev ft -r NAME              remove (refuses unpushed work / running daemons)
 dev ft -rf NAME             force remove
