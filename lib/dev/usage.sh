@@ -79,28 +79,21 @@ VERBS:
                                    (auto-detected from a running container).
   dotfile rm PATH   Remove a previously copied path from the home volume
                   (confirms; DEV_ASSUME_YES=1 skips the prompt).
-  ft new NAME     Feature workspace inside the running container: branch
-                  feat/NAME off origin/main (FT_BASE or 'git config
-                  ft.base' overrides), worktree at
-                  .worktrees/NAME, a herdr tab, 'mise run setup' to
-                  completion, then the coding agent. Args after '--' go to
-                  the agent (--agent KIND or 'git config ft.agent' for
-                  opencode/pi/...; missing binary or failed start leaves
-                  the worktree ready, never errors; re-running reopens an
-                  existing feature). Needs herdr inside: 'dev ft sync' once.
-  ft rm [-f] NAME Remove a feature: stop its daemons, remove worktree + tab,
-                  delete the branch only if merged. -f discards work.
-  ft ls           herdr's worktree listing for this container.
-  ft sync         Mirror the HOST herdr client's exact version into the
-                  container (mise ubi; FT_HERDR_REPO overrides the repo).
-  ft enable       Opt-in toggle for host aggregation: generate the
-                  container's ssh host key + sshd_config, authorize your
-                  key, and print the ~/.ssh/config ProxyCommand stanza for
-                  'herdr machine add' (--write appends it). No listener, no
-                  published port — a per-connection 'sshd -i' as vscode.
-  ft disable      Remove that ssh material again.
-  ft shell-init   Print ft/ftcd/ftls/ftrm/ftsync shell helpers +
-                  completion:  eval "\$(dev ft shell-init)"
+  ft NAME         Feature worktree + host herdr tab: branch feat/NAME off
+                  origin/main (FT_BASE or 'git config ft.base' overrides),
+                  worktree at .worktrees/NAME (reused if it exists), and a
+                  tab cd'd into it. Needs a running host herdr session for
+                  the tab; the worktree is prepared either way.
+  fta [-cl|-op|-pi] NAME
+                  Same, then auto-start this workspace's container
+                  (headless; 'dev down' stops it), attach the tab into it
+                  at the worktree, and start the agent found there
+                  (claude/opencode/pi; plain shell when none). FT_AGENT or
+                  'git config ft.agent' set a default kind.
+  ft -l           List the repo's worktrees and branches.
+  ft -r NAME      Remove worktree + tab; delete the branch only if merged.
+                  Refuses uncommitted/unpushed work and running daemons.
+  ft -rf NAME     Force: stop daemons, discard everything.
   reset           Remove the dev container(s) for the current workspace
                   (normal, dind, pind, and maintenance variants if present)
                   and prompt individually for each existing named

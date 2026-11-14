@@ -59,10 +59,6 @@ LABEL dev.uid="${USER_UID}" dev.gid="${USER_GID}"
 # - gosu: clean privilege drop in the entrypoint
 # - iproute2: 'ss' for tinyproxy bind verification
 # - tcpdump: read NFLOG group for `dev --monitor-fw`
-# - openssh-server: provides /usr/sbin/sshd for `dev ft enable`'s stdio-SSH
-#   ProxyCommand path. Inert: nothing starts it, nothing listens; it is only
-#   ever spawned per-connection as vscode with `sshd -i`.
-# - jq: parse herdr's JSON in the `dev ft` container-side scripts
 # hadolint ignore=DL3008
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
@@ -72,9 +68,7 @@ RUN apt-get update && \
         dnsutils \
         gosu \
         iproute2 \
-        tcpdump \
-        openssh-server \
-        jq && \
+        tcpdump && \
     rm -rf /var/lib/apt/lists/*
 
 # Playwright/Chromium runtime libraries + fonts for stable text rendering.

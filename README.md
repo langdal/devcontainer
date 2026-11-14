@@ -325,36 +325,26 @@ dev dotfile add ~/.config/gh --secret   # chmod 600 the copied paths
 dev dotfile rm  ~/.config/nvim          # remove again (confirms)
 ```
 
-## Feature workspaces (`dev ft`)
+## Feature worktrees (`dev ft` / `dev fta`)
 
-Run several coding agents in parallel inside one workspace container, one
-feature each — the container is auto-started headless when none is running
-(`dev shell` attaches to it, `dev down` stops it): `dev ft new NAME` cuts
-`feat/NAME` from `origin/main` (set
-`FT_BASE` to change), checks it out as a worktree at `.worktrees/NAME` —
-inside the repo, so the same files are visible on the host for `ftcd`,
-host-run dev servers and host-only `.env` resolution (run
-`git config worktree.useRelativePaths true` once, git ≥ 2.48, so the
-worktree's `.git` pointer resolves on both sides of the bind mount) — opens
-a herdr tab for it, runs `mise install` + `mise run setup` to completion,
-and only then starts the agent. `dev ft rm NAME` tears it down and deletes
-the branch only when merged. Requires herdr inside the container:
-`dev ft sync` installs the exact version of your host client (mise ubi from
-GitHub releases, allowlisted in closed mode).
+One worktree per feature, one host herdr tab per worktree, agents in the
+sandbox. `dev ft NAME` cuts `feat/NAME` from `origin/main` (`FT_BASE` or
+`git config ft.base` overrides), checks it out at `.worktrees/NAME` —
+inside the repo, so host and container see the same files (run
+`git config worktree.useRelativePaths true` once, git ≥ 2.48) — and opens
+a herdr tab cd'd into it; an existing feature is reused, never an error.
+`dev fta NAME` additionally starts the workspace container headless when
+needed (`dev shell` attaches, `dev down` stops it), attaches the tab into
+the container at the worktree, and launches the agent installed there —
+`claude`, `opencode`, or `pi`, a plain shell when none — with `-cl`,
+`-op`, `-pi` for an explicit choice. `dev ft -l` lists, `dev ft -r NAME`
+removes (refusing uncommitted or unpushed work and running mise daemons;
+the branch is deleted only when merged), `dev ft -rf NAME` forces.
 
-Shell helpers (`ft`, `ftcd`, `ftls`, `ftrm`, `ftsync` + completion) come
-from `eval "$(dev ft shell-init)"` in your rc file; zsh needs
-`autoload -Uz bashcompinit && bashcompinit` first.
-
-To aggregate several such containers in one host herdr window
-(`herdr machine add`), opt in per repo with `dev ft enable`: it generates a
-host key + `sshd_config` in the home volume, authorizes your public key, and
-prints a `ProxyCommand` stanza for `~/.ssh/config` (`--write` appends it).
-Nothing listens and no port is published — each connection spawns a
-per-session `sshd -i` as `vscode` over the runtime's exec, so the sandbox
-gains no network surface and no root daemon. `dev ft disable` removes the
-material again. The `openssh-server` package this relies on is baked into
-the image but inert until `enable`.
+herdr runs on the host only; nothing herdr-related is installed in the
+image. Host prerequisites beyond herdr: git ≥ 2.48 and jq. Note that
+herdr sees the tab's foreground process as the container runtime, so
+sidebar agent-state detection does not apply to attached agents.
 
 ## Host requirements
 
