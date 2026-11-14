@@ -86,8 +86,9 @@ VERBS:
                   the tab; the worktree is prepared either way.
   fta [-cl|-op|-pi] NAME
                   Same, then auto-start this workspace's container
-                  (headless; 'dev down' stops it), attach the tab into it
-                  at the worktree, and start the agent found there
+                  (headless; 'dev down' stops it), BUILD the worktree to
+                  completion (mise install + the 'setup' task), attach
+                  the tab into it, and start the agent found there
                   (claude/opencode/pi; plain shell when none). FT_AGENT or
                   'git config ft.agent' set a default kind.
   ft -l           List the repo's worktrees and branches.

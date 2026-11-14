@@ -46,7 +46,8 @@ Usage: dev ft NAME | dev ft -l | dev ft -r NAME | dev ft -rf NAME
                .worktrees/NAME — reused if it exists — and open a host
                herdr tab cd'd into it.
   fta NAME     Same, then: start this workspace's container headless if
-               needed, attach the tab into it at the worktree, and start
+               needed, build the worktree to completion (mise install +
+               the 'setup' task), attach the tab into it, and start
                the agent found there (claude, opencode, or pi; a plain
                shell when none is installed). -cl/-op/-pi pick explicitly;
                FT_AGENT or 'git config ft.agent' set a default.
@@ -182,6 +183,17 @@ _ft_open_attach() {
   _ft_ensure_worktree "$2"
   _ft_require_container
   _ft_cwt="/workspace/.worktrees/$2"
+  # Build to completion BEFORE the agent sees the tree — the classic ft
+  # guarantee: tools, the committed 'setup' task when one exists, daemon
+  # registration. Fatal on failure; the worktree survives for fixing.
+  # shellcheck disable=SC2016  # $-expansion happens container-side, by design
+  _ft_build='export PATH="$HOME/.local/bin:$PATH"; mise trust >/dev/null 2>&1 || mise trust; mise install; if mise tasks ls 2>/dev/null | grep -qE "^setup([[:space:]]|$)"; then mise run setup; else echo "ft: no setup task in mise.toml — skipping the build step." >&2; fi; mise daemons register >/dev/null 2>&1 || true'
+  echo "ft: building $FT_BRANCH before the agent (mise install + setup; first run can take a while)" >&2
+  # shellcheck disable=SC2086  # intentional word-splitting of $MANAGED_RUNTIME_ARGS
+  if ! $RUNTIME $MANAGED_RUNTIME_ARGS exec --user vscode -w "$_ft_cwt" "$MANAGED_NAME" sh -c "$_ft_build"; then
+    echo "Error: the build failed in $_ft_cwt — fix it ('dev shell'), then re-run 'dev fta $2'." >&2
+    exit 1
+  fi
   if [[ -z "$_ft_kind" ]]; then
     _ft_kind="${FT_AGENT:-$(git config ft.agent 2>/dev/null || true)}"
   fi
