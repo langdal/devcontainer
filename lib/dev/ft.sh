@@ -190,8 +190,14 @@ _ft_open_attach() {
     _ft_kind=$($RUNTIME $MANAGED_RUNTIME_ARGS exec --user vscode "$MANAGED_NAME" \
       sh -c 'PATH="$HOME/.local/bin:$PATH"; for a in claude opencode pi; do command -v "$a" >/dev/null 2>&1 && { echo "$a"; exit 0; }; done; exit 0')
   fi
-  _ft_prog="${_ft_kind:-zsh}"
-  _ft_inner="export PATH=\"\$HOME/.local/bin:\$PATH\"; cd $_ft_cwt 2>/dev/null; exec $_ft_prog"
+  # Do not exec the agent: when it exits (double Ctrl+C is claude's exit
+  # chord), fall through to an interactive shell IN the container at the
+  # worktree, instead of tearing the whole attach down to the host prompt.
+  if [[ -n "$_ft_kind" ]]; then
+    _ft_inner="export PATH=\"\$HOME/.local/bin:\$PATH\"; cd $_ft_cwt 2>/dev/null; $_ft_kind; exec zsh"
+  else
+    _ft_inner="export PATH=\"\$HOME/.local/bin:\$PATH\"; cd $_ft_cwt 2>/dev/null; exec zsh"
+  fi
   _ft_cmd=$(printf '%s %s exec -it --user vscode -w %s %s sh -c %q' \
             "$RUNTIME" "$MANAGED_RUNTIME_ARGS" "$_ft_cwt" "$MANAGED_NAME" "$_ft_inner")
   _ft_pane=$(_ft_tab "$2")

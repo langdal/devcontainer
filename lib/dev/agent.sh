@@ -207,6 +207,26 @@ _agent_materialize_keychain() {
   done
 }
 
+# On macOS a leftover ~/.claude/.credentials.json wins over the live Keychain
+# token ("a real file always wins"), silently injecting dead credentials: the
+# container's claude then says "Not logged in". Warn when the file is chosen
+# while the Keychain also holds credentials; say outright when it is expired.
+_agent_warn_stale_claude_file() {
+  local f="$HOME/.claude/.credentials.json" exp now
+  [[ -e "$f" ]] || return 0
+  _agent_macos_keychain_has_creds || return 0
+  exp="$(grep -o '"expiresAt"[[:space:]]*:[[:space:]]*[0-9]*' "$f" 2>/dev/null | grep -o '[0-9]*$' | head -n1)"
+  now=$(( $(date +%s) * 1000 ))
+  if [[ -n "$exp" && "$exp" -lt "$now" ]]; then
+    echo "  claude: WARNING — injecting ~/.claude/.credentials.json, whose token is EXPIRED," >&2
+    echo "  claude: while the macOS Keychain holds live Claude credentials. Move the stale" >&2
+    echo "  claude: file aside and re-run:  mv ~/.claude/.credentials.json{,.bak} && dev agent add claude" >&2
+  else
+    echo "  claude: note — ~/.claude/.credentials.json wins over the macOS Keychain entry;" >&2
+    echo "  claude: if the container says 'Not logged in', move it aside and re-add." >&2
+  fi
+}
+
 # _agent_copy_into_volume <name>: resolve an agent's manifest to existing host
 # sources and inject them into the workspace home volume via _stage_and_extract,
 # then apply the claude-only onboarding-flag follow-up.
@@ -217,6 +237,7 @@ _agent_copy_into_volume() {
     echo "  ${name}: no source files found on host — nothing to copy." >&2
     return 0
   fi
+  [[ "$name" == claude ]] && _agent_warn_stale_claude_file
 
   # Materialize any Keychain-sourced entries (macOS Claude credentials) into a
   # temp dir, rewriting their SRC to a real path so _stage_and_extract can cp
