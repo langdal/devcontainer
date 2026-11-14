@@ -347,9 +347,10 @@ There is one container per repository: `ft`/`fta` resolve the repo's main
 checkout wherever you invoke them — from a worktree or a subdirectory —
 so the container is always `dev-<repo>` mounting the main checkout, never
 a per-feature container. herdr runs on the host only; nothing
-herdr-related is installed in the image. Host prerequisites beyond herdr: git ≥ 2.48 and jq. Note that
-herdr sees the tab's foreground process as the container runtime, so
-sidebar agent-state detection does not apply to attached agents.
+herdr-related is installed in the image. Host prerequisites beyond herdr: git ≥ 2.48 and jq. The tab's foreground process is the container runtime,
+so `fta` sets herdr's documented sandbox-wrapper hint (`HERDR_AGENT=KIND`
+on that process) to name the agent for the panel; state classification
+reads the pane's screen, which is the agent's own UI.
 
 ## Host requirements
 

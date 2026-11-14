@@ -216,6 +216,11 @@ _ft_open_attach() {
   fi
   _ft_cmd=$(printf '%s %s exec -it --user vscode -w %s %s sh -c %q' \
             "$RUNTIME" "$MANAGED_RUNTIME_ARGS" "$_ft_cwt" "$MANAGED_NAME" "$_ft_inner")
+  # herdr identifies a pane's agent from its HOST foreground process — here
+  # the container runtime, not the agent. HERDR_AGENT on that wrapper process
+  # is herdr's documented sandbox/VM hint: it names the agent for the panel,
+  # and state classification reads the pane's screen, which IS the agent's UI.
+  [[ -n "$_ft_kind" ]] && _ft_cmd="HERDR_AGENT=$_ft_kind $_ft_cmd"
   _ft_pane=$(_ft_tab "$2")
   if [[ -z "$_ft_pane" ]]; then
     echo "Error: dev fta needs a running host herdr session for the tab (worktree is ready)." >&2
