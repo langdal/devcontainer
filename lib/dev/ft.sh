@@ -133,7 +133,11 @@ _ft_open() {
   _ft_check_name "${1:-}"
   _ft_ensure_worktree "$1"
   _ft_pane=$(_ft_tab "$1")
-  [[ -n "$_ft_pane" ]] && echo "ft: $FT_BRANCH — tab open at $FT_WT"
+  if [[ -n "$_ft_pane" ]]; then
+    echo "ft: $FT_BRANCH — tab open at $FT_WT"
+    echo "ft: (build-free by design — 'mise run setup' there before host dev servers;"
+    echo "ft:  'dev fta $1' builds the container side)"
+  fi
 }
 
 # No container? Start one headless and keep going — dev's own start flow with
