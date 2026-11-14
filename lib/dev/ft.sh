@@ -61,9 +61,17 @@ the worktree and says so.
 EOF
 }
 
+# The repo's MAIN checkout, even when invoked from inside a worktree (where
+# --show-toplevel would return the worktree) or a subdirectory. Everything
+# hangs off this: the .worktrees/ layout, and the one-container-per-repository
+# invariant below.
 _ft_repo_root() {
-  git rev-parse --show-toplevel 2>/dev/null \
-    || { echo "Error: dev ft: run it from inside a git repository." >&2; exit 1; }
+  _ft_g=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
+  if [[ -z "$_ft_g" || ! -d "$_ft_g" ]]; then
+    echo "Error: dev ft: run it from inside a git repository." >&2
+    exit 1
+  fi
+  printf '%s' "${_ft_g%/.git}"
 }
 
 _ft_base() {
@@ -149,6 +157,12 @@ _ft_autostart() {
 }
 
 _ft_require_container() {
+  # One container per repository: dev derives the container name from the
+  # basename of $PWD, so resolve from the repo's main checkout regardless of
+  # where ft was invoked (a worktree, a subdirectory). This cwd also carries
+  # into the backgrounded autostart, which mounts it as /workspace — the main
+  # checkout, never a worktree.
+  cd "${FT_ROOT:-$(_ft_repo_root)}" || exit 1
   detect_runtime
   # shellcheck disable=SC2034  # consumed by ensure_runtime_ready
   NEEDS_ENGINE=true

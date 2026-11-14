@@ -94,6 +94,9 @@ VERBS:
   ft -r NAME      Remove worktree + tab; delete the branch only if merged.
                   Refuses uncommitted/unpushed work and running daemons.
   ft -rf NAME     Force: stop daemons, discard everything.
+                  ft/fta work from anywhere inside the repo (worktrees
+                  included) and always target the repo's ONE container,
+                  named after the main checkout's directory.
   reset           Remove the dev container(s) for the current workspace
                   (normal, dind, pind, and maintenance variants if present)
                   and prompt individually for each existing named

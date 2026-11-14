@@ -341,8 +341,11 @@ the container at the worktree, and launches the agent installed there —
 removes (refusing uncommitted or unpushed work and running mise daemons;
 the branch is deleted only when merged), `dev ft -rf NAME` forces.
 
-herdr runs on the host only; nothing herdr-related is installed in the
-image. Host prerequisites beyond herdr: git ≥ 2.48 and jq. Note that
+There is one container per repository: `ft`/`fta` resolve the repo's main
+checkout wherever you invoke them — from a worktree or a subdirectory —
+so the container is always `dev-<repo>` mounting the main checkout, never
+a per-feature container. herdr runs on the host only; nothing
+herdr-related is installed in the image. Host prerequisites beyond herdr: git ≥ 2.48 and jq. Note that
 herdr sees the tab's foreground process as the container runtime, so
 sidebar agent-state detection does not apply to attached agents.
 
