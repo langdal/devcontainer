@@ -46,7 +46,8 @@ Usage: dev ft <action> [args]
 Feature workspaces: one worktree + herdr tab + agent per feature, inside
 this workspace's running dev container.
 
-  new NAME [-- AGENT_ARGS...]  Branch feat/NAME off origin/main (FT_BASE
+  new NAME [--agent KIND] [-- AGENT_ARGS...]
+                               Branch feat/NAME off origin/main (FT_BASE
                                or 'git config ft.base' overrides, e.g.
                                'main' for a repo with no remote), worktree
                                at .worktrees/NAME,
@@ -66,6 +67,12 @@ this workspace's running dev container.
   shell-init                   Print shell helpers (ft/ftcd/ftls/ftrm/
                                ftsync + completion) for your rc file:
                                eval "$(dev ft shell-init)"
+
+The agent kind defaults to claude; --agent KIND, FT_AGENT or 'git config
+ft.agent' pick another (opencode, pi, or anything herdr accepts). A
+missing agent binary, or a failed start, leaves the worktree + tab ready
+and says so — it is never an error. Re-running 'new' on an existing
+feature reopens it.
 
 Starts this workspace's container headless when none is running ('dev
 shell' attaches to it; 'dev down' stops it). Needs herdr inside the
@@ -133,8 +140,10 @@ _ft_exec_script() {
     exit 1
   fi
   _ft_base="${FT_BASE:-$(git config ft.base 2>/dev/null || true)}"
+  _ft_agent="${FT_AGENT:-$(git config ft.agent 2>/dev/null || true)}"
   _ft_env=()
   [[ -n "$_ft_base" ]] && _ft_env=(--env "FT_BASE=$_ft_base")
+  [[ -n "$_ft_agent" ]] && _ft_env=(${_ft_env[@]+"${_ft_env[@]}"} --env "FT_AGENT=$_ft_agent")
   # shellcheck disable=SC2086  # intentional word-splitting of $MANAGED_RUNTIME_ARGS
   cat "$SCRIPT_DIR/scripts/ft/prelude.sh" "$_ft_script" \
     | $RUNTIME $MANAGED_RUNTIME_ARGS exec -i --user vscode ${_ft_env[@]+"${_ft_env[@]}"} "$MANAGED_NAME" \

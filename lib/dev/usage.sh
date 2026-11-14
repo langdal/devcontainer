@@ -84,7 +84,10 @@ VERBS:
                   ft.base' overrides), worktree at
                   .worktrees/NAME, a herdr tab, 'mise run setup' to
                   completion, then the coding agent. Args after '--' go to
-                  the agent. Needs herdr inside: 'dev ft sync' once.
+                  the agent (--agent KIND or 'git config ft.agent' for
+                  opencode/pi/...; missing binary or failed start leaves
+                  the worktree ready, never errors; re-running reopens an
+                  existing feature). Needs herdr inside: 'dev ft sync' once.
   ft rm [-f] NAME Remove a feature: stop its daemons, remove worktree + tab,
                   delete the branch only if merged. -f discards work.
   ft ls           herdr's worktree listing for this container.

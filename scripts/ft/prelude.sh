@@ -28,7 +28,10 @@ ft_ensure_server() {
     return 1
   }
   ft_server_up && return 0
-  nohup herdr server </dev/null >"$HOME/.herdr-server.log" 2>&1 &
+  # The server spawns agent binaries itself (no shell), inheriting the PATH it
+  # was started with — the exec'd image environment, which lacks ~/.local/bin,
+  # where user-installed agents (and ft sync's herdr symlink) live. Prefix it.
+  PATH="$HOME/.local/bin:$PATH" nohup herdr server </dev/null >"$HOME/.herdr-server.log" 2>&1 &
   _ft_i=0
   while [ "$_ft_i" -lt 30 ]; do
     ft_server_up && return 0
