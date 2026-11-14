@@ -328,29 +328,17 @@ dev dotfile rm  ~/.config/nvim          # remove again (confirms)
 ## Feature worktrees (`dev ft` / `dev fta`)
 
 One worktree per feature, one host herdr tab per worktree, agents in the
-sandbox. `dev ft NAME` cuts `feat/NAME` from `origin/main` (`FT_BASE` or
-`git config ft.base` overrides), checks it out at `.worktrees/NAME` —
-inside the repo, so host and container see the same files (run
-`git config worktree.useRelativePaths true` once, git ≥ 2.48) — and opens
-a herdr tab cd'd into it; an existing feature is reused, never an error.
-`dev fta NAME` additionally starts the workspace container headless when
-needed (`dev shell` attaches, `dev down` stops it), builds the worktree
-to completion first (`mise install`, then the committed `setup` task —
-the agent never lands in a half-built tree), attaches the tab into the
-container at the worktree, and launches the agent installed there —
-`claude`, `opencode`, or `pi`, a plain shell when none — with `-cl`,
-`-op`, `-pi` for an explicit choice. `dev ft -l` lists, `dev ft -r NAME`
-removes (refusing uncommitted or unpushed work and running mise daemons;
-the branch is deleted only when merged), `dev ft -rf NAME` forces.
+repo's single sandbox container. See [docs/ft.md](docs/ft.md) for the user
+and setup guide (mise config, per-worktree ports, autocomplete).
 
-There is one container per repository: `ft`/`fta` resolve the repo's main
-checkout wherever you invoke them — from a worktree or a subdirectory —
-so the container is always `dev-<repo>` mounting the main checkout, never
-a per-feature container. herdr runs on the host only; nothing
-herdr-related is installed in the image. Host prerequisites beyond herdr: git ≥ 2.48 and jq. The tab's foreground process is the container runtime,
-so `fta` sets herdr's documented sandbox-wrapper hint (`HERDR_AGENT=KIND`
-on that process) to name the agent for the panel; state classification
-reads the pane's screen, which is the agent's own UI.
+```
+dev ft NAME                 worktree feat/NAME + herdr tab (build-free)
+dev fta [-cl|-op|-pi] NAME  + container up, build, attach tab, start agent
+dev ft -l                   list worktrees
+dev ft -r NAME              remove (refuses unpushed work / running daemons)
+dev ft -rf NAME             force remove
+dev ft --completions        shell completion (eval in ~/.zshrc)
+```
 
 ## Host requirements
 
